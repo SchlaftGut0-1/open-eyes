@@ -78,5 +78,8 @@ jobs:
           Chromium-based browser. Verify where it was built with
           \`gh attestation verify $FILE --repo $GITHUB_REPOSITORY\`.
           EOF
-          gh release create "$GITHUB_REF_NAME" "$FILE" "$FILE.sha256" \
+          # A pre-release version (1.2.3-beta.1) must not become the "Latest" release.
+          prerelease=()
+          if [[ "$version" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" "$FILE" "$FILE.sha256" "${prerelease[@]}" \
             --title "open-eyes $version" --notes-file notes.md --verify-tag
