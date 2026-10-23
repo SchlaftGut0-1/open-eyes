@@ -244,6 +244,15 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("connect", "--endpoint", "ws://example.com:9222/devtools/browser/x"), /non-local/);
   });
 
+  test("status never opens an agent window", async () => {
+    await cli("open", fixture("form.html"));
+    assert.match(await cli("close"), /closed the agent window/);
+    assert.match(await cli("status"), /agent window: none/);
+    assert.match(await cli("status"), /agent window: none/, "the first status must not have opened one");
+    await cli("open", fixture("form.html"));
+    assert.match(await cli("status"), /agent window: file:.*form\.html/);
+  });
+
   test("screenshot writes a PNG", async () => {
     const file = await cli("screenshot", join(root, "shot.png"));
     assert.ok(existsSync(file));
