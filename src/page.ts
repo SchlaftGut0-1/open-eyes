@@ -78,6 +78,23 @@ const WAIT_FOR_QUIET_DOM = `new Promise((resolve) => {
   const cap = setTimeout(done, ${MAX_QUIET_WAIT_MS});
 })`;
 
+// Picks the <option> matching `wanted` (exact text, then ignoring case, then contained) in a
+// native <select>, through the native setter so frameworks like React see the change.
+const CHOOSE_OPTION = `function (wanted) {
+  if (!(this instanceof HTMLSelectElement)) return { native: false };
+  const options = [...this.options];
+  const norm = (text) => text.trim().toLowerCase();
+  const option =
+    options.find((o) => o.text.trim() === wanted) ??
+    options.find((o) => norm(o.text) === norm(wanted)) ??
+    options.find((o) => norm(o.text).includes(norm(wanted)));
+  if (!option) return { native: true, available: options.map((o) => o.text.trim()) };
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(this, option.value);
+  this.dispatchEvent(new Event("input", { bubbles: true }));
+  this.dispatchEvent(new Event("change", { bubbles: true }));
+  return { native: true, chosen: option.text.trim() };
+}`;
+
 const SELECT_CONTENTS = `function () {
   if (typeof this.select === "function") return this.select();
   if (this.isContentEditable) {
@@ -242,6 +259,58 @@ export class Page {
       await this.#settle(10_000);
       await this.#leaveIfBlocked();
       return `pressed ${key}${await this.#observe(entry.url)}`;
+    });
+  }
+
+  /**
+   * Chooses `option` (by its visible text) in a dropdown: a native <select> directly, or a
+   * custom listbox/combobox by opening it and clicking the matching option.
+   */
+  select(ref: string, option: string): Promise<string> {
+    return this.#audited("select", ref, async (entry) => {
+      await this.#guard();
+      const { backendNodeId, label } = await this.#resolve(ref);
+      entry.target = `${label} → ${option}`;
+      const box = await this.#locate(backendNodeId, ref);
+      await this.#announce({ label: `choose "${option}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+      const { object } = await this.#send<{ object: { objectId: string } }>("DOM.resolveNode", { backendNodeId });
+      const { result } = await this.#send("Runtime.callFunctionOn", {
+        objectId: object.objectId,
+        functionDeclaration: CHOOSE_OPTION,
+        arguments: [{ value: option }],
+        returnByValue: true,
+      });
+      const native = result.value as { native: boolean; chosen?: string; available?: string[] };
+      if (native.native) {
+        if (!native.chosen) throw new Error(`no option "${option}" in ${label}; options: ${native.available!.join(", ")}`);
+        return `chose "${native.chosen}" in ${label}${await this.#observe(entry.url)}`;
+      }
+
+      // A custom dropdown: open it, then click one of the options that appeared. Options that
+      // were already there belong to other dropdowns on the page.
+      const isOption = (line: string) => /^\s*option /.test(line) && / @\d+$/.test(line);
+      const before = new Set((await this.#capture()).lines.filter(isOption));
+      await this.click(ref);
+      const shown = (await this.#capture()).lines.filter(isOption);
+      const appeared = shown.filter((line) => !before.has(line));
+      const optionLines = appeared.length ? appeared : shown;
+      const nameOf = (line: string) => line.trim().replace(/^option /, "").replace(/( \[[^\]]*\])? @\d+$/, "").replace(/^"|"$/g, "");
+      const norm = (text: string) => text.trim().toLowerCase();
+      const match =
+        optionLines.find((line) => nameOf(line) === option) ??
+        optionLines.find((line) => norm(nameOf(line)) === norm(option)) ??
+        optionLines.find((line) => norm(nameOf(line)).includes(norm(option)));
+      if (!match) {
+        const available = optionLines.map(nameOf);
+        throw new Error(
+          available.length
+            ? `no option "${option}" in ${label}; options: ${available.join(", ")}`
+            : `${label} did not show any options after opening it`,
+        );
+      }
+      const clicked = await this.click(match.match(/@\d+$/)![0]);
+      // Keep the changes the click reported, under a line that says what was chosen.
+      return `chose "${nameOf(match)}" in ${label}${clicked.replace(/^clicked [^\n]*/, "")}`;
     });
   }
 

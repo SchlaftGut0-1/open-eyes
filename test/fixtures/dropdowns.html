@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Dropdowns</title>
+<label>Country
+  <select id="country">
+    <option value="">Choose one</option>
+    <option value="ec">Ecuador</option>
+    <option value="ar">Argentina</option>
+  </select>
+</label>
+<p id="picked"></p>
+
+<button id="size" aria-haspopup="listbox" aria-expanded="false">Size: none</button>
+<ul id="sizes" role="listbox" aria-label="Sizes" hidden>
+  <li role="option" tabindex="-1">Small</li>
+  <li role="option" tabindex="-1">Large</li>
+</ul>
+<script>
+  document.getElementById("country").addEventListener("change", (event) => {
+    document.getElementById("picked").textContent = `Picked ${event.target.value}`;
+  });
+  const size = document.getElementById("size");
+  const sizes = document.getElementById("sizes");
+  size.addEventListener("click", () => {
+    sizes.hidden = !sizes.hidden;
+    size.setAttribute("aria-expanded", String(!sizes.hidden));
+  });
+  for (const option of sizes.children) {
+    option.addEventListener("click", () => {
+      size.textContent = `Size: ${option.textContent}`;
+      sizes.hidden = true;
+      size.setAttribute("aria-expanded", "false");
+    });
+  }
+</script>

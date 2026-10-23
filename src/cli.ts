@@ -48,6 +48,7 @@ Page (works in the agent's own window)
   click <@N>             Click an element from the last snapshot
   fill <@N> <text>       Replace the content of a field
   press <key>            Press a key (Enter, Tab, Escape, ArrowDown, a, ...)
+  select <@N> <option>   Choose an option by its text in a dropdown (native or custom)
   scroll [@N] [down|up] [pixels]
                          Scroll the page (default: down one screen); with @N, scroll
                          the list or panel holding it, or with no direction bring
@@ -58,7 +59,8 @@ Page (works in the agent's own window)
 
 Scripts (open-eyes run): \`page\` methods, all async
   goto(url)  snapshot({ full, find, scope, diff, interactive, limit, page })
-  click("@N")  fill("@N", text)  press(key)  scroll(ref?, "down"|"up", px?)
+  click("@N")  fill("@N", text)  press(key)  select("@N", option)
+  scroll(ref?, "down"|"up", px?)
   waitForText(text, ms?)  wait(ms)
   eval(js)  screenshot(path?)  handoff(message?, ms?)  url()
   Refs come from snapshot(): take one before clicking and after the page changes.
@@ -314,6 +316,11 @@ async function main([command, ...args]: string[]): Promise<void> {
     }
     case "press":
       return withPage(`press ${args[0] ?? ""}`, (page) => page.press(need(args[0], "press <key>")));
+    case "select": {
+      const ref = need(args[0], "select <@N> <option>");
+      const option = need(args.slice(1).join(" ") || undefined, "select <@N> <option>");
+      return withPage(`select ${ref} ${option}`, (page) => page.select(ref, option));
+    }
     case "scroll": {
       let ref: string | undefined;
       let direction: "down" | "up" | undefined;
