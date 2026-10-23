@@ -8,7 +8,7 @@ import { decisionExpression, OWNER_EXPRESSION, overlayExpression, type OverlayAc
 import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
 import { formatSnapshot, type AXNode, type LineNode } from "./snapshot.ts";
 import { stateDir, type Ref, type State } from "./state.ts";
-import { diffLines, findLines, paginate, subtree, viewportView, type Position } from "./view.ts";
+import { diffLines, findLines, interactiveIndexes, paginate, subtree, viewportView, type Position } from "./view.ts";
 
 export type Box = { x: number; y: number; width: number; height: number };
 
@@ -32,6 +32,8 @@ const baselineFile = join(stateDir, "snapshot.txt");
 export type SnapshotOptions = {
   /** The whole page instead of what is on screen. */
   full?: boolean;
+  /** Only elements with refs, headings and the containers that place them. */
+  interactive?: boolean;
   /** Only what changed since the last snapshot of this page. */
   diff?: boolean;
   /** Page size in lines; 0 shows everything. */
@@ -128,7 +130,15 @@ export class Page {
 
   async snapshot(options: SnapshotOptions = {}): Promise<string> {
     await this.#guard();
-    const { lines, previous, lineNodes } = await this.#capture();
+    if (options.interactive && options.diff) throw new Error("--interactive cannot be combined with --diff");
+    const captured = await this.#capture();
+    const { previous } = captured;
+    let { lines, lineNodes } = captured;
+    if (options.interactive) {
+      const keep = interactiveIndexes(lines, lineNodes.map((n) => n.role));
+      lines = keep.map((i) => lines[i]);
+      lineNodes = keep.map((i) => lineNodes[i]);
+    }
     let header = "";
     let body: string[];
     let footer: string[] = [];

@@ -48,6 +48,8 @@ async function cliErrorWith(extra: Record<string, string>, ...args: string[]): P
   throw new Error(`expected "open-eyes ${args.join(" ")}" to fail`);
 }
 
+const refLine = (snapshot: string) => snapshot.split("\n").find((l) => / @\d+$/.test(l));
+
 const refOf = (snapshot: string, entry: string) => {
   const line = snapshot.split("\n").find((l) => l.includes(entry));
   const ref = line?.match(/@\d+$/)?.[0];
@@ -397,6 +399,17 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     await cli("open", fixture("tall.html"));
     const jumped = await cli("click", refOf(await cli("snapshot"), "link Home"));
     assert.doesNotMatch(jumped, /page changed/, "a #fragment jump is not a page change");
+  });
+
+  test("snapshot --interactive keeps only what an agent can act on", async () => {
+    await cli("open", fixture("form.html"));
+    const body = (await cli("snapshot", "--interactive")).split("\n\n")[1];
+    for (const line of ["heading Sign up", "textbox Name", "checkbox Accept terms", "textbox Password", "button Send", "link Next page"]) {
+      assert.match(body, new RegExp(line));
+    }
+    assert.doesNotMatch(body, /^\s*"/m, "no plain text lines");
+    assert.equal((await cli("snapshot", "--interactive", "--find", "Send")).split("\n\n")[1], refLine(await cli("snapshot", "--find", "Send")));
+    assert.match(await cliError("snapshot", "--interactive", "--diff"), /cannot be combined/);
   });
 
   test("screenshot writes a PNG", async () => {

@@ -71,6 +71,7 @@ To look elsewhere, prefer narrow views over reading everything:
 | `snapshot --find "<text>"` | Lines anywhere on the page containing the text, with their parents. Best way to locate an element |
 | `snapshot --scope @N` | Only element `@N` and what is inside it (a form, a list, a dialog) |
 | `snapshot --diff` | Only what changed since your last snapshot |
+| `snapshot --interactive` | Only what you can click or type into, plus headings; when you want to act, not read. Combines with the others |
 | `snapshot --full` | The whole page, 400 lines per page (`--page 2` for more, `--limit 0` for all; expensive) |
 
 You can click any ref, even off screen: the page scrolls to it.
