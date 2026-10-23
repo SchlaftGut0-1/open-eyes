@@ -119,42 +119,42 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     await cli("open", fixture("form.html"));
     const snapshot = await cli("snapshot");
     assert.match(snapshot, /^title: "Test form"$/m);
-    assert.match(snapshot, /- heading "Sign up"/);
-    assert.match(snapshot, /- textbox "Name" @\d+/);
-    assert.match(snapshot, /- link "Next page" @\d+/);
+    assert.match(snapshot, /heading Sign up/);
+    assert.match(snapshot, /textbox Name @\d+/);
+    assert.match(snapshot, /link Next page @\d+/);
     const body = snapshot.split("\n\n")[1];
     assert.doesNotMatch(body, /open-eyes/, "the overlay must stay out of the snapshot");
   });
 
   test("fill, check and click drive the page", async () => {
     const snapshot = await cli("snapshot");
-    await cli("fill", refOf(snapshot, 'textbox "Name"'), "Ana");
-    await cli("click", refOf(snapshot, 'checkbox "Accept terms"'));
-    await cli("click", refOf(snapshot, 'button "Send"'));
+    await cli("fill", refOf(snapshot, 'textbox Name'), "Ana");
+    await cli("click", refOf(snapshot, 'checkbox Accept terms'));
+    await cli("click", refOf(snapshot, 'button Send'));
     assert.equal(await cli("eval", "document.getElementById('out').textContent"), "Hello, Ana (accepted)");
   });
 
   test("refs stay stable and actions report what changed", async () => {
     await cli("open", fixture("form.html"));
     const first = await cli("snapshot");
-    const send = refOf(first, 'button "Send"');
+    const send = refOf(first, 'button Send');
 
-    assert.match(await cli("fill", refOf(first, 'textbox "Name"'), "Bo"), /changes:\n.*value="Bo"/s);
-    assert.match(await cli("click", send), /clicked button "Send"\nchanges:\n.*\+ - text "Hello, Bo"/s);
+    assert.match(await cli("fill", refOf(first, 'textbox Name'), "Bo"), /changes:\n.*value=Bo/s);
+    assert.match(await cli("click", send), /clicked button "Send"\nchanges:\n.*\+ "Hello, Bo"/s);
 
-    assert.equal(refOf(await cli("snapshot"), 'button "Send"'), send);
+    assert.equal(refOf(await cli("snapshot"), 'button Send'), send);
     assert.match(await cli("snapshot", "--diff"), /no changes since the last snapshot/);
   });
 
   test("snapshots can be searched, scoped and paged", async () => {
     const all = await cli("snapshot");
     const found = await cli("snapshot", "--find", "terms");
-    assert.match(found, /checkbox "Accept terms"/);
-    assert.doesNotMatch(found, /heading "Sign up"/);
+    assert.match(found, /checkbox Accept terms/);
+    assert.doesNotMatch(found, /heading Sign up/);
 
-    const name = refOf(all, 'textbox "Name"');
+    const name = refOf(all, 'textbox Name');
     const scoped = (await cli("snapshot", "--scope", name)).split("\n\n")[1];
-    assert.match(scoped, new RegExp(`^- textbox "Name".* ${name}`));
+    assert.match(scoped, new RegExp(`^textbox Name.* ${name}`));
     assert.doesNotMatch(scoped, /button/);
 
     assert.match(await cli("snapshot", "--limit", "2"), /page 1 of \d+ .*next: --page 2/);
@@ -164,8 +164,8 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
 
   test("refs from a page that is gone are rejected", async () => {
     const snapshot = await cli("snapshot");
-    const name = refOf(snapshot, 'textbox "Name"');
-    assert.match(await cli("click", refOf(snapshot, 'link "Next page"')), /the page changed to .*second\.html/);
+    const name = refOf(snapshot, 'textbox Name');
+    assert.match(await cli("click", refOf(snapshot, 'link Next page')), /the page changed to .*second\.html/);
     assert.match(await cliError("fill", name, "x"), /no longer loaded/);
     assert.match(await cliError("click", "@999"), /unknown ref/);
   });
@@ -176,7 +176,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       script,
       `await page.goto(${JSON.stringify(fixture("second.html"))});
        const snap = await page.snapshot();
-       await page.fill(snap.match(/textbox "Search" (@\\d+)/)[1], "open-eyes");
+       await page.fill(snap.match(/textbox Search (@\\d+)/)[1], "open-eyes");
        return page.eval("document.querySelector('input').value");`,
     );
     assert.equal(await cli("run", script), "open-eyes");
@@ -185,7 +185,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
   test("the user can take control, and the agent waits for them", async () => {
     await cli("open", fixture("form.html"));
     const snapshot = await cli("snapshot");
-    const send = refOf(snapshot, 'button "Send"');
+    const send = refOf(snapshot, 'button Send');
     const human = await humanAt();
     try {
       await human.click("take");
@@ -240,8 +240,8 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       assert.match(await cli("status"), /connected through the open-eyes daemon/);
       await cli("open", fixture("form.html"));
       const snapshot = await cli("snapshot");
-      await cli("fill", refOf(snapshot, 'textbox "Name"'), "Daemon");
-      assert.match(await cli("click", refOf(snapshot, 'button "Send"')), /Hello, Daemon/);
+      await cli("fill", refOf(snapshot, 'textbox Name'), "Daemon");
+      assert.match(await cli("click", refOf(snapshot, 'button Send')), /Hello, Daemon/);
       assert.match(await cliError("connect", "--endpoint", endpoint), /already connected/);
     } finally {
       assert.match(await cli("disconnect"), /disconnected/);
@@ -266,7 +266,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     } finally {
       await cli("policy", "reset");
     }
-    assert.match(await cli("snapshot"), /heading "Sign up"/);
+    assert.match(await cli("snapshot"), /heading Sign up/);
   });
 
   test("risky actions wait for the user to allow them on screen", async () => {
@@ -276,22 +276,22 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     const human = await humanAt();
     try {
       // Not risky: goes through without asking.
-      await cliWith(ask, "click", refOf(snapshot, 'checkbox "Accept terms"'));
+      await cliWith(ask, "click", refOf(snapshot, 'checkbox Accept terms'));
 
-      const sending = cliWith(ask, "click", refOf(snapshot, 'button "Send"'));
+      const sending = cliWith(ask, "click", refOf(snapshot, 'button Send'));
       await human.click("allow");
       assert.match(await sending, /clicked button "Send"/);
 
-      const again = cliErrorWith(ask, "click", refOf(snapshot, 'button "Send"'));
+      const again = cliErrorWith(ask, "click", refOf(snapshot, 'button Send'));
       await human.click("deny");
       assert.match(await again, /the user denied: click button "Send"/);
 
-      const password = cliWith(ask, "fill", refOf(snapshot, 'textbox "Password"'), "hunter2-secret");
+      const password = cliWith(ask, "fill", refOf(snapshot, 'textbox Password'), "hunter2-secret");
       await human.click("allow");
       assert.match(await password, /filled textbox "Password"/);
 
       // A page script cannot answer for the user.
-      const sneaky = cliErrorWith(ask, "click", refOf(snapshot, 'button "Send"'));
+      const sneaky = cliErrorWith(ask, "click", refOf(snapshot, 'button Send'));
       await until(() => human.evaluate(`!!document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="allow"]')?.checkVisibility()`), "the question");
       await human.evaluate(`document.getElementById("__open_eyes__").shadowRoot.querySelector('[data-part="allow"]').click()`);
       await sleep(1000);
@@ -305,7 +305,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
   test("an approved Enter still reaches the field that had focus", async () => {
     const ask = { OPEN_EYES_CONFIRM: "risky" };
     await cli("open", fixture("search.html"));
-    await cli("fill", refOf(await cli("snapshot"), 'textbox "Query"'), "chromium");
+    await cli("fill", refOf(await cli("snapshot"), 'textbox Query'), "chromium");
     const human = await humanAt();
     try {
       const pressing = cliWith(ask, "press", "Enter");
@@ -339,7 +339,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("usage", "show"), /shown/);
     await cli("open", fixture("form.html"));
     const snapshot = await cli("snapshot");
-    await cli("fill", refOf(snapshot, 'textbox "Name"'), "super-secret-name");
+    await cli("fill", refOf(snapshot, 'textbox Name'), "super-secret-name");
 
     const usage = await cli("usage");
     assert.match(usage, /^open file:.*form\.html +\d+ tok/m);

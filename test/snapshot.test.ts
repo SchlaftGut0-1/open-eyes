@@ -30,7 +30,7 @@ describe("formatSnapshot", () => {
         el("link", "Home", { backendDOMNodeId: 11 }),
       ),
     );
-    assert.equal(text, ['- heading "Title"', '- button "Save" @1', '- link "Home" @2'].join("\n"));
+    assert.equal(text, ["heading Title", "button Save @1", "link Home @2"].join("\n"));
     assert.deepEqual(refs, {
       1: { backendNodeId: 10, label: 'button "Save"' },
       2: { backendNodeId: 11, label: 'link "Home"' },
@@ -41,7 +41,7 @@ describe("formatSnapshot", () => {
     const { text } = formatSnapshot(
       page(el("generic", "", {}, [el("none", "", { ignored: true }, [el("button", "Go", { backendDOMNodeId: 1 })])])),
     );
-    assert.equal(text, '- button "Go" @1');
+    assert.equal(text, "button Go @1");
   });
 
   test("drops text that repeats its parent's name or value", () => {
@@ -52,7 +52,7 @@ describe("formatSnapshot", () => {
         el("StaticText", "Standalone"),
       ),
     );
-    assert.equal(text, ['- link "Docs" @1', '- textbox "Name" value="Ana" @2', '- text "Standalone"'].join("\n"));
+    assert.equal(text, ["link Docs @1", "textbox Name value=Ana @2", '"Standalone"'].join("\n"));
   });
 
   test("shows element states", () => {
@@ -68,7 +68,7 @@ describe("formatSnapshot", () => {
         el("button", "Menu", { backendDOMNodeId: 2, properties: [{ name: "expanded", value: { value: false } }] }),
       ),
     );
-    assert.equal(text, ['- checkbox "Terms" [checked, disabled] @1', '- button "Menu" [collapsed] @2'].join("\n"));
+    assert.equal(text, ["checkbox Terms [checked, disabled] @1", "button Menu [collapsed] @2"].join("\n"));
   });
 
   test("keeps the refs of elements it has seen before", () => {
@@ -77,14 +77,36 @@ describe("formatSnapshot", () => {
       el("button", "Old", { backendDOMNodeId: 20 }),
     );
     const { text, refs, nextRef } = formatSnapshot(nodes, { byNode: new Map([[20, 4]]), nextRef: 7 });
-    assert.equal(text, ['- button "New" @7', '- button "Old" @4'].join("\n"));
+    assert.equal(text, ["button New @7", "button Old @4"].join("\n"));
     assert.deepEqual(Object.keys(refs), ["4", "7"]);
     assert.equal(nextRef, 8);
   });
 
+  test("quotes names only when they could be misread", () => {
+    const { text } = formatSnapshot(
+      page(
+        el("button", "Save [draft]", { backendDOMNodeId: 1 }),
+        el("link", "Reply to @3", { backendDOMNodeId: 2 }),
+        el("textbox", "a=b", { backendDOMNodeId: 3, value: { value: "x @9" } }),
+        el("heading", 'Say "hi"'),
+      ),
+    );
+    assert.equal(
+      text,
+      ['button "Save [draft]" @1', 'link "Reply to @3" @2', 'textbox "a=b" value="x @9" @3', 'heading "Say \\"hi\\""'].join("\n"),
+    );
+  });
+
+  test("drops unnamed list and table wrappers", () => {
+    const { text } = formatSnapshot(
+      page(el("list", "", {}, [el("listitem", "", {}, [el("link", "One", { backendDOMNodeId: 1 })])]), el("table", "Prices")),
+    );
+    assert.equal(text, ["link One @1", "table Prices"].join("\n"));
+  });
+
   test("truncates long text", () => {
     const { text } = formatSnapshot(page(el("heading", "x".repeat(500))));
-    assert.equal(text, `- heading "${"x".repeat(120)}…"`);
+    assert.equal(text, `heading ${"x".repeat(120)}…`);
   });
 });
 
@@ -135,7 +157,12 @@ describe("formatSnapshot properties", () => {
     fc.assert(
       fc.property(treeArbitrary, (nodes) => {
         const { text } = formatSnapshot(nodes);
-        for (const line of text ? text.split("\n") : []) assert.match(line, /^(  )*- [A-Za-z]+( |$)/);
+        // An element line starts with its role; a text line is a JSON string.
+        for (const line of text ? text.split("\n") : []) {
+          const body = line.replace(/^(  )*/, "");
+          if (body.startsWith('"')) assert.equal(typeof JSON.parse(body), "string");
+          else assert.match(body, /^[A-Za-z]+( |$)/);
+        }
       }),
     );
   });
