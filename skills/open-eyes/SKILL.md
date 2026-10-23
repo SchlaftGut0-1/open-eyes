@@ -19,8 +19,24 @@ open-eyes launch     # if not: starts a visible browser with the open-eyes profi
 Use `open-eyes launch --headless` only when the user asks for background work with no
 window; by default the user should be able to watch you.
 
-The open-eyes profile keeps its logins between runs. If a site needs the user to log
-in, open the page, tell the user, and wait for them to do it in that window.
+The open-eyes profile keeps its logins between runs.
+
+## Working with the user
+
+The user can press **Take control** in your window at any time. While they are in
+control, every action fails with "the user has taken control". Do not retry: run
+`open-eyes wait` and continue once it returns.
+
+When you need the user (a login, a captcha, 2FA, a choice only they can make), ask:
+
+```bash
+open-eyes handoff "Please log in to GitHub, then hand control back"
+```
+
+It shows your message in the window and blocks until the user presses **Hand back to
+agent** (default timeout 600s; change it with `--timeout <seconds>`). Run it with a tool
+timeout at least that long, or in the background. Take a new snapshot afterwards: the
+user may have navigated.
 
 ## Core loop
 
@@ -60,6 +76,7 @@ EOF
 | `wait(ms)` | Sleep |
 | `eval(js)` | Evaluate an expression in the page, return its JSON value |
 | `screenshot(path?)` | Save a PNG, return its path |
+| `handoff(message?, ms?)` | Ask the user to take over and wait for them (no message: wait only if they took control) |
 | `url()` | Current URL |
 
 Refs only exist after a `snapshot()`, so inside a script take a snapshot before clicking
