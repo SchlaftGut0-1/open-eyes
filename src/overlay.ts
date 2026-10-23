@@ -54,6 +54,35 @@ const OVERLAY = String.raw`(cmd) => {
     host.style.cssText = "all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;";
     const root = host.attachShadow({ mode: "open" });
     const part = (el, name, css) => { el.dataset.part = name; el.style.cssText = css; root.appendChild(el); return el; };
+    // What the overlay's buttons do. Only real user input runs them (see the shield below).
+    const actions = {
+      take: () => setOwner("user", null),
+      back: () => setOwner("agent", null),
+      allow: () => decide("allow"),
+      deny: () => decide("deny"),
+    };
+    const decide = (decision) => {
+      if (!state.confirm) return;
+      state.decisions[state.confirm.id] = decision;
+      state.confirm = null;
+    };
+    // Input on the overlay must never reach the page: sites close menus and search boxes on
+    // a click "outside" them, and a pressed button takes keyboard focus, either of which
+    // would undo what the agent was doing (an approved Enter would go nowhere). The shield
+    // runs before the page's own document listeners, handles our buttons and stops the event.
+    const shield = (event) => {
+      if (!event.composedPath().includes(host)) return;
+      event.stopImmediatePropagation();
+      if (event.type === "mousedown" || event.type === "pointerdown") event.preventDefault(); // Keep focus.
+      if (event.type !== "click" || !event.isTrusted) return; // Page scripts cannot press our buttons.
+      const button = event.composedPath().find((el) => el.dataset && el.dataset.part in actions);
+      if (!button) return;
+      actions[button.dataset.part]();
+      render();
+    };
+    for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick", "auxclick", "contextmenu", "touchstart", "touchend"]) {
+      window.addEventListener(type, shield, true);
+    }
     const font = "font:500 13px/1.4 system-ui,sans-serif;";
     const pill = "border-radius:999px;color:#fff;box-shadow:0 4px 16px rgb(0 0 0 / .25);" + font;
 
@@ -84,11 +113,6 @@ const OVERLAY = String.raw`(cmd) => {
       "position:fixed;right:16px;bottom:16px;padding:8px 14px;border:0;cursor:pointer;" +
       "pointer-events:auto;background:" + AGENT + ";" + pill);
     take.textContent = "✋ Take control";
-    take.addEventListener("click", (event) => {
-      if (!event.isTrusted) return; // Page scripts cannot take control on the user's behalf.
-      setOwner("user", null);
-      render();
-    });
 
     const panel = part(document.createElement("div"), "panel",
       "position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:min(480px,90vw);" +
@@ -102,11 +126,6 @@ const OVERLAY = String.raw`(cmd) => {
     back.dataset.part = "back";
     back.textContent = "Hand back to agent ↩";
     back.style.cssText = "padding:8px 14px;border:0;cursor:pointer;background:" + USER + ";" + pill;
-    back.addEventListener("click", (event) => {
-      if (!event.isTrusted) return;
-      setOwner("agent", null);
-      render();
-    });
     panel.appendChild(back);
 
     const ask = part(document.createElement("div"), "ask",
@@ -117,21 +136,15 @@ const OVERLAY = String.raw`(cmd) => {
     question.dataset.part = "question";
     question.style.cssText = "margin-bottom:10px;white-space:pre-wrap;";
     ask.appendChild(question);
-    const decide = (name, label, color, decision) => {
+    const choice = (name, label, color) => {
       const button = document.createElement("button");
       button.dataset.part = name;
       button.textContent = label;
       button.style.cssText = "margin-right:8px;padding:8px 14px;border:0;cursor:pointer;background:" + color + ";" + pill;
-      button.addEventListener("click", (event) => {
-        if (!event.isTrusted || !state.confirm) return; // Only the user decides.
-        state.decisions[state.confirm.id] = decision;
-        state.confirm = null;
-        render();
-      });
       ask.appendChild(button);
     };
-    decide("allow", "Allow", USER, "allow");
-    decide("deny", "Deny", "#dc2626", "deny");
+    choice("allow", "Allow", USER);
+    choice("deny", "Deny", "#dc2626");
 
     (document.body ?? document.documentElement).appendChild(host);
   }
