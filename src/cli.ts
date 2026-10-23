@@ -52,6 +52,12 @@ Page (works in the agent's own window)
   eval <js>              Evaluate a JavaScript expression in the page
   run <file|->           Run a script with \`page\` in scope (- reads stdin)
 
+Scripts (open-eyes run): \`page\` methods, all async
+  goto(url)  snapshot({ full, find, scope, diff, interactive, limit, page })
+  click("@N")  fill("@N", text)  press(key)  waitForText(text, ms?)  wait(ms)
+  eval(js)  screenshot(path?)  handoff(message?, ms?)  url()
+  Refs come from snapshot(): take one before clicking and after the page changes.
+
 Working with the user
   handoff <message>      Ask the user to take over (log in, solve a captcha...)
                          and wait until they hand control back
