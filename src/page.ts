@@ -96,6 +96,13 @@ const CHOOSE_OPTION = `function (wanted) {
   return { native: true, chosen: option.text.trim() };
 }`;
 
+// After an action, wait until the page has had no content request (fetch or XHR) in flight
+// for QUIET_MS, at most MAX_NETWORK_WAIT_MS: searches often fire after a debounce, and their
+// results should be in the page before its changes are reported. Images, sockets and the
+// like are ignored, so they never hold an action up.
+const MAX_NETWORK_WAIT_MS = 2000;
+const CONTENT_REQUESTS = new Set(["Fetch", "XHR"]);
+
 const SELECT_CONTENTS = `function () {
   if (typeof this.select === "function") return this.select();
   if (this.isContentEditable) {
@@ -224,6 +231,7 @@ export class Page {
       await this.#announce({ label: `click ${label}`, x, y, box, busy: true });
       await this.#confirm(`click ${label}`, isRiskyClick(label));
       const finishDownload = await this.#watchDownloads();
+      const network = await this.#trackNetwork();
       await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
       for (const type of ["mousePressed", "mouseReleased"]) {
         await this.#send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
@@ -232,7 +240,7 @@ export class Page {
       await sleep(150);
       await this.#settle(10_000);
       await this.#leaveIfBlocked();
-      const observed = await this.#observe(entry.url);
+      const observed = await this.#observe(entry.url, network);
       const download = await finishDownload();
       if (download.saved) entry.target += ` (downloaded ${basename(download.saved)})`;
       return `clicked ${label}${observed}${download.report}`;
@@ -254,11 +262,12 @@ export class Page {
       });
       await this.#confirm(`type into ${label}, a password field`, result.value === true);
       await this.#send("DOM.focus", { backendNodeId });
+      const network = await this.#trackNetwork();
       await this.#send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: SELECT_CONTENTS });
       // Inserting over the selection replaces existing content and fires real input events.
       if (text) await this.#send("Input.insertText", { text });
       else await this.press("Backspace", false);
-      return `filled ${label}${await this.#observe(entry.url)}`;
+      return `filled ${label}${await this.#observe(entry.url, network)}`;
     });
   }
 
@@ -280,10 +289,11 @@ export class Page {
       const submits = key === "Enter" && (await this.#evaluate(`!!document.activeElement?.closest?.("form")`));
       await this.#confirm("press Enter, which submits a form", submits === true);
       const finishDownload = await this.#watchDownloads();
+      const network = await this.#trackNetwork();
       await dispatch();
       await this.#settle(10_000);
       await this.#leaveIfBlocked();
-      const observed = await this.#observe(entry.url);
+      const observed = await this.#observe(entry.url, network);
       const download = await finishDownload();
       if (download.saved) entry.target += ` (downloaded ${basename(download.saved)})`;
       return `pressed ${key}${observed}${download.report}`;
@@ -327,9 +337,10 @@ export class Page {
       const y = box.y + box.height / 2;
       await this.#announce({ label: `hover over ${label}`, x, y, box, busy: true });
       // A real mouse move fires CSS :hover and mouseenter/mouseover listeners alike.
+      const network = await this.#trackNetwork();
       await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
       await this.#overlay({ type: "idle" });
-      return `hovered over ${label}${await this.#observe(entry.url)}`;
+      return `hovered over ${label}${await this.#observe(entry.url, network)}`;
     });
   }
 
@@ -397,6 +408,7 @@ export class Page {
       await this.#guard();
       const [width, height, before] = (await this.#evaluate("[innerWidth, innerHeight, scrollY]")) as number[];
       let summary: string;
+      let network: (() => Promise<boolean>) | undefined;
       if (ref && !direction) {
         const { backendNodeId, label } = await this.#resolve(ref);
         entry.target = label;
@@ -417,11 +429,12 @@ export class Page {
         const distance = Math.round(pixels ?? height * 0.85);
         const dir = direction ?? "down";
         await this.#announce({ label: `scroll ${dir} ${where}`, x, y, busy: true });
+        network = await this.#trackNetwork(); // Lazy loading fetches as the page moves.
         await this.#send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: dir === "down" ? distance : -distance });
         await this.#overlay({ type: "idle" });
         summary = `scrolled ${dir} ${distance} px in ${where}`;
       }
-      await this.#evaluate(WAIT_FOR_QUIET_DOM).catch(() => {});
+      await this.#settleAfterAction(network);
       await sleep(150); // Let smooth scrolling settle.
       const after = (await this.#evaluate("scrollY")) as number;
       if (!ref && after === before) {
@@ -588,8 +601,8 @@ export class Page {
    * page is one line, also when the site navigates without reloading (GitHub, most apps):
    * a diff of the whole page would cost hundreds of tokens and help nobody.
    */
-  async #observe(urlBefore?: string): Promise<string> {
-    await this.#evaluate(WAIT_FOR_QUIET_DOM).catch(() => {}); // Fails if the page navigated.
+  async #observe(urlBefore?: string, network?: () => Promise<boolean>): Promise<string> {
+    await this.#settleAfterAction(network);
     if (!OBSERVE || !this.#state.refsLoaderId) return "";
     if (this.#state.refsLoaderId !== (await this.#loaderId())) {
       return `\nthe page changed to ${await this.url()}; run "open-eyes snapshot" to see it`;
@@ -610,6 +623,51 @@ export class Page {
     const more = changes.length - OBSERVE_LIMIT;
     const tail = more > 0 ? [`… ${more} more changed lines; run "open-eyes snapshot" to see the page`] : [];
     return `\nchanges:\n${[...changes.slice(0, OBSERVE_LIMIT), ...tail].join("\n")}`;
+  }
+
+  /**
+   * Counts the page's content requests from now on. The returned function waits until none
+   * has been in flight for QUIET_MS after the action (at most MAX_NETWORK_WAIT_MS) and says
+   * whether any were seen.
+   */
+  async #trackNetwork(): Promise<() => Promise<boolean>> {
+    const inflight = new Set<string>();
+    let seen = false;
+    let lastChange = Date.now();
+    const mine = (sessionId?: string) => sessionId === this.#sessionId;
+    const done = (p: { requestId: string }, sessionId?: string) => {
+      if (mine(sessionId) && inflight.delete(p.requestId)) lastChange = Date.now();
+    };
+    const stops = [
+      this.#cdp.on("Network.requestWillBeSent", (p, sessionId) => {
+        if (!mine(sessionId) || !CONTENT_REQUESTS.has(p.type)) return;
+        inflight.add(p.requestId);
+        seen = true;
+        lastChange = Date.now();
+      }),
+      this.#cdp.on("Network.loadingFinished", done),
+      this.#cdp.on("Network.loadingFailed", done),
+    ];
+    await this.#send("Network.enable").catch(() => {});
+    return async () => {
+      // Count quiet time from the end of the action, so a debounced request still starts in it.
+      lastChange = Math.max(lastChange, Date.now());
+      const deadline = Date.now() + MAX_NETWORK_WAIT_MS;
+      try {
+        while (Date.now() < deadline && (inflight.size > 0 || Date.now() - lastChange < QUIET_MS)) await sleep(50);
+      } finally {
+        for (const stop of stops) stop();
+      }
+      return seen;
+    };
+  }
+
+  /** Waits for the DOM, and the network if tracked, to settle; fails quietly mid-navigation. */
+  async #settleAfterAction(network?: () => Promise<boolean>): Promise<void> {
+    const quietDom = this.#evaluate(WAIT_FOR_QUIET_DOM).catch(() => {});
+    if (!network) return void (await quietDom);
+    const [fetched] = await Promise.all([network(), quietDom]);
+    if (fetched) await this.#evaluate(WAIT_FOR_QUIET_DOM).catch(() => {}); // Let the results render.
   }
 
   /**

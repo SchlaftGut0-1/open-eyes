@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -533,6 +534,44 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.ok(second && second !== saved, `a new file, not ${saved}`);
     assert.equal(readFileSync(second, "utf8"), "hello from open-eyes");
     assert.match(await cli("log", "--limit", "1"), /click +link "Download notes" \(downloaded notes \(\d+\)\.txt\)/);
+  });
+
+  test("actions wait for the content they fetched, but never hang on a request", async () => {
+    // A search box that, like Wikipedia's, fetches suggestions after a debounce.
+    const page = `<!doctype html><title>Search</title><input aria-label="Query"><button>Poll forever</button><ul></ul>
+      <script>
+        let timer;
+        document.querySelector("input").addEventListener("input", (event) => {
+          clearTimeout(timer);
+          timer = setTimeout(async () => {
+            const items = await (await fetch("/suggest?q=" + event.target.value)).json();
+            document.querySelector("ul").innerHTML = items.map((i) => "<li>" + i + "</li>").join("");
+          }, 200);
+        });
+        document.querySelector("button").addEventListener("click", () => fetch("/never"));
+      </script>`;
+    const server = createServer((request, response) => {
+      if (request.url === "/") return response.end(page);
+      if (request.url?.startsWith("/suggest")) {
+        return setTimeout(() => response.end(JSON.stringify(["Chromium browser", "Chromium element"])), 700);
+      }
+      // /never: keep the request open.
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    try {
+      await cli("open", `http://127.0.0.1:${port}/`);
+      const snapshot = await cli("snapshot");
+      const filled = await cli("fill", refOf(snapshot, "textbox Query"), "chromium");
+      assert.match(filled, /\+ +"Chromium browser"/, "suggestions fetched after a debounce are reported");
+
+      const started = Date.now();
+      await cli("click", refOf(snapshot, "button Poll forever"));
+      assert.ok(Date.now() - started < 6000, "a request that never ends does not hold the action");
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
   });
 
   test("screenshot writes a PNG", async () => {
