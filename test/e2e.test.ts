@@ -302,6 +302,20 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     }
   });
 
+  test("an approved Enter still reaches the field that had focus", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    await cli("open", fixture("search.html"));
+    await cli("fill", refOf(await cli("snapshot"), 'textbox "Query"'), "chromium");
+    const human = await humanAt();
+    try {
+      const pressing = cliWith(ask, "press", "Enter");
+      await human.click("allow");
+      assert.match(await pressing, /the page changed to .*second\.html\?q=chromium/);
+    } finally {
+      human.close();
+    }
+  });
+
   test("the audit log records actions and outcomes, never typed text", async () => {
     const log = await cli("log", "--limit", "50");
     assert.match(log, /OK +click +button "Send"/);

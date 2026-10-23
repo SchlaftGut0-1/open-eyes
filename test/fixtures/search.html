@@ -1,0 +1,12 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Search</title>
+<form action="second.html">
+  <input aria-label="Query" name="q" />
+</form>
+<script>
+  // Like many sites (Wikipedia's search, menus), close the search box on a click outside it.
+  document.addEventListener("mousedown", (event) => {
+    if (!event.target.closest("form")) document.querySelector("form")?.remove();
+  });
+</script>
