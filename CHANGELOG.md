@@ -6,6 +6,43 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0-beta.1] - 2026-10-23
+
+First pre-release of 0.4.0: agents read far fewer tokens. Measured on six sites, the
+default snapshot dropped from 22,139 to 6,802 tokens (-69%), and a live session that
+cost 11,423 tokens now costs 5,121.
+
+### Added
+
+- `snapshot` shows **what is on screen**, plus an outline of the headings above and
+  below; `--full` prints the whole page. `--find`, `--scope` and `--diff` still cover
+  the whole page.
+- `snapshot --interactive` keeps only what can be clicked or typed into, plus headings
+  (about half the tokens of a full snapshot on text-heavy pages).
+- `open-eyes usage` shows the tokens each command cost the agent; `usage show` puts a
+  live counter in the agent window.
+
+### Changed
+
+- **Compact snapshot format**: `button Save @3` instead of `- button "Save" @3`; text
+  lines are quoted; empty list and table wrappers are gone.
+- Snapshots drop noise: table cells and list items named after their own content, list
+  bullets, separators, decorative images, repeated labels and lone punctuation.
+  Citations are one line.
+- When a click navigates without reloading (GitHub, single-page apps), the action reports
+  "the page changed to <url>" in one line instead of a diff of the whole page (GitHub
+  tab clicks: ~860 to ~36 tokens).
+- The agent skill shrank from 1,582 to 648 tokens; script and option details moved to
+  `open-eyes help`.
+- Pre-release versions are published as GitHub pre-releases.
+
+### Fixed
+
+- Approving a confirmation no longer breaks the action it approved: clicks on the
+  overlay never reach the page or move keyboard focus (Wikipedia's search closed on the
+  click on Allow).
+- The token counter no longer covers the Allow and Deny buttons in small windows.
+
 ## [0.3.0] - 2026-10-23
 
 ### Added
@@ -71,7 +108,8 @@ All notable changes to open-eyes are documented here. The format follows
   `eval`, multi-step `run` scripts, a live overlay showing each action, and an agent
   skill.
 
-[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0-beta.1...HEAD
+[0.4.0-beta.1]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.3.0...v0.4.0-beta.1
 [0.3.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/2bbe51e...v0.2.0
 [0.1.0]: https://github.com/SchlaftGut0-1/open-eyes/commit/2bbe51e
