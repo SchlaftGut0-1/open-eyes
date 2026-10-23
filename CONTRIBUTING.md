@@ -69,11 +69,12 @@ CI on Node 22 and 24 and CodeQL passing. Pull requests into `main` must come fro
    The Release workflow checks the tag matches `package.json` and is on `main`, runs the
    tests, packs the package, signs its build provenance and publishes the GitHub release
    with the `CHANGELOG.md` notes.
-4. Open a pull request from `main` into `develop` and merge it with a merge commit. `develop`
-   only accepts squash merges, so a maintainer merges this one by bypassing the
-   "Squash features into develop" rule; CI and CodeQL are still required. A squashed
-   back-merge would make every later release conflict on `package.json` and the
-   changelog.
+4. Open a pull request from `main` into `develop` and merge it with a merge commit by
+   running `scripts/back-merge.sh <pr-number>` (needs admin rights). `develop` only
+   accepts squash merges and a ruleset bypass cannot change the merge method, so the
+   script turns the "Squash features into develop" rule off for this one merge and
+   always turns it back on; CI and CodeQL stay required. A squashed back-merge would
+   make every later release conflict on `package.json` and the changelog.
 
 ### Contributing a change
 
