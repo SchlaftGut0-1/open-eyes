@@ -1,0 +1,25 @@
+# Enforces git flow: main only accepts release/* and hotfix/* branches.
+# "gitflow" is a required status check on main.
+name: Git flow
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  gitflow:
+    name: gitflow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check source branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ "$HEAD_REF" =~ ^(release|hotfix)/ ]]; then
+            echo "OK: $HEAD_REF may be merged into main."
+          else
+            echo "::error::main only accepts release/* or hotfix/* branches, not '$HEAD_REF'. Target develop instead."
+            exit 1
+          fi

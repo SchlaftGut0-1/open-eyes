@@ -19,17 +19,34 @@ On Node 23.6+ you can skip the build while iterating: `npm run dev -- snapshot`.
 
 ## Workflow
 
-`main` is protected: every change lands through a pull request with passing CI.
+open-eyes uses [git flow](https://nvie.com/posts/a-successful-git-branching-model/):
 
-1. Fork the repo and create a branch from `main`.
+| Branch | Purpose | Branches from | Merges into |
+|---|---|---|---|
+| `main` | Released versions only | | |
+| `develop` | Integration of finished work (default branch) | `main` | `main`, via release |
+| `feature/*` | One feature or fix | `develop` | `develop` (squash) |
+| `release/x.y.z` | Prepare a release: version bump, final fixes | `develop` | `main` (merge commit) |
+| `hotfix/x.y.z` | Urgent fix to a released version | `main` | `main` (merge commit) |
+
+After a release or hotfix lands on `main`, `main` is merged back into `develop` and the
+release is tagged `vX.Y.Z`.
+
+Both `main` and `develop` are protected: changes land only through pull requests, with
+CI on Node 22 and 24 and CodeQL passing. Pull requests into `main` must come from
+`release/*` or `hotfix/*`; the `gitflow` check rejects anything else.
+
+### Contributing a change
+
+1. Fork the repo and create `feature/<short-name>` from `develop`.
 2. Make your change. Keep the code in the style of the surrounding files.
 3. Run `npm run typecheck` and `npm test`. The end-to-end tests start a headless
    Chromium on a random port with a throwaway profile; they never touch your browser.
    Add or update tests for what you changed, and try it against a real browser.
-4. Open a pull request describing what changed and how you tested it.
+4. Open a pull request **into `develop`** describing what changed and how you tested it.
 
-Pull requests are squash-merged, so the PR title becomes the commit message. Please
-write it as a short imperative sentence ("Add iframe support to snapshot").
+Feature pull requests are squash-merged, so the PR title becomes the commit message.
+Please write it as a short imperative sentence ("Add iframe support to snapshot").
 
 ## Reporting bugs and ideas
 
