@@ -4,7 +4,11 @@ export type AXNode = {
   nodeId: string;
   ignored: boolean;
   role?: { value: string };
-  name?: { value: string };
+  name?: {
+    value: string;
+    /** How Chromium computed the name; the first source that is not superseded won. */
+    sources?: { type: string; superseded?: boolean; value?: unknown; attributeValue?: unknown }[];
+  };
   value?: { value: unknown };
   childIds?: string[];
   backendDOMNodeId?: number;
@@ -49,9 +53,21 @@ const TRANSPARENT = new Set([
   "LayoutTable",
   "LayoutTableRow",
   "LayoutTableCell",
+  "superscript",
+  "subscript",
 ]);
 const SKIPPED = new Set(["InlineTextBox", "LineBreak"]);
+/** Dropped with everything inside: list bullets and separators say nothing to an agent. */
+const DROPPED = new Set(["ListMarker", "separator"]);
 const MAX_TEXT = 120;
+
+/** Whether Chromium built the name from the node's own content (as for a table cell). */
+const nameFromContents = (node: AXNode) =>
+  node.name?.sources?.find((s) => !s.superseded && (s.value !== undefined || s.attributeValue !== undefined))?.type ===
+  "contents";
+
+/** Text with no letters or digits, such as the "|" and "·" between links. */
+const PUNCTUATION_ONLY = /^[\p{P}\p{S}\s]+$/u;
 
 const truncate = (text: string) => (text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…` : text);
 
@@ -97,9 +113,15 @@ export function formatSnapshot(
   };
   let nextRef = known.nextRef;
 
+  // The element printed last, to drop a label repeated right after it ("radio Small", "Small").
+  let previous: { depth: number; name: string } | undefined;
+
   const visit = (node: AXNode, depth: number, parentName: string): void => {
     const role = node.role?.value ?? "";
-    const name = String(node.name?.value ?? "").trim();
+    // A wrapper named after its own content (a table cell, a list item) would repeat what
+    // its children already say, so it is treated as unnamed and dissolved.
+    const name = TRANSPARENT.has(role) && nameFromContents(node) ? "" : String(node.name?.value ?? "").trim();
+    if (DROPPED.has(role) && !node.ignored) return;
     const children = (node.childIds ?? []).flatMap((id) => byId.get(id) ?? []);
     const visitChildren = (childDepth: number, inheritedName: string) =>
       children.forEach((child) => visit(child, childDepth, inheritedName));
@@ -109,13 +131,18 @@ export function formatSnapshot(
     const indent = "  ".repeat(depth);
     if (role === "StaticText") {
       // Text already shown as its parent's name (a link's label, a heading) is noise.
+      const repeatsLabel = previous?.depth === depth && previous.name === name;
       // Text is always quoted, so it can never be mistaken for an element line.
-      if (name && !parentName.includes(name)) emit(`${indent}${JSON.stringify(truncate(name))}`, node, role);
+      if (name && !parentName.includes(name) && !repeatsLabel && !PUNCTUATION_ONLY.test(name)) {
+        emit(`${indent}${JSON.stringify(truncate(name))}`, node, role);
+        previous = undefined;
+      }
       return;
     }
 
     const interactive = INTERACTIVE.has(role) && node.backendDOMNodeId !== undefined;
     if (!interactive && !name && TRANSPARENT.has(role)) return visitChildren(depth, parentName);
+    if (role === "image" && !name && !interactive) return; // Decorative.
 
     let line = `${indent}${role}`;
     if (name) line += ` ${bare(truncate(name))}`;
@@ -131,6 +158,7 @@ export function formatSnapshot(
       line += ` @${ref}`;
     }
     emit(line, node, role);
+    previous = { depth, name };
     visitChildren(depth + 1, `${name} ${value ?? ""}`.trim() || parentName);
   };
 
