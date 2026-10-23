@@ -49,6 +49,7 @@ Page (works in the agent's own window)
   fill <@N> <text>       Replace the content of a field
   press <key>            Press a key (Enter, Tab, Escape, ArrowDown, a, ...)
   select <@N> <option>   Choose an option by its text in a dropdown (native or custom)
+  hover <@N>             Move the mouse over an element and report what appeared
   scroll [@N] [down|up] [pixels]
                          Scroll the page (default: down one screen); with @N, scroll
                          the list or panel holding it, or with no direction bring
@@ -59,7 +60,7 @@ Page (works in the agent's own window)
 
 Scripts (open-eyes run): \`page\` methods, all async
   goto(url)  snapshot({ full, find, scope, diff, interactive, limit, page })
-  click("@N")  fill("@N", text)  press(key)  select("@N", option)
+  click("@N")  fill("@N", text)  press(key)  select("@N", option)  hover("@N")
   scroll(ref?, "down"|"up", px?)
   waitForText(text, ms?)  wait(ms)
   eval(js)  screenshot(path?)  handoff(message?, ms?)  url()
@@ -316,6 +317,8 @@ async function main([command, ...args]: string[]): Promise<void> {
     }
     case "press":
       return withPage(`press ${args[0] ?? ""}`, (page) => page.press(need(args[0], "press <key>")));
+    case "hover":
+      return withPage(`hover ${args[0] ?? ""}`, (page) => page.hover(need(args[0], "hover <@N>")));
     case "select": {
       const ref = need(args[0], "select <@N> <option>");
       const option = need(args.slice(1).join(" ") || undefined, "select <@N> <option>");

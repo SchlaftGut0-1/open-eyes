@@ -472,6 +472,20 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("select", size, "Huge"), /no option "Huge".*options: Small, Large/);
   });
 
+  test("hover opens menus and tooltips and reports them", async () => {
+    await cli("open", fixture("hover.html"));
+    const snapshot = await cli("snapshot");
+    assert.doesNotMatch(snapshot, /Laptops/);
+
+    const menu = await cli("hover", refOf(snapshot, "link Products"));
+    assert.match(menu, /^hovered over link "Products"\nchanges:/);
+    assert.match(menu, /\+ +link Laptops @\d+/);
+    assert.match(menu, /\+ +link Phones @\d+/);
+
+    const tip = await cli("hover", refOf(snapshot, "button Help"));
+    assert.match(tip, /\+ +tooltip Opens the user guide/);
+  });
+
   test("screenshot writes a PNG", async () => {
     const file = await cli("screenshot", join(root, "shot.png"));
     assert.ok(existsSync(file));

@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Hover</title>
+<style>
+  .menu ul { display: none; }
+  .menu:hover ul { display: block; }
+</style>
+<nav class="menu" aria-label="Main">
+  <a href="#products">Products</a>
+  <ul>
+    <li><a href="#laptops">Laptops</a></li>
+    <li><a href="#phones">Phones</a></li>
+  </ul>
+</nav>
+<button id="help">Help</button>
+<script>
+  document.getElementById("help").addEventListener("mouseenter", () => {
+    const tip = document.createElement("div");
+    tip.setAttribute("role", "tooltip");
+    tip.textContent = "Opens the user guide";
+    document.body.append(tip);
+  });
+</script>
