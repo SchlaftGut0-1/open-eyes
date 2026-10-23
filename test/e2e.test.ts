@@ -380,6 +380,25 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(scrolled, /^heading Top \(above\)$/m);
   });
 
+  test("navigating without a reload is reported as a page change, not a diff", async () => {
+    await cli("open", fixture("app.html"));
+    const snapshot = await cli("snapshot");
+    const toggle = refOf(snapshot, "button Show details");
+
+    const navigated = await cli("click", refOf(snapshot, "link Issues"));
+    assert.match(navigated, /^clicked link "Issues"\nthe page changed to .*app\.html\?view=issues; run "open-eyes snapshot"/);
+    assert.ok(navigated.length < 250, `one line, not a diff: ${navigated}`);
+    // Same document: refs from before still work.
+    assert.match(await cli("click", toggle), /\+ +button Hide details/);
+
+    const rewritten = await cli("click", refOf(await cli("snapshot"), "button Rewrite"));
+    assert.match(rewritten, /most of the page changed \(\d+ lines\)/);
+
+    await cli("open", fixture("tall.html"));
+    const jumped = await cli("click", refOf(await cli("snapshot"), "link Home"));
+    assert.doesNotMatch(jumped, /page changed/, "a #fragment jump is not a page change");
+  });
+
   test("screenshot writes a PNG", async () => {
     const file = await cli("screenshot", join(root, "shot.png"));
     assert.ok(existsSync(file));
