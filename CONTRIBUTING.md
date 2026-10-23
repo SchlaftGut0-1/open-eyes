@@ -68,7 +68,8 @@ CI on Node 22 and 24 and CodeQL passing. Pull requests into `main` must come fro
    ```
    The Release workflow checks the tag matches `package.json` and is on `main`, runs the
    tests, packs the package, signs its build provenance and publishes the GitHub release
-   with the `CHANGELOG.md` notes.
+   with the `CHANGELOG.md` notes. Pre-release versions (`X.Y.Z-beta.N`, `X.Y.Z-rc.N`) are
+   published as GitHub pre-releases and never become the latest release.
 4. Open a pull request from `main` into `develop` and merge it with a merge commit, not a
    squash: a squashed back-merge makes every later release conflict on `package.json`
    and the changelog. `develop` only accepts squash merges, so a maintainer does this
