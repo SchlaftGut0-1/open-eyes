@@ -21,6 +21,17 @@ window; by default the user should be able to watch you.
 
 The open-eyes profile keeps its logins between runs.
 
+If the user wants you to use **their everyday browser** (with their logins), they enable
+remote debugging once at `chrome://inspect/#remote-debugging`, then:
+
+```bash
+open-eyes connect      # the user approves a prompt in their browser, once
+open-eyes disconnect   # when done
+```
+
+While connected, every command works in a new window of the user's browser. Their
+logged-in sessions are at stake: be extra careful and ask before anything irreversible.
+
 ## Working with the user
 
 The user can press **Take control** in your window at any time. While they are in

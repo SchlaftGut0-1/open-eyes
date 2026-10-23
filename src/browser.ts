@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CDP } from "./cdp.ts";
 import { Page } from "./page.ts";
-import { profileDir, type State } from "./state.ts";
+import { profileDir, socketPath, stateDir, type State } from "./state.ts";
 
 const BROWSER_NAMES = [
   "chromium",
@@ -22,6 +23,84 @@ const MAC_BROWSERS = [
 ];
 
 const LAUNCH_TIMEOUT_MS = 30_000;
+/** How long `connect` waits for the user to approve the browser's permission prompt. */
+const CONNECT_TIMEOUT_MS = 120_000;
+
+/** Everyday-profile directories, where a browser with remote debugging on writes DevToolsActivePort. */
+function profileDirs(): Record<string, string[]> {
+  const home = homedir();
+  if (process.platform === "darwin") {
+    const support = join(home, "Library", "Application Support");
+    return {
+      chrome: [join(support, "Google", "Chrome")],
+      chromium: [join(support, "Chromium")],
+      brave: [join(support, "BraveSoftware", "Brave-Browser")],
+      edge: [join(support, "Microsoft Edge")],
+    };
+  }
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA ?? join(home, "AppData", "Local");
+    return {
+      chrome: [join(local, "Google", "Chrome", "User Data")],
+      chromium: [join(local, "Chromium", "User Data")],
+      brave: [join(local, "BraveSoftware", "Brave-Browser", "User Data")],
+      edge: [join(local, "Microsoft", "Edge", "User Data")],
+    };
+  }
+  const config = process.env.XDG_CONFIG_HOME ?? join(home, ".config");
+  return {
+    chrome: [join(config, "google-chrome"), join(config, "google-chrome-beta")],
+    chromium: [join(config, "chromium")],
+    brave: [join(config, "BraveSoftware", "Brave-Browser")],
+    edge: [join(config, "microsoft-edge")],
+  };
+}
+
+/** Reads a DevToolsActivePort file ("<port>\n/devtools/browser/<id>") into a WebSocket URL. */
+export function readDevToolsActivePort(dir: string): string | undefined {
+  let content: string;
+  try {
+    content = readFileSync(join(dir, "DevToolsActivePort"), "utf8");
+  } catch {
+    return undefined;
+  }
+  const [port, path] = content.split(/\r?\n/);
+  if (!/^\d{1,5}$/.test(port) || !/^\/devtools\/browser\/[\w-]+$/.test(path ?? "")) return undefined;
+  return `ws://127.0.0.1:${port}${path}`;
+}
+
+/** The user's everyday browser, if remote debugging is enabled in it. */
+export function findEverydayBrowser(name?: string): { name: string; url: string } | undefined {
+  const dirs = profileDirs();
+  if (name && !dirs[name]) throw new Error(`unknown browser "${name}"; use one of: ${Object.keys(dirs).join(", ")}`);
+  for (const [browser, candidates] of Object.entries(dirs)) {
+    if (name && browser !== name) continue;
+    for (const dir of candidates) {
+      const url = readDevToolsActivePort(dir);
+      if (url) return { name: browser, url };
+    }
+  }
+  return undefined;
+}
+
+/** Whether `url` is a DevTools WebSocket on this machine (and on `port`, if given). */
+export function isLocalDevToolsUrl(url: string, port?: number): boolean {
+  const ws = URL.parse(url);
+  return (
+    ws?.protocol === "ws:" &&
+    ["127.0.0.1", "localhost"].includes(ws.hostname) &&
+    (port === undefined || ws.port === String(port))
+  );
+}
+
+const isAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 export type BrowserVersion = { Browser: string; webSocketDebuggerUrl: string };
 
@@ -47,9 +126,9 @@ export async function browserVersion(port: number): Promise<BrowserVersion | und
     return undefined;
   }
   // Only ever open a DevTools connection to the local browser we just asked.
-  const ws = URL.parse(version.webSocketDebuggerUrl ?? "");
-  const local = ws?.protocol === "ws:" && ["127.0.0.1", "localhost"].includes(ws.hostname) && ws.port === String(port);
-  if (!local) throw new Error(`port ${port} answered with an unexpected DevTools endpoint`);
+  if (!isLocalDevToolsUrl(version.webSocketDebuggerUrl ?? "", port)) {
+    throw new Error(`port ${port} answered with an unexpected DevTools endpoint`);
+  }
   return version;
 }
 
@@ -85,11 +164,77 @@ export async function launch(
   throw new Error(`${binary} started but is not answering on port ${port} after ${LAUNCH_TIMEOUT_MS / 1000}s`);
 }
 
+/** The connection to use: the daemon while connected to the user's browser, else the launched one. */
+async function browserEndpoint(state: State): Promise<string> {
+  if (state.daemonPid) {
+    if (isAlive(state.daemonPid)) return `unix:${socketPath}`;
+    Object.assign(state, { daemonPid: undefined, targetId: undefined, refs: {} });
+    throw new Error('the connection to your browser was closed; run "open-eyes connect" again');
+  }
+  const version = await browserVersion(state.port);
+  if (!version) throw new Error(`no browser on port ${state.port}; run "open-eyes launch" or "open-eyes connect" first`);
+  return version.webSocketDebuggerUrl;
+}
+
+/**
+ * Connects to the user's everyday browser at `endpoint` through a background daemon that
+ * holds the one approved connection. Returns the browser's name and version.
+ */
+export async function connectBrowser(state: State, endpoint: string): Promise<string> {
+  if (!isLocalDevToolsUrl(endpoint)) throw new Error(`refusing to connect to non-local endpoint ${endpoint}`);
+  if (state.daemonPid && isAlive(state.daemonPid)) {
+    throw new Error('already connected to a browser; run "open-eyes disconnect" first');
+  }
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const log = openSync(join(stateDir, "daemon.log"), "a");
+  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "__daemon", endpoint], {
+    detached: true,
+    stdio: ["ignore", log, log],
+  });
+  closeSync(log); // The daemon has its own copy.
+  let exited = false;
+  child.once("exit", () => (exited = true));
+
+  const deadline = Date.now() + CONNECT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (exited) {
+      throw new Error(`the browser refused or closed the connection; details in ${join(stateDir, "daemon.log")}`);
+    }
+    try {
+      const cdp = await CDP.connect(`unix:${socketPath}`);
+      try {
+        const { product } = await cdp.send<{ product: string }>("Browser.getVersion");
+        child.unref();
+        Object.assign(state, { daemonPid: child.pid, targetId: undefined, refs: {}, refsLoaderId: undefined });
+        return product;
+      } finally {
+        cdp.close();
+      }
+    } catch {
+      await sleep(250); // The daemon is still waiting for the user's approval.
+    }
+  }
+  child.kill();
+  throw new Error(`the connection was not approved within ${CONNECT_TIMEOUT_MS / 1000}s`);
+}
+
+/** Closes the agent window in the user's browser and stops the daemon. */
+export async function disconnectBrowser(state: State): Promise<boolean> {
+  const pid = state.daemonPid;
+  if (!pid || !isAlive(pid)) {
+    state.daemonPid = undefined;
+    return false;
+  }
+  await closeAgentWindow(state);
+  process.kill(pid, "SIGTERM");
+  for (let i = 0; i < 30 && isAlive(pid); i++) await sleep(100);
+  state.daemonPid = undefined;
+  return true;
+}
+
 /** Connects to the browser and attaches to the agent's window, opening one if needed. */
 export async function connectPage(state: State): Promise<{ cdp: CDP; page: Page }> {
-  const version = await browserVersion(state.port);
-  if (!version) throw new Error(`no browser on port ${state.port}; run "open-eyes launch" first`);
-  const cdp = await CDP.connect(version.webSocketDebuggerUrl);
+  const cdp = await CDP.connect(await browserEndpoint(state));
 
   const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string }[] }>(
     "Target.getTargets",
@@ -114,9 +259,10 @@ export async function connectPage(state: State): Promise<{ cdp: CDP; page: Page 
 }
 
 export async function closeAgentWindow(state: State): Promise<boolean> {
-  const version = await browserVersion(state.port);
-  if (!version || !state.targetId) return false;
-  const cdp = await CDP.connect(version.webSocketDebuggerUrl);
+  if (!state.targetId) return false;
+  const endpoint = await browserEndpoint(state).catch(() => undefined);
+  if (!endpoint) return false;
+  const cdp = await CDP.connect(endpoint);
   try {
     await cdp.send("Target.closeTarget", { targetId: state.targetId });
     return true;

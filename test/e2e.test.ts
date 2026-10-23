@@ -221,6 +221,29 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     }
   });
 
+  test("connect drives a browser through the daemon, and disconnect stops it", async () => {
+    const endpoint = (await browserVersion(port))!.webSocketDebuggerUrl;
+    assert.match(await cli("connect", "--endpoint", endpoint), /connected to .*Chrome/);
+    const { daemonPid } = JSON.parse(readFileSync(join(env.XDG_STATE_HOME, "open-eyes", "state.json"), "utf8"));
+    assert.ok(daemonPid > 0);
+    try {
+      assert.match(await cli("status"), /connected through the open-eyes daemon/);
+      await cli("open", fixture("form.html"));
+      const snapshot = await cli("snapshot");
+      await cli("fill", refOf(snapshot, 'textbox "Name"'), "Daemon");
+      assert.match(await cli("click", refOf(snapshot, 'button "Send"')), /Hello, Daemon/);
+      assert.match(await cliError("connect", "--endpoint", endpoint), /already connected/);
+    } finally {
+      assert.match(await cli("disconnect"), /disconnected/);
+    }
+    assert.throws(() => process.kill(daemonPid, 0), "the daemon should have exited");
+    assert.match(await cli("status"), new RegExp(`on port ${port}`));
+  });
+
+  test("connect refuses endpoints on other machines", async () => {
+    assert.match(await cliError("connect", "--endpoint", "ws://example.com:9222/devtools/browser/x"), /non-local/);
+  });
+
   test("screenshot writes a PNG", async () => {
     const file = await cli("screenshot", join(root, "shot.png"));
     assert.ok(existsSync(file));

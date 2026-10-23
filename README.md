@@ -9,7 +9,8 @@ agent with a terminal see and drive a **real, visible browser**, and lets **you 
 what it is doing** as it happens.
 
 - **Your browser, no fork.** Works with stock Chromium, Chrome, Brave, or Edge over the
-  Chrome DevTools Protocol.
+  Chrome DevTools Protocol. Use a dedicated profile (`launch`) or your everyday browser
+  with all your logins (`connect`).
 - **You can see the agent.** It works in its own window with a live overlay: a cursor
   that moves to each target, a highlight on the element it is about to touch, and a
   banner describing the step.
@@ -41,11 +42,26 @@ open-eyes click @12
 To use it from an agent, copy `skills/open-eyes` into your agent's skills directory
 (for Claude Code: `~/.claude/skills/open-eyes`).
 
+## Use your everyday browser
+
+Chrome 144+ (and Chromium, Brave, Edge) can let tools connect to the browser you already
+use:
+
+1. Open `chrome://inspect/#remote-debugging` and turn remote debugging on.
+2. Run `open-eyes connect` and approve the prompt in your browser.
+
+Chrome asks for approval on every new connection, so open-eyes keeps a single approved
+connection in a small background daemon and routes commands through a private local
+socket (readable only by your user). The agent works in its own window; your tabs are
+left alone. `open-eyes disconnect` closes that window and stops the daemon.
+
 ## Commands
 
 | Command | Does |
 |---|---|
 | `launch [--headless]` | Start a browser with the open-eyes profile (visible unless `--headless`) |
+| `connect [--browser <name>]` | Use your everyday browser, with your logins |
+| `disconnect` | Stop using your everyday browser |
 | `status` | Show the browser and the agent window |
 | `open <url>` | Open a URL in the agent window |
 | `snapshot` | Print the page as text; actionable elements get `@N` refs |
@@ -81,6 +97,5 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 
 ## Status
 
-Early MVP. Next up: attaching to your everyday browser profile, guardrails against
-prompt injection, snapshots inside iframes, and several parallel agent windows
-("spaces").
+Early MVP. Next up: guardrails against prompt injection, snapshots inside iframes, and
+several parallel agent windows ("spaces").

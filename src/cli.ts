@@ -1,9 +1,18 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { browserVersion, closeAgentWindow, connectPage, launch } from "./browser.ts";
+import {
+  browserVersion,
+  closeAgentWindow,
+  connectBrowser,
+  connectPage,
+  disconnectBrowser,
+  findEverydayBrowser,
+  launch,
+} from "./browser.ts";
+import { runDaemon } from "./daemon.ts";
 import type { Page } from "./page.ts";
 import { runScript } from "./run.ts";
-import { loadState, profileDir, saveState } from "./state.ts";
+import { loadState, profileDir, saveState, socketPath } from "./state.ts";
 
 const HELP = `open-eyes: give your AI agent eyes on a real browser, while you watch.
 
@@ -12,6 +21,11 @@ Usage: open-eyes <command> [args]
 Browser
   launch [--headless]    Start a visible browser with the open-eyes profile
                          (--headless: no window, for CI or background work)
+  connect                Use your everyday browser, with your logins, instead
+                         (enable it first at chrome://inspect/#remote-debugging)
+    --browser <name>     chrome, chromium, brave or edge (default: first found)
+    --endpoint <ws-url>  A local DevTools WebSocket URL to connect to directly
+  disconnect             Stop using your everyday browser
   status                 Show the browser and the agent window
   close                  Close the agent window
 
@@ -86,14 +100,21 @@ function need(arg: string | undefined, usage: string): string {
   return arg;
 }
 
+const CONNECT_HELP = `no browser with remote debugging enabled was found.
+In Chrome 144+ (or Chromium, Brave, Edge), open chrome://inspect/#remote-debugging,
+turn on remote debugging, and run "open-eyes connect" again.`;
+
 async function withPage(action: (page: Page) => Promise<unknown>): Promise<void> {
   const state = loadState();
-  const { cdp, page } = await connectPage(state);
   try {
-    print(await action(page));
+    const { cdp, page } = await connectPage(state);
+    try {
+      print(await action(page));
+    } finally {
+      cdp.close();
+    }
   } finally {
-    saveState(state);
-    cdp.close();
+    saveState(state); // Also when connecting failed: it may have learned the daemon is gone.
   }
 }
 
@@ -112,14 +133,41 @@ async function main([command, ...args]: string[]): Promise<void> {
     }
     case "status": {
       const state = loadState();
-      const version = await browserVersion(state.port);
-      if (!version) return print(`no browser on port ${state.port}; run "open-eyes launch"`);
-      print(`browser: ${version.Browser} on port ${state.port}`);
+      if (state.daemonPid) {
+        print(`browser: your everyday browser, connected through the open-eyes daemon (pid ${state.daemonPid})`);
+      } else {
+        const version = await browserVersion(state.port);
+        if (!version) return print(`no browser on port ${state.port}; run "open-eyes launch" or "open-eyes connect"`);
+        print(`browser: ${version.Browser} on port ${state.port}`);
+      }
       return withPage(async (page) => {
         const inControl = (await page.owner()) === "user" ? "the user" : "the agent";
         return `agent window: ${await page.url()}\nin control: ${inControl}`;
       });
     }
+    case "connect": {
+      const state = loadState();
+      const browser = takeOption(args, "--browser");
+      let endpoint = takeOption(args, "--endpoint");
+      let name = endpoint ?? "";
+      if (!endpoint) {
+        const found = findEverydayBrowser(browser);
+        if (!found) throw new Error(CONNECT_HELP);
+        ({ url: endpoint, name } = found);
+      }
+      console.error(`connecting to ${name}; approve the remote debugging prompt in your browser if it appears...`);
+      const product = await connectBrowser(state, endpoint);
+      saveState(state);
+      return print(`connected to ${product}. Agent commands now use your browser; "open-eyes disconnect" to stop.`);
+    }
+    case "disconnect": {
+      const state = loadState();
+      const disconnected = await disconnectBrowser(state);
+      saveState(state);
+      return print(disconnected ? "disconnected from your browser" : "not connected to a browser");
+    }
+    case "__daemon": // Started by "connect"; not for direct use.
+      return runDaemon(need(args[0], "__daemon <ws-url>"), socketPath);
     case "close": {
       const state = loadState();
       const closed = await closeAgentWindow(state);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +6,16 @@ import { join } from "node:path";
 export const stateDir = join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "open-eyes");
 export const profileDir = join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "open-eyes", "profile");
 const stateFile = join(stateDir, "state.json");
+
+/**
+ * Where the daemon listens. Runtime dirs are private and short (socket paths are limited
+ * to ~100 characters); the hash keeps separate state dirs, like test runs, apart.
+ */
+export const socketPath = (() => {
+  const id = createHash("sha256").update(stateDir).digest("hex").slice(0, 12);
+  if (process.platform === "win32") return `\\\\.\\pipe\\open-eyes-${id}`;
+  return join(process.env.XDG_RUNTIME_DIR ?? stateDir, `open-eyes-${id}.sock`);
+})();
 
 export type Ref = { backendNodeId: number; label: string };
 
@@ -19,6 +30,8 @@ export type State = {
   refsLoaderId?: string;
   /** Next ref number for this document; numbers are never reused within it. */
   nextRef?: number;
+  /** Set while connected to the user's browser through the daemon (`open-eyes connect`). */
+  daemonPid?: number;
 };
 
 const TARGET_ID = /^[0-9A-F]{32}$/i;
@@ -48,6 +61,7 @@ export function parseState(raw: unknown): Omit<State, "port"> & { port?: number 
     refs,
     refsLoaderId: typeof saved.refsLoaderId === "string" && TARGET_ID.test(saved.refsLoaderId) ? saved.refsLoaderId : undefined,
     nextRef: Number.isInteger(saved.nextRef) && (saved.nextRef as number) > 0 ? (saved.nextRef as number) : undefined,
+    daemonPid: Number.isInteger(saved.daemonPid) && (saved.daemonPid as number) > 0 ? (saved.daemonPid as number) : undefined,
   };
 }
 
@@ -66,6 +80,6 @@ export function loadState(): State {
 }
 
 export function saveState(state: State): void {
-  mkdirSync(stateDir, { recursive: true });
-  writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  writeFileSync(stateFile, JSON.stringify(state, null, 2), { mode: 0o600 });
 }
