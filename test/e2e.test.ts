@@ -320,6 +320,32 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("status"), /agent window: file:.*form\.html/);
   });
 
+  test("token usage is recorded per command and shown in the window", async () => {
+    await cli("usage", "reset");
+    assert.match(await cli("usage", "show"), /shown/);
+    await cli("open", fixture("form.html"));
+    const snapshot = await cli("snapshot");
+    await cli("fill", refOf(snapshot, 'textbox "Name"'), "super-secret-name");
+
+    const usage = await cli("usage");
+    assert.match(usage, /^open file:.*form\.html +\d+ tok/m);
+    assert.match(usage, /^snapshot +\d+ tok/m);
+    assert.match(usage, /^fill @\d+ +\d+ tok/m);
+    assert.match(usage, /total +[\d,]+ tok +in 3 actions/);
+    assert.doesNotMatch(usage, /super-secret-name/);
+
+    const human = await humanAt();
+    try {
+      const counter = `document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="usage"]')`;
+      assert.match(await human.evaluate(`${counter}?.textContent`), /last \d+ tok \u00B7 total [\d,]+ tok \u00B7 3 actions/);
+      await cli("usage", "hide");
+      assert.equal(await human.evaluate(`${counter}?.checkVisibility()`), false);
+    } finally {
+      human.close();
+    }
+    assert.match(await cli("usage", "reset"), /reset/);
+  });
+
   test("screenshot writes a PNG", async () => {
     const file = await cli("screenshot", join(root, "shot.png"));
     assert.ok(existsSync(file));

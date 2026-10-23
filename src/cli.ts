@@ -15,6 +15,7 @@ import { runDaemon } from "./daemon.ts";
 import type { Page } from "./page.ts";
 import { CONFIRM_MODES, loadPolicy, normalizeSite, policyFile, savePolicy, type ConfirmMode } from "./policy.ts";
 import { runScript } from "./run.ts";
+import { formatUsage, readUsage, recordUsage, resetUsage, usageSummary } from "./usage.ts";
 import { loadState, profileDir, saveState, socketPath } from "./state.ts";
 
 const HELP = `open-eyes: give your AI agent eyes on a real browser, while you watch.
@@ -64,6 +65,11 @@ Safety
   policy reset           Back to defaults: every site allowed, confirm risky
   log [--limit <n>]      Show the last actions the agent took (default 20)
 
+Token usage
+  usage [--limit <n>]    Tokens each recent command cost the agent (estimated)
+  usage show|hide        Show or hide the token counter in the agent window
+  usage reset            Start counting from zero
+
 Environment
   OPEN_EYES_PORT         Remote debugging port (default 9222)
   OPEN_EYES_BROWSER      Browser binary to launch
@@ -72,9 +78,14 @@ Environment
   OPEN_EYES_OBSERVE      Set to 0 to stop actions from reporting page changes
   OPEN_EYES_CONFIRM      Override the confirm mode (risky, always, never)`;
 
+function format(value: unknown): string {
+  if (value === undefined) return "";
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
 function print(value: unknown): void {
-  if (value === undefined) return;
-  console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
+  const text = format(value);
+  if (text) console.log(text);
 }
 
 /** Removes `--name <value>` from args and returns the value. */
@@ -118,16 +129,26 @@ const CONNECT_HELP = `no browser with remote debugging enabled was found.
 In Chrome 144+ (or Chromium, Brave, Edge), type chrome://inspect/#remote-debugging in the
 address bar, turn on remote debugging there, and run "open-eyes connect" again.`;
 
-async function withPage(action: (page: Page) => Promise<unknown>): Promise<void> {
+/**
+ * Runs a page command and records what it printed, which is what the agent reads and pays
+ * for in tokens. `label` names the command in `open-eyes usage`; it never holds typed text.
+ */
+async function withPage(label: string, action: (page: Page) => Promise<unknown>): Promise<void> {
   const state = loadState();
+  const started = Date.now();
+  let output = "";
+  let connection: Awaited<ReturnType<typeof connectPage>> | undefined;
   try {
-    const { cdp, page } = await connectPage(state);
-    try {
-      print(await action(page));
-    } finally {
-      cdp.close();
-    }
+    connection = await connectPage(state);
+    output = format(await action(connection.page));
+    if (output) console.log(output);
+  } catch (error) {
+    output = `error: ${(error as Error).message}`;
+    throw error;
   } finally {
+    const entry = recordUsage(label, output, Date.now() - started);
+    if (state.showTokens && connection) await connection.page.showUsage(usageSummary(entry)).catch(() => {});
+    connection?.cdp.close();
     saveState(state); // Also when connecting failed: it may have learned the daemon is gone.
   }
 }
@@ -221,6 +242,27 @@ async function main([command, ...args]: string[]): Promise<void> {
         ].join("\n"),
       );
     }
+    case "usage": {
+      const state = loadState();
+      const action = args[0];
+      if (action === "reset") {
+        resetUsage();
+        return print("token counter reset");
+      }
+      if (action === "show" || action === "hide") {
+        state.showTokens = action === "show" || undefined;
+        saveState(state);
+        if (action === "hide") {
+          // Take the counter off the window now instead of at the next command.
+          const { cdp, page } = await connectExistingPage(state).catch(() => ({ cdp: undefined, page: undefined }));
+          await page?.showUsage(null).catch(() => {});
+          cdp?.close();
+        }
+        return print(action === "show" ? "token counter shown in the agent window" : "token counter hidden");
+      }
+      if (action !== undefined && action !== "--limit") throw new Error(`unknown usage action "${action}"; see "open-eyes help"`);
+      return print(formatUsage(readUsage(), takeNumber(args, "--limit", 1) ?? 30));
+    }
     case "log": {
       const limit = takeNumber(args, "--limit", 1) ?? 20;
       const entries = readAudit(limit);
@@ -235,8 +277,9 @@ async function main([command, ...args]: string[]): Promise<void> {
       return print(closed ? "closed the agent window" : "no agent window to close");
     }
     case "open":
-      return withPage((page) => page.goto(need(args[0], "open <url>")));
+      return withPage(`open ${args[0] ?? ""}`, (page) => page.goto(need(args[0], "open <url>")));
     case "snapshot": {
+      const original = [...args];
       const options = {
         diff: takeFlag(args, "--diff"),
         find: takeOption(args, "--find"),
@@ -245,33 +288,33 @@ async function main([command, ...args]: string[]): Promise<void> {
         page: takeNumber(args, "--page", 1),
       };
       if (args.length) throw new Error(`unknown snapshot option "${args[0]}"; see "open-eyes help"`);
-      return withPage((page) => page.snapshot(options));
+      return withPage(`snapshot ${original.join(" ")}`.trim(), (page) => page.snapshot(options));
     }
     case "click":
-      return withPage((page) => page.click(need(args[0], "click <@N>")));
+      return withPage(`click ${args[0] ?? ""}`, (page) => page.click(need(args[0], "click <@N>")));
     case "fill": {
       const ref = need(args[0], "fill <@N> <text>");
-      return withPage((page) => page.fill(ref, args.slice(1).join(" ")));
+      return withPage(`fill ${ref}`, (page) => page.fill(ref, args.slice(1).join(" ")));
     }
     case "press":
-      return withPage((page) => page.press(need(args[0], "press <key>")));
+      return withPage(`press ${args[0] ?? ""}`, (page) => page.press(need(args[0], "press <key>")));
     case "screenshot":
-      return withPage((page) => page.screenshot(args[0]));
+      return withPage("screenshot", (page) => page.screenshot(args[0]));
     case "eval":
-      return withPage((page) => page.eval(need(args[0], "eval <js>")));
+      return withPage("eval", (page) => page.eval(need(args[0], "eval <js>")));
     case "run": {
       const file = need(args[0], "run <file|->");
       const source = readFileSync(file === "-" ? 0 : file, "utf8");
-      return withPage((page) => runScript(page, source));
+      return withPage(`run ${file}`, (page) => runScript(page, source));
     }
     case "handoff": {
       const timeout = takeTimeout(args);
       const message = need(args.join(" ") || undefined, "handoff <message> [--timeout <seconds>]");
-      return withPage((page) => page.handoff(message, timeout));
+      return withPage("handoff", (page) => page.handoff(message, timeout));
     }
     case "wait": {
       const timeout = takeTimeout(args);
-      return withPage((page) => page.handoff(undefined, timeout));
+      return withPage("wait", (page) => page.handoff(undefined, timeout));
     }
     case undefined:
     case "help":

@@ -266,6 +266,11 @@ export class Page {
     throw new Error(`the user has not handed control back after ${timeoutMs / 1000}s; run "open-eyes wait" to keep waiting`);
   }
 
+  /** Shows the token counter in the agent window, or hides it with null. */
+  async showUsage(text: string | null): Promise<void> {
+    await this.#overlay({ type: "usage", text });
+  }
+
   async owner(): Promise<Owner> {
     return ((await this.#evaluate(OWNER_EXPRESSION).catch(() => null)) as Owner) ?? null;
   }

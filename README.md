@@ -101,6 +101,7 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `wait` | Wait until the user hands back control they took |
 | `policy [allow\|block\|remove\|confirm\|reset]` | Show or change which sites are allowed and what needs approval |
 | `log` | Show the last actions the agent took |
+| `usage [show\|hide\|reset]` | Tokens each command cost the agent; `show` puts a live counter in the agent window |
 | `close` | Close the agent window |
 
 Set `OPEN_EYES_SLOWMO=0` to drop the pause that lets you follow each action.
