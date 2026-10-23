@@ -52,8 +52,9 @@ user may have navigated.
 ## Core loop
 
 1. `open-eyes open <url>`
-2. `open-eyes snapshot`: the page as indented text. Every actionable element ends with
-   a ref like `@7`. An element keeps its ref while the page stays loaded.
+2. `open-eyes snapshot`: the page as indented text, one element per line as
+   `role name [states] @N` (for example `button Save @3`); quoted lines are plain text.
+   An element keeps its ref while the page stays loaded.
 3. Act with refs: `open-eyes click @7`, `open-eyes fill @3 "some text"`, `open-eyes press Enter`.
    Each action prints the **changes** it caused (`+` added, `-` removed, under their
    parent), so you usually do not need another snapshot.
