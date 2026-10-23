@@ -21,7 +21,6 @@ open-eyes is pre-1.0. Only the latest release on `main` receives security fixes.
   protect against pages steering the agent. They are not a sandbox: an agent that is
   itself compromised can edit the policy file. Reports of ways for a *page* to bypass
   them are in scope.
-
 - open-eyes connects to the browser's remote debugging port on `127.0.0.1`. Anything
   that can reach that port can control the browser; do not expose it to a network.
 - Scripts passed to `open-eyes run` execute with your user's permissions, the same as
