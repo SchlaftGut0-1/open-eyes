@@ -234,28 +234,35 @@ export async function disconnectBrowser(state: State): Promise<boolean> {
 
 /** Connects to the browser and attaches to the agent's window, opening one if needed. */
 export async function connectPage(state: State): Promise<{ cdp: CDP; page: Page }> {
-  const cdp = await CDP.connect(await browserEndpoint(state));
+  const { cdp, page } = await connectExistingPage(state);
+  if (page) return { cdp, page };
+  const { targetId } = await cdp.send<{ targetId: string }>("Target.createTarget", {
+    url: "about:blank",
+    newWindow: true,
+  });
+  Object.assign(state, { targetId, refs: {} });
+  return { cdp, page: await attach(cdp, targetId, state) };
+}
 
+/** Like connectPage, but never opens a window: `page` is undefined when there is none. */
+export async function connectExistingPage(state: State): Promise<{ cdp: CDP; page?: Page }> {
+  const cdp = await CDP.connect(await browserEndpoint(state));
   const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string }[] }>(
     "Target.getTargets",
   );
-  let targetId = state.targetId;
+  const { targetId } = state;
   if (!targetId || !targetInfos.some((t) => t.targetId === targetId && t.type === "page")) {
-    ({ targetId } = await cdp.send<{ targetId: string }>("Target.createTarget", {
-      url: "about:blank",
-      newWindow: true,
-    }));
-    state.targetId = targetId;
-    state.refs = {};
+    Object.assign(state, { targetId: undefined, refs: {} });
+    return { cdp };
   }
+  return { cdp, page: await attach(cdp, targetId, state) };
+}
 
-  const { sessionId } = await cdp.send<{ sessionId: string }>("Target.attachToTarget", {
-    targetId,
-    flatten: true,
-  });
+async function attach(cdp: CDP, targetId: string, state: State): Promise<Page> {
+  const { sessionId } = await cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
   const page = new Page(cdp, sessionId, state);
   await page.init();
-  return { cdp, page };
+  return page;
 }
 
 export async function closeAgentWindow(state: State): Promise<boolean> {
