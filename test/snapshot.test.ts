@@ -3,16 +3,21 @@ import { describe, test } from "node:test";
 import fc from "fast-check";
 import { formatSnapshot, type AXNode } from "../src/snapshot.ts";
 
-type Spec = { role: string; name: string; children: Spec[] } & Omit<Partial<AXNode>, "role" | "name" | "childIds">;
+type Spec = { role: string; name: string; sources?: NonNullable<AXNode["name"]>["sources"]; children: Spec[] } & Omit<
+  Partial<AXNode>,
+  "role" | "name" | "childIds"
+>;
 
-const el = (role: string, name = "", extra: Partial<AXNode> = {}, children: Spec[] = []): Spec =>
-  ({ ...extra, role, name, children }) as Spec;
+const el = (role: string, name = "", extra: Partial<AXNode> = {}, children: Spec[] = []): Spec => {
+  const { name: nameInfo, ...rest } = extra;
+  return { ...rest, role, name, sources: nameInfo?.sources, children } as Spec;
+};
 
 /** Flattens a nested spec into the node list Chromium returns, root first. */
 function page(...children: Spec[]): AXNode[] {
   const nodes: AXNode[] = [];
-  const add = ({ role, name, children, ...extra }: Spec): string => {
-    const node: AXNode = { nodeId: String(nodes.length), ignored: false, ...extra, role: { value: role }, name: { value: name } };
+  const add = ({ role, name, sources, children, ...extra }: Spec): string => {
+    const node: AXNode = { nodeId: String(nodes.length), ignored: false, ...extra, role: { value: role }, name: { value: name, sources } };
     nodes.push(node);
     node.childIds = children.map(add);
     return node.nodeId;
@@ -102,6 +107,54 @@ describe("formatSnapshot", () => {
       page(el("list", "", {}, [el("listitem", "", {}, [el("link", "One", { backendDOMNodeId: 1 })])]), el("table", "Prices")),
     );
     assert.equal(text, ["link One @1", "table Prices"].join("\n"));
+  });
+
+  test("drops list bullets, separators and decorative images", () => {
+    const { text } = formatSnapshot(
+      page(
+        el("ListMarker", "•", {}, [el("StaticText", "•")]),
+        el("StaticText", "Item"),
+        el("separator"),
+        el("image"),
+        el("image", "Company logo"),
+        el("link", "", { backendDOMNodeId: 1 }, [el("image")]),
+      ),
+    );
+    assert.equal(text, ['"Item"', "image Company logo", "link @1"].join("\n"));
+  });
+
+  test("keeps citations as one clickable line", () => {
+    const { text } = formatSnapshot(page(el("StaticText", "A claim."), el("superscript", "", {}, [el("link", "[1]", { backendDOMNodeId: 1 })])));
+    assert.equal(text, ['"A claim."', 'link "[1]" @1'].join("\n"));
+  });
+
+  test("drops a label that repeats the element right before it", () => {
+    const { text } = formatSnapshot(
+      page(
+        el("radio", "Small", { backendDOMNodeId: 1 }),
+        el("StaticText", "Small"),
+        el("radio", "Large", { backendDOMNodeId: 2 }),
+        el("StaticText", "Large print is easier to read"),
+      ),
+    );
+    assert.equal(text, ["radio Small @1", "radio Large @2", '"Large print is easier to read"'].join("\n"));
+  });
+
+  test("dissolves cells named after their own content, keeps names set on purpose", () => {
+    const fromContents = { sources: [{ type: "contents", value: { value: "x" } }] };
+    const fromLabel = { sources: [{ type: "attribute", attributeValue: { value: "x" } }, { type: "contents", superseded: true, value: { value: "x" } }] };
+    const { text } = formatSnapshot(
+      page(
+        el("cell", "512 points by Jowsey | hide", { name: { value: "512 points by Jowsey | hide", ...fromContents } }, [
+          el("StaticText", "512 points by"),
+          el("link", "Jowsey", { backendDOMNodeId: 1 }),
+          el("StaticText", "|"),
+          el("link", "hide", { backendDOMNodeId: 2 }),
+        ]),
+        el("cell", "Votes", { name: { value: "Votes", ...fromLabel } }, [el("link", "up", { backendDOMNodeId: 3 })]),
+      ),
+    );
+    assert.equal(text, ['"512 points by"', "link Jowsey @1", "link hide @2", "cell Votes", "  link up @3"].join("\n"));
   });
 
   test("truncates long text", () => {
