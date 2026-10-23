@@ -95,6 +95,7 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `click <@N>` | Click an element |
 | `fill <@N> <text>` | Replace a field's content |
 | `press <key>` | Press a key |
+| `scroll [@N] [down\|up] [pixels]` | Scroll the page, or the list holding `@N`, and show what is on screen |
 | `screenshot [path]` | Save a PNG and print its path |
 | `eval <js>` | Evaluate JavaScript in the page |
 | `run <file\|->` | Run a multi-step script with `page` in scope |
