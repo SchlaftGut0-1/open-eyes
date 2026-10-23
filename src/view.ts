@@ -107,3 +107,43 @@ export function diffLines(before: string[], after: string[], maxCells = 4_000_00
   }
   return out;
 }
+
+/** Where a line's element is relative to the viewport; undefined when it has no box. */
+export type Position = "above" | "below" | "beside" | "visible" | undefined;
+
+const LANDMARKS = new Set(["banner", "navigation", "main", "contentinfo", "complementary", "search", "form", "dialog", "region"]);
+const MAX_OUTLINE = 40;
+
+/**
+ * The lines on screen, each with its ancestors for context, and an outline of the headings
+ * and landmarks elsewhere so the agent knows what else the page holds.
+ */
+export function viewportView(
+  lines: string[],
+  roles: string[],
+  positions: Position[],
+): { shown: string[]; hidden: number; outline: string[] } {
+  const keep = new Set<number>();
+  positions.forEach((position, i) => {
+    if (position !== "visible") return;
+    for (let at = i; at !== -1 && !keep.has(at); at = parentIndex(lines, at)) keep.add(at);
+  });
+  const nameOf = (i: number) => lines[i].trim().replace(/^\S+ ?/, "");
+  const headings = new Set(lines.flatMap((_, i) => (roles[i] === "heading" ? [nameOf(i)] : [])));
+  const outline = lines.flatMap((line, i) => {
+    const where = positions[i];
+    if (keep.has(i) || (where !== "above" && where !== "below")) return [];
+    const landmark = LANDMARKS.has(roles[i]) && nameOf(i) !== "";
+    // Sections are often a region named after their heading; list the heading once.
+    if (roles[i] !== "heading" && !(landmark && !headings.has(nameOf(i)))) return [];
+    return [`${line.trim()} (${where})`];
+  });
+  return {
+    shown: [...keep].sort((a, b) => a - b).map((i) => lines[i]),
+    hidden: lines.length - keep.size,
+    outline:
+      outline.length > MAX_OUTLINE
+        ? [...outline.slice(0, MAX_OUTLINE), `… ${outline.length - MAX_OUTLINE} more headings`]
+        : outline,
+  };
+}

@@ -35,8 +35,10 @@ Browser
 
 Page (works in the agent's own window)
   open <url>             Open a URL
-  snapshot               Print the page as text; actionable elements get @N refs,
-                         which stay the same for an element while the page is loaded
+  snapshot               Print what is on screen as text, plus an outline of the rest;
+                         actionable elements get @N refs, which stay the same for an
+                         element while the page is loaded
+    --full               The whole page instead of what is on screen
     --diff               Only what changed since the last snapshot
     --find <text>        Only lines containing <text>, with their parents
     --scope <@N>         Only the element @N and what is inside it
@@ -281,6 +283,7 @@ async function main([command, ...args]: string[]): Promise<void> {
     case "snapshot": {
       const original = [...args];
       const options = {
+        full: takeFlag(args, "--full"),
         diff: takeFlag(args, "--diff"),
         find: takeOption(args, "--find"),
         scope: takeOption(args, "--scope"),

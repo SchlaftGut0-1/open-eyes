@@ -6,9 +6,9 @@ import { audit, type AuditEntry } from "./audit.ts";
 import type { CDP } from "./cdp.ts";
 import { decisionExpression, OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
 import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
-import { formatSnapshot, type AXNode } from "./snapshot.ts";
+import { formatSnapshot, type AXNode, type LineNode } from "./snapshot.ts";
 import { stateDir, type Ref, type State } from "./state.ts";
-import { diffLines, findLines, paginate, subtree } from "./view.ts";
+import { diffLines, findLines, paginate, subtree, viewportView, type Position } from "./view.ts";
 
 export type Box = { x: number; y: number; width: number; height: number };
 
@@ -24,6 +24,8 @@ const OBSERVE_LIMIT = 80;
 const baselineFile = join(stateDir, "snapshot.txt");
 
 export type SnapshotOptions = {
+  /** The whole page instead of what is on screen. */
+  full?: boolean;
   /** Only what changed since the last snapshot of this page. */
   diff?: boolean;
   /** Page size in lines; 0 shows everything. */
@@ -120,9 +122,28 @@ export class Page {
 
   async snapshot(options: SnapshotOptions = {}): Promise<string> {
     await this.#guard();
-    const { lines, previous } = await this.#capture();
+    const { lines, previous, lineNodes } = await this.#capture();
+    let header = "";
     let body: string[];
-    if (options.diff) {
+    let footer: string[] = [];
+    if (!options.full && !options.diff && !options.scope && !options.find) {
+      // The default: what the user would see, which is usually what the agent needs.
+      const { positions, viewport } = await this.#positions(lineNodes);
+      const { shown, hidden, outline } = viewportView(lines, lineNodes.map((n) => n.role), positions);
+      body = shown;
+      if (viewport.pageHeight > viewport.height) {
+        const percent = Math.round((100 * viewport.height) / viewport.pageHeight);
+        header = `\non screen: ${viewport.top}-${viewport.top + viewport.height} px of ${viewport.pageHeight.toLocaleString("en-US")} (${percent}%)`;
+      }
+      if (hidden) {
+        footer = [
+          "",
+          `off screen: ${hidden.toLocaleString("en-US")} more lines${outline.length ? ". Outline:" : ""}`,
+          ...outline,
+          "search them with --find <text>, or see everything with --full",
+        ];
+      }
+    } else if (options.diff) {
       const changes = previous && diffLines(previous, lines);
       if (!previous) body = ["(first snapshot of this page, so all of it)", ...lines];
       else if (!changes) body = ["(too many changes to diff, so all of it)", ...lines];
@@ -135,8 +156,8 @@ export class Page {
       }
     }
     const title = await this.#evaluate("document.title");
-    const shown = paginate(body, options.limit ?? SNAPSHOT_LIMIT, options.page);
-    return `url: ${await this.url()}\ntitle: ${JSON.stringify(title)}\n\n${shown.join("\n")}`;
+    const shown = [...paginate(body, options.limit ?? SNAPSHOT_LIMIT, options.page), ...footer];
+    return `url: ${await this.url()}\ntitle: ${JSON.stringify(title)}${header}\n\n${shown.join("\n")}`;
   }
 
   click(ref: string): Promise<string> {
@@ -299,7 +320,7 @@ export class Page {
    * Reads the page and numbers its elements, keeping the refs of elements already seen
    * on this document. Returns the lines and, for the same document, the previous ones.
    */
-  async #capture(): Promise<{ lines: string[]; previous?: string[] }> {
+  async #capture(): Promise<{ lines: string[]; previous?: string[]; lineNodes: LineNode[] }> {
     const loaderId = await this.#loaderId();
     const sameDocument = this.#state.refsLoaderId === loaderId;
     const byNode = new Map<number, number>();
@@ -308,7 +329,7 @@ export class Page {
     }
     await this.#send("Accessibility.enable");
     const { nodes } = await this.#send<{ nodes: AXNode[] }>("Accessibility.getFullAXTree");
-    const { text, refs, nextRef } = formatSnapshot(nodes, {
+    const { text, refs, nextRef, lineNodes } = formatSnapshot(nodes, {
       byNode,
       nextRef: sameDocument ? (this.#state.nextRef ?? 1) : 1,
     });
@@ -325,7 +346,39 @@ export class Page {
     Object.assign(this.#state, { refs, refsLoaderId: loaderId, nextRef });
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(baselineFile, text);
-    return { lines: text ? text.split("\n") : [], previous };
+    return { lines: text ? text.split("\n") : [], previous, lineNodes };
+  }
+
+  /** Where each line's element is relative to the viewport, from the page's layout. */
+  async #positions(lineNodes: LineNode[]): Promise<{
+    positions: Position[];
+    viewport: { top: number; height: number; pageHeight: number };
+  }> {
+    const [left, top, width, height, pageHeight] = (await this.#evaluate(
+      "[scrollX, scrollY, innerWidth, innerHeight, document.documentElement.scrollHeight]",
+    )) as number[];
+    // Layout bounds are in page coordinates; fixed elements appear at the current scroll.
+    const { documents } = await this.#send<{
+      documents: { nodes: { backendNodeId: number[] }; layout: { nodeIndex: number[]; bounds: number[][] } }[];
+    }>("DOMSnapshot.captureSnapshot", { computedStyles: [] });
+    const main = documents[0];
+    const boxes = new Map<number, [number, number, number, number]>(); // left, top, right, bottom
+    main?.layout.nodeIndex.forEach((nodeIndex, i) => {
+      const [x, y, w, h] = main.layout.bounds[i];
+      if (w <= 0 && h <= 0) return;
+      const id = main.nodes.backendNodeId[nodeIndex];
+      const box = boxes.get(id);
+      boxes.set(id, box ? [Math.min(box[0], x), Math.min(box[1], y), Math.max(box[2], x + w), Math.max(box[3], y + h)] : [x, y, x + w, y + h]);
+    });
+    const positions = lineNodes.map(({ backendNodeId }): Position => {
+      const box = backendNodeId === undefined ? undefined : boxes.get(backendNodeId);
+      if (!box) return undefined;
+      if (box[3] <= top) return "above";
+      if (box[1] >= top + height) return "below";
+      if (box[2] <= left || box[0] >= left + width) return "beside";
+      return "visible";
+    });
+    return { positions, viewport: { top: Math.round(top), height: Math.round(height), pageHeight: Math.round(pageHeight) } };
   }
 
   /** What an action changed, so the agent rarely needs a separate snapshot. */

@@ -52,7 +52,7 @@ user may have navigated.
 ## Core loop
 
 1. `open-eyes open <url>`
-2. `open-eyes snapshot`: the page as indented text, one element per line as
+2. `open-eyes snapshot`: what is on screen as indented text, one element per line as
    `role name [states] @N` (for example `button Save @3`); quoted lines are plain text.
    An element keeps its ref while the page stays loaded.
 3. Act with refs: `open-eyes click @7`, `open-eyes fill @3 "some text"`, `open-eyes press Enter`.
@@ -63,15 +63,17 @@ user may have navigated.
 
 ## Keep snapshots small
 
-Snapshots are capped at 400 lines per page. Prefer narrow views over reading everything:
+`snapshot` shows only what is on screen, plus an outline of the headings above and below.
+To look elsewhere, prefer narrow views over reading everything:
 
 | Command | Shows |
 |---|---|
-| `snapshot --find "<text>"` | Only lines containing the text, with their parents. Best way to locate an element |
+| `snapshot --find "<text>"` | Lines anywhere on the page containing the text, with their parents. Best way to locate an element |
 | `snapshot --scope @N` | Only element `@N` and what is inside it (a form, a list, a dialog) |
 | `snapshot --diff` | Only what changed since your last snapshot |
-| `snapshot --page 2` | The next page of a long snapshot |
-| `snapshot --limit 0` | Everything (expensive on big pages) |
+| `snapshot --full` | The whole page, 400 lines per page (`--page 2` for more, `--limit 0` for all; expensive) |
+
+You can click any ref, even off screen: the page scrolls to it.
 
 Use `open-eyes screenshot` when layout or visuals matter (it prints a PNG path you can
 read). Prefer `snapshot` for everything else: it is far cheaper.

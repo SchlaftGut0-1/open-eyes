@@ -360,6 +360,26 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("usage", "reset"), /reset/);
   });
 
+  test("the default snapshot shows what is on screen and outlines the rest", async () => {
+    await cli("open", fixture("tall.html"));
+    const onScreen = await cli("snapshot");
+    assert.match(onScreen, /^on screen: 0-\d+ px of [\d,]+ \(\d+%\)$/m);
+    assert.match(onScreen, /heading Top/);
+    assert.match(onScreen, /link Home @\d+/);
+    assert.doesNotMatch(onScreen, /Bottom button/);
+    assert.match(onScreen, /^heading Bottom \(below\)$/m);
+    assert.match(onScreen, /--full/);
+
+    assert.match(await cli("snapshot", "--full"), /button Bottom button @\d+/);
+    const button = refOf(await cli("snapshot", "--find", "Bottom button"), "button Bottom button");
+    assert.match(await cli("click", button), /clicked button "Bottom button"/);
+
+    // The click scrolled the button into view: now the top is off screen.
+    const scrolled = await cli("snapshot");
+    assert.match(scrolled, /button Pressed (\[focused\] )?@\d+/);
+    assert.match(scrolled, /^heading Top \(above\)$/m);
+  });
+
   test("screenshot writes a PNG", async () => {
     const file = await cli("screenshot", join(root, "shot.png"));
     assert.ok(existsSync(file));
