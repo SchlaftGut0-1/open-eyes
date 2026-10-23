@@ -13,6 +13,9 @@ what it is doing** as it happens.
 - **You can see the agent.** It works in its own window with a live overlay: a cursor
   that moves to each target, a highlight on the element it is about to touch, and a
   banner describing the step.
+- **Take control any time.** Press **Take control** in the agent's window to pause it,
+  do what you need, and hand it back. Agents can also ask for help with
+  `open-eyes handoff "Please log in"` and wait for you.
 - **Cheap eyes.** `snapshot` turns the page into compact text with `@N` refs, so the
   model reads structure instead of burning tokens on screenshots. Screenshots are there
   when visuals matter.
@@ -50,6 +53,8 @@ To use it from an agent, copy `skills/open-eyes` into your agent's skills direct
 | `screenshot [path]` | Save a PNG and print its path |
 | `eval <js>` | Evaluate JavaScript in the page |
 | `run <file\|->` | Run a multi-step script with `page` in scope |
+| `handoff <message>` | Ask the user to take over, wait until they hand control back |
+| `wait` | Wait until the user hands back control they took |
 | `close` | Close the agent window |
 
 Set `OPEN_EYES_SLOWMO=0` to drop the pause that lets you follow each action.
@@ -73,6 +78,6 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 
 ## Status
 
-Early MVP. Next up: snapshots inside iframes, handing control back and forth between
-you and the agent, several parallel agent windows ("spaces"), and attaching to your
-everyday browser profile.
+Early MVP. Next up: smaller snapshots (diffs and size limits), attaching to your
+everyday browser profile, guardrails against prompt injection, snapshots inside
+iframes, and several parallel agent windows ("spaces").

@@ -25,6 +25,12 @@ Page (works in the agent's own window)
   eval <js>              Evaluate a JavaScript expression in the page
   run <file|->           Run a script with \`page\` in scope (- reads stdin)
 
+Working with the user
+  handoff <message>      Ask the user to take over (log in, solve a captcha...)
+                         and wait until they hand control back
+  wait                   Wait until the user hands back control they took
+                         Both accept --timeout <seconds> (default 600)
+
 Environment
   OPEN_EYES_PORT         Remote debugging port (default 9222)
   OPEN_EYES_BROWSER      Browser binary to launch
@@ -33,6 +39,16 @@ Environment
 function print(value: unknown): void {
   if (value === undefined) return;
   console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
+}
+
+/** Removes `--timeout <seconds>` from args and returns it in milliseconds. */
+function takeTimeout(args: string[]): number | undefined {
+  const i = args.indexOf("--timeout");
+  if (i === -1) return undefined;
+  const seconds = Number(args[i + 1]);
+  if (!(seconds > 0)) throw new Error("--timeout needs a number of seconds");
+  args.splice(i, 2);
+  return seconds * 1000;
 }
 
 function need(arg: string | undefined, usage: string): string {
@@ -69,7 +85,10 @@ async function main([command, ...args]: string[]): Promise<void> {
       const version = await browserVersion(state.port);
       if (!version) return print(`no browser on port ${state.port}; run "open-eyes launch"`);
       print(`browser: ${version.Browser} on port ${state.port}`);
-      return withPage(async (page) => `agent window: ${await page.url()}`);
+      return withPage(async (page) => {
+        const inControl = (await page.owner()) === "user" ? "the user" : "the agent";
+        return `agent window: ${await page.url()}\nin control: ${inControl}`;
+      });
     }
     case "close": {
       const state = loadState();
@@ -97,6 +116,15 @@ async function main([command, ...args]: string[]): Promise<void> {
       const file = need(args[0], "run <file|->");
       const source = readFileSync(file === "-" ? 0 : file, "utf8");
       return withPage((page) => runScript(page, source));
+    }
+    case "handoff": {
+      const timeout = takeTimeout(args);
+      const message = need(args.join(" ") || undefined, "handoff <message> [--timeout <seconds>]");
+      return withPage((page) => page.handoff(message, timeout));
+    }
+    case "wait": {
+      const timeout = takeTimeout(args);
+      return withPage((page) => page.handoff(undefined, timeout));
     }
     case undefined:
     case "help":

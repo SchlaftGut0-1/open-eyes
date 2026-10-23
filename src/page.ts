@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { CDP } from "./cdp.ts";
-import { overlayExpression, type OverlayAction } from "./overlay.ts";
+import { OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
 import { formatSnapshot, type AXNode } from "./snapshot.ts";
 import { stateDir, type Ref, type State } from "./state.ts";
 
@@ -10,6 +10,9 @@ export type Box = { x: number; y: number; width: number; height: number };
 
 /** Pause after showing an action so the human can follow along. 0 disables it. */
 const SLOWMO_MS = Number(process.env.OPEN_EYES_SLOWMO ?? 400);
+
+const USER_IN_CONTROL =
+  'the user has taken control of the agent window; run "open-eyes wait" to wait until they hand it back';
 
 const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
   Enter: { code: "Enter", keyCode: 13, text: "\r" },
@@ -58,13 +61,13 @@ export class Page {
 
   async goto(url: string): Promise<string> {
     const target = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`;
-    await this.#show({ label: `opening ${target}` });
+    await this.#announce({ label: `opening ${target}` });
     const { errorText } = await this.#send<{ errorText?: string }>("Page.navigate", { url: target });
     if (errorText) throw new Error(`could not open ${target}: ${errorText}`);
     this.#state.refs = {};
     await this.#settle(30_000);
     const current = await this.url();
-    await this.#show({ label: `on ${current}` }, false);
+    await this.#announce({ label: `on ${current}` }, false);
     return current;
   }
 
@@ -83,11 +86,12 @@ export class Page {
     const box = await this.#locate(backendNodeId, ref);
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
-    await this.#show({ label: `click ${label}`, x, y, box });
+    await this.#announce({ label: `click ${label}`, x, y, box, busy: true });
     await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
     for (const type of ["mousePressed", "mouseReleased"]) {
       await this.#send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
     }
+    await this.#overlay({ type: "idle" });
     await sleep(150);
     await this.#settle(10_000);
     return `clicked ${label}`;
@@ -96,7 +100,7 @@ export class Page {
   async fill(ref: string, text: string): Promise<string> {
     const { backendNodeId, label } = await this.#resolve(ref);
     const box = await this.#locate(backendNodeId, ref);
-    await this.#show({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2, box });
+    await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2, box });
     await this.#send("DOM.focus", { backendNodeId });
     const { object } = await this.#send<{ object: { objectId: string } }>("DOM.resolveNode", { backendNodeId });
     await this.#send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: SELECT_CONTENTS });
@@ -109,7 +113,7 @@ export class Page {
   async press(key: string, announce = true): Promise<string> {
     const def = KEYS[key] ?? (key.length === 1 ? { code: "", keyCode: key.toUpperCase().charCodeAt(0), text: key } : null);
     if (!def) throw new Error(`unknown key "${key}"; use a single character or one of: ${Object.keys(KEYS).join(", ")}`);
-    if (announce) await this.#show({ label: `press ${key}` });
+    if (announce) await this.#announce({ label: `press ${key}` });
     const common = { key: key === "Space" ? " " : key, code: def.code, windowsVirtualKeyCode: def.keyCode };
     await this.#send("Input.dispatchKeyEvent", { type: def.text ? "keyDown" : "rawKeyDown", text: def.text, ...common });
     await this.#send("Input.dispatchKeyEvent", { type: "keyUp", ...common });
@@ -120,13 +124,13 @@ export class Page {
   /** Saves a PNG of the visible page (without the overlay) and returns its path. */
   async screenshot(path?: string): Promise<string> {
     const file = path ?? join(stateDir, "screenshots", `${new Date().toISOString().replace(/[:.]/g, "-")}.png`);
-    await this.#evaluate(overlayExpression(null));
+    await this.#overlay({ type: "hide" });
     try {
       const { data } = await this.#send<{ data: string }>("Page.captureScreenshot", { format: "png" });
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, Buffer.from(data, "base64"));
     } finally {
-      await this.#show({ label: "took a screenshot" }, false);
+      await this.#overlay({ type: "show" });
     }
     return file;
   }
@@ -137,7 +141,7 @@ export class Page {
   }
 
   async waitForText(text: string, timeoutMs = 10_000): Promise<void> {
-    await this.#show({ label: `waiting for "${text}"` });
+    await this.#announce({ label: `waiting for "${text}"` });
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const found = await this.#evaluate(`document.body?.innerText.includes(${JSON.stringify(text)})`).catch(() => false);
@@ -149,6 +153,28 @@ export class Page {
 
   wait(ms: number): Promise<void> {
     return sleep(ms);
+  }
+
+  /**
+   * Waits until the user hands control back. With a message, first asks the user for help
+   * (log in, solve a captcha...); without one, waits only if the user took control.
+   */
+  async handoff(message: string | undefined, timeoutMs = 600_000): Promise<string> {
+    const owner = await this.#overlay(message === undefined ? { type: "show" } : { type: "handoff", message });
+    if (owner !== "user") return "the agent is in control; the user has not taken over";
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await sleep(500);
+      // A navigation wipes the page's memory of who is in control: claim it again for the user.
+      if ((await this.#overlay({ type: "claim", message })) === "agent") {
+        return `the user handed control back; now on ${await this.url()}. Take a new snapshot before acting.`;
+      }
+    }
+    throw new Error(`the user has not handed control back after ${timeoutMs / 1000}s; run "open-eyes wait" to keep waiting`);
+  }
+
+  async owner(): Promise<Owner> {
+    return ((await this.#evaluate(OWNER_EXPRESSION).catch(() => null)) as Owner) ?? null;
   }
 
   async url(): Promise<string> {
@@ -171,9 +197,14 @@ export class Page {
     return result.value;
   }
 
-  async #show(action: OverlayAction, pause = true): Promise<void> {
-    // The overlay is a courtesy to the human watching; never fail an action over it.
-    await this.#evaluate(overlayExpression(action)).catch(() => {});
+  /** Updates the overlay and returns who is in control; never fails over drawing. */
+  async #overlay(cmd: OverlayCommand): Promise<Owner> {
+    return ((await this.#evaluate(overlayExpression(cmd)).catch(() => null)) as Owner) ?? null;
+  }
+
+  /** Shows the next action to the human, or refuses it if the human is in control. */
+  async #announce(action: OverlayAction & { busy?: boolean }, pause = true): Promise<void> {
+    if ((await this.#overlay({ type: "action", ...action })) === "user") throw new Error(USER_IN_CONTROL);
     if (pause && SLOWMO_MS > 0) await sleep(SLOWMO_MS);
   }
 
