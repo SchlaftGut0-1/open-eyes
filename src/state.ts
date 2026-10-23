@@ -19,18 +19,47 @@ export type State = {
   refsLoaderId?: string;
 };
 
+const TARGET_ID = /^[0-9A-F]{32}$/i;
+
+export function parsePort(value: unknown): number | undefined {
+  const port = Number(value);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
+}
+
+/**
+ * Reads the state file, keeping only well-formed fields. The file feeds values into
+ * browser connections, so anything unexpected is dropped rather than trusted.
+ */
+export function parseState(raw: unknown): Omit<State, "port"> & { port?: number } {
+  const saved = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const refs: Record<string, Ref> = {};
+  if (saved.refs && typeof saved.refs === "object") {
+    for (const [key, ref] of Object.entries(saved.refs as Record<string, Partial<Ref>>)) {
+      if (/^\d+$/.test(key) && Number.isInteger(ref?.backendNodeId) && typeof ref?.label === "string") {
+        refs[key] = { backendNodeId: ref.backendNodeId!, label: ref.label };
+      }
+    }
+  }
+  return {
+    port: parsePort(saved.port),
+    targetId: typeof saved.targetId === "string" && TARGET_ID.test(saved.targetId) ? saved.targetId : undefined,
+    refs,
+    refsLoaderId: typeof saved.refsLoaderId === "string" && TARGET_ID.test(saved.refsLoaderId) ? saved.refsLoaderId : undefined,
+  };
+}
+
 export function loadState(): State {
-  let saved: Partial<State> = {};
+  let raw: unknown;
   try {
-    saved = JSON.parse(readFileSync(stateFile, "utf8"));
+    raw = JSON.parse(readFileSync(stateFile, "utf8"));
   } catch {
     // First run, or unreadable state: start fresh.
   }
-  return {
-    refs: {},
-    ...saved,
-    port: Number(process.env.OPEN_EYES_PORT) || saved.port || 9222,
-  };
+  const saved = parseState(raw);
+  if (process.env.OPEN_EYES_PORT && !parsePort(process.env.OPEN_EYES_PORT)) {
+    throw new Error(`OPEN_EYES_PORT must be a port number, got "${process.env.OPEN_EYES_PORT}"`);
+  }
+  return { ...saved, port: parsePort(process.env.OPEN_EYES_PORT) ?? saved.port ?? 9222 };
 }
 
 export function saveState(state: State): void {

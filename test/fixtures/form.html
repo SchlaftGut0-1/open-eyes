@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Test form</title>
+<h1>Sign up</h1>
+<label>Name <input id="name" /></label>
+<label><input type="checkbox" id="tos" /> Accept terms</label>
+<button id="send">Send</button>
+<p id="out"></p>
+<a href="second.html">Next page</a>
+<script>
+  document.getElementById("send").addEventListener("click", () => {
+    const name = document.getElementById("name").value;
+    const accepted = document.getElementById("tos").checked ? " (accepted)" : "";
+    document.getElementById("out").textContent = `Hello, ${name}${accepted}`;
+  });
+</script>

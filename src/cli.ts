@@ -10,7 +10,8 @@ const HELP = `open-eyes: give your AI agent eyes on a real browser, while you wa
 Usage: open-eyes <command> [args]
 
 Browser
-  launch                 Start a visible browser with the open-eyes profile
+  launch [--headless]    Start a visible browser with the open-eyes profile
+                         (--headless: no window, for CI or background work)
   status                 Show the browser and the agent window
   close                  Close the agent window
 
@@ -54,7 +55,7 @@ async function main([command, ...args]: string[]): Promise<void> {
   switch (command) {
     case "launch": {
       const state = loadState();
-      const { binary, alreadyRunning } = await launch(state.port);
+      const { binary, alreadyRunning } = await launch(state.port, { headless: args.includes("--headless") });
       saveState(state);
       print(
         alreadyRunning

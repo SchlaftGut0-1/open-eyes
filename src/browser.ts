@@ -36,34 +36,45 @@ export function findBrowser(): string | undefined {
 }
 
 export async function browserVersion(port: number): Promise<BrowserVersion | undefined> {
+  let version: BrowserVersion;
   try {
     const response = await fetch(`http://127.0.0.1:${port}/json/version`);
-    return response.ok ? ((await response.json()) as BrowserVersion) : undefined;
+    if (!response.ok) return undefined;
+    version = (await response.json()) as BrowserVersion;
   } catch {
     return undefined;
   }
+  // Only ever open a DevTools connection to the local browser we just asked.
+  const ws = URL.parse(version.webSocketDebuggerUrl ?? "");
+  const local = ws?.protocol === "ws:" && ["127.0.0.1", "localhost"].includes(ws.hostname) && ws.port === String(port);
+  if (!local) throw new Error(`port ${port} answered with an unexpected DevTools endpoint`);
+  return version;
 }
 
-/** Starts a visible browser with its own open-eyes profile and remote debugging on `port`. */
-export async function launch(port: number): Promise<{ binary: string; alreadyRunning: boolean }> {
+/** Starts a browser with its own open-eyes profile and remote debugging on `port`. */
+export async function launch(
+  port: number,
+  { headless = false } = {},
+): Promise<{ binary: string; alreadyRunning: boolean }> {
   if (await browserVersion(port)) return { binary: "", alreadyRunning: true };
   const binary = findBrowser();
   if (!binary) throw new Error("no Chromium-based browser found; set OPEN_EYES_BROWSER to its path");
 
   mkdirSync(profileDir, { recursive: true });
-  const child = spawn(
-    binary,
-    [
-      `--remote-debugging-port=${port}`,
-      `--user-data-dir=${profileDir}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-    ],
-    { detached: true, stdio: "ignore" },
-  );
+  const args = [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profileDir}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+  ];
+  if (headless) args.push("--headless=new");
+  const child = spawn(binary, args, { detached: true, stdio: "ignore" });
+  let spawnError: Error | undefined;
+  child.once("error", (error) => (spawnError = error));
   child.unref();
 
   for (let attempt = 0; attempt < 50; attempt++) {
+    if (spawnError) throw new Error(`could not start ${binary}: ${spawnError.message}`);
     if (await browserVersion(port)) return { binary, alreadyRunning: false };
     await sleep(200);
   }
