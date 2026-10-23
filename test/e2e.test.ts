@@ -291,7 +291,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       assert.match(await password, /filled textbox "Password"/);
 
       // A page script cannot answer for the user.
-      const sneaky = cliErrorWith({ ...ask }, "click", refOf(snapshot, 'button "Send"'));
+      const sneaky = cliErrorWith(ask, "click", refOf(snapshot, 'button "Send"'));
       await until(() => human.evaluate(`!!document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="allow"]')?.checkVisibility()`), "the question");
       await human.evaluate(`document.getElementById("__open_eyes__").shadowRoot.querySelector('[data-part="allow"]').click()`);
       await sleep(1000);
@@ -309,6 +309,15 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(log, /BLOCKED +open +https:\/\/www\.example\.com\//);
     assert.match(log, /fill +textbox "Password" \(14 characters\)/);
     assert.doesNotMatch(log, /hunter2-secret/);
+  });
+
+  test("status never opens an agent window", async () => {
+    await cli("open", fixture("form.html"));
+    assert.match(await cli("close"), /closed the agent window/);
+    assert.match(await cli("status"), /agent window: none/);
+    assert.match(await cli("status"), /agent window: none/, "the first status must not have opened one");
+    await cli("open", fixture("form.html"));
+    assert.match(await cli("status"), /agent window: file:.*form\.html/);
   });
 
   test("screenshot writes a PNG", async () => {

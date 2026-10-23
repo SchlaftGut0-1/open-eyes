@@ -4,6 +4,7 @@ import {
   browserVersion,
   closeAgentWindow,
   connectBrowser,
+  connectExistingPage,
   connectPage,
   disconnectBrowser,
   findEverydayBrowser,
@@ -153,10 +154,19 @@ async function main([command, ...args]: string[]): Promise<void> {
         if (!version) return print(`no browser on port ${state.port}; run "open-eyes launch" or "open-eyes connect"`);
         print(`browser: ${version.Browser} on port ${state.port}`);
       }
-      return withPage(async (page) => {
-        const inControl = (await page.owner()) === "user" ? "the user" : "the agent";
-        return `agent window: ${await page.url()}\nin control: ${inControl}`;
-      });
+      // Only look: status must not open an agent window in the user's browser.
+      try {
+        const { cdp, page } = await connectExistingPage(state);
+        try {
+          if (!page) return print("agent window: none (opens with the next page command)");
+          const inControl = (await page.owner()) === "user" ? "the user" : "the agent";
+          return print(`agent window: ${await page.url()}\nin control: ${inControl}`);
+        } finally {
+          cdp.close();
+        }
+      } finally {
+        saveState(state);
+      }
     }
     case "connect": {
       const state = loadState();
