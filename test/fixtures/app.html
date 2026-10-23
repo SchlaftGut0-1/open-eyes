@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>App</title>
+<header>
+  <a href="?view=issues" id="issues">Issues</a>
+  <button id="rewrite">Rewrite</button>
+  <button id="toggle">Show details</button>
+</header>
+<main><h1>Home</h1></main>
+<script>
+  // Like GitHub: change the URL and the content without reloading the document.
+  document.getElementById("issues").addEventListener("click", (event) => {
+    event.preventDefault();
+    history.pushState({}, "", "?view=issues");
+    document.querySelector("main").innerHTML = "<h1>Issues</h1>" + "<p>Issue</p>".repeat(30);
+  });
+  document.getElementById("rewrite").addEventListener("click", () => {
+    document.querySelector("main").innerHTML = Array.from({ length: 60 }, (_, i) => `<p>Paragraph ${i}</p>`).join("");
+  });
+  document.getElementById("toggle").addEventListener("click", (event) => {
+    event.target.textContent = "Hide details";
+  });
+</script>

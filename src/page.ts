@@ -6,9 +6,9 @@ import { audit, type AuditEntry } from "./audit.ts";
 import type { CDP } from "./cdp.ts";
 import { decisionExpression, OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
 import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
-import { formatSnapshot, type AXNode } from "./snapshot.ts";
+import { formatSnapshot, type AXNode, type LineNode } from "./snapshot.ts";
 import { stateDir, type Ref, type State } from "./state.ts";
-import { diffLines, findLines, paginate, subtree } from "./view.ts";
+import { diffLines, findLines, interactiveIndexes, paginate, subtree, viewportView, type Position } from "./view.ts";
 
 export type Box = { x: number; y: number; width: number; height: number };
 
@@ -20,10 +20,20 @@ const SNAPSHOT_LIMIT = Number(process.env.OPEN_EYES_SNAPSHOT_LIMIT ?? 400);
 /** After an action, report what changed on the page (off with OPEN_EYES_OBSERVE=0). */
 const OBSERVE = process.env.OPEN_EYES_OBSERVE !== "0";
 const OBSERVE_LIMIT = 80;
+/** A diff this large (in changed lines, and as a share of the page) is reported as a page change. */
+const PAGE_CHANGE_LINES = 40;
+const PAGE_CHANGE_SHARE = 0.5;
+
+/** The URL without its #fragment: jumping to a section is not a page change. */
+const withoutHash = (url: string) => url.replace(/#.*$/, "");
 /** The last snapshot's text, the baseline for diffs. */
 const baselineFile = join(stateDir, "snapshot.txt");
 
 export type SnapshotOptions = {
+  /** The whole page instead of what is on screen. */
+  full?: boolean;
+  /** Only elements with refs, headings and the containers that place them. */
+  interactive?: boolean;
   /** Only what changed since the last snapshot of this page. */
   diff?: boolean;
   /** Page size in lines; 0 shows everything. */
@@ -120,9 +130,36 @@ export class Page {
 
   async snapshot(options: SnapshotOptions = {}): Promise<string> {
     await this.#guard();
-    const { lines, previous } = await this.#capture();
+    if (options.interactive && options.diff) throw new Error("--interactive cannot be combined with --diff");
+    const captured = await this.#capture();
+    const { previous } = captured;
+    let { lines, lineNodes } = captured;
+    if (options.interactive) {
+      const keep = interactiveIndexes(lines, lineNodes.map((n) => n.role));
+      lines = keep.map((i) => lines[i]);
+      lineNodes = keep.map((i) => lineNodes[i]);
+    }
+    let header = "";
     let body: string[];
-    if (options.diff) {
+    let footer: string[] = [];
+    if (!options.full && !options.diff && !options.scope && !options.find) {
+      // The default: what the user would see, which is usually what the agent needs.
+      const { positions, viewport } = await this.#positions(lineNodes);
+      const { shown, hidden, outline } = viewportView(lines, lineNodes.map((n) => n.role), positions);
+      body = shown;
+      if (viewport.pageHeight > viewport.height) {
+        const percent = Math.round((100 * viewport.height) / viewport.pageHeight);
+        header = `\non screen: ${viewport.top}-${viewport.top + viewport.height} px of ${viewport.pageHeight.toLocaleString("en-US")} (${percent}%)`;
+      }
+      if (hidden) {
+        footer = [
+          "",
+          `off screen: ${hidden.toLocaleString("en-US")} more lines${outline.length ? ". Outline:" : ""}`,
+          ...outline,
+          "search them with --find <text>, or see everything with --full",
+        ];
+      }
+    } else if (options.diff) {
       const changes = previous && diffLines(previous, lines);
       if (!previous) body = ["(first snapshot of this page, so all of it)", ...lines];
       else if (!changes) body = ["(too many changes to diff, so all of it)", ...lines];
@@ -135,8 +172,8 @@ export class Page {
       }
     }
     const title = await this.#evaluate("document.title");
-    const shown = paginate(body, options.limit ?? SNAPSHOT_LIMIT, options.page);
-    return `url: ${await this.url()}\ntitle: ${JSON.stringify(title)}\n\n${shown.join("\n")}`;
+    const shown = [...paginate(body, options.limit ?? SNAPSHOT_LIMIT, options.page), ...footer];
+    return `url: ${await this.url()}\ntitle: ${JSON.stringify(title)}${header}\n\n${shown.join("\n")}`;
   }
 
   click(ref: string): Promise<string> {
@@ -157,7 +194,7 @@ export class Page {
       await sleep(150);
       await this.#settle(10_000);
       await this.#leaveIfBlocked();
-      return `clicked ${label}${await this.#observe()}`;
+      return `clicked ${label}${await this.#observe(entry.url)}`;
     });
   }
 
@@ -180,7 +217,7 @@ export class Page {
       // Inserting over the selection replaces existing content and fires real input events.
       if (text) await this.#send("Input.insertText", { text });
       else await this.press("Backspace", false);
-      return `filled ${label}${await this.#observe()}`;
+      return `filled ${label}${await this.#observe(entry.url)}`;
     });
   }
 
@@ -196,7 +233,7 @@ export class Page {
       await dispatch(); // Part of another action, which was already checked.
       return `pressed ${key}`;
     }
-    return this.#audited("press", key, async () => {
+    return this.#audited("press", key, async (entry) => {
       await this.#guard();
       await this.#announce({ label: `press ${key}` });
       const submits = key === "Enter" && (await this.#evaluate(`!!document.activeElement?.closest?.("form")`));
@@ -204,7 +241,7 @@ export class Page {
       await dispatch();
       await this.#settle(10_000);
       await this.#leaveIfBlocked();
-      return `pressed ${key}${await this.#observe()}`;
+      return `pressed ${key}${await this.#observe(entry.url)}`;
     });
   }
 
@@ -266,6 +303,11 @@ export class Page {
     throw new Error(`the user has not handed control back after ${timeoutMs / 1000}s; run "open-eyes wait" to keep waiting`);
   }
 
+  /** Shows the token counter in the agent window, or hides it with null. */
+  async showUsage(text: string | null): Promise<void> {
+    await this.#overlay({ type: "usage", text });
+  }
+
   async owner(): Promise<Owner> {
     return ((await this.#evaluate(OWNER_EXPRESSION).catch(() => null)) as Owner) ?? null;
   }
@@ -294,7 +336,7 @@ export class Page {
    * Reads the page and numbers its elements, keeping the refs of elements already seen
    * on this document. Returns the lines and, for the same document, the previous ones.
    */
-  async #capture(): Promise<{ lines: string[]; previous?: string[] }> {
+  async #capture(): Promise<{ lines: string[]; previous?: string[]; lineNodes: LineNode[] }> {
     const loaderId = await this.#loaderId();
     const sameDocument = this.#state.refsLoaderId === loaderId;
     const byNode = new Map<number, number>();
@@ -303,7 +345,7 @@ export class Page {
     }
     await this.#send("Accessibility.enable");
     const { nodes } = await this.#send<{ nodes: AXNode[] }>("Accessibility.getFullAXTree");
-    const { text, refs, nextRef } = formatSnapshot(nodes, {
+    const { text, refs, nextRef, lineNodes } = formatSnapshot(nodes, {
       byNode,
       nextRef: sameDocument ? (this.#state.nextRef ?? 1) : 1,
     });
@@ -320,11 +362,47 @@ export class Page {
     Object.assign(this.#state, { refs, refsLoaderId: loaderId, nextRef });
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(baselineFile, text);
-    return { lines: text ? text.split("\n") : [], previous };
+    return { lines: text ? text.split("\n") : [], previous, lineNodes };
   }
 
-  /** What an action changed, so the agent rarely needs a separate snapshot. */
-  async #observe(): Promise<string> {
+  /** Where each line's element is relative to the viewport, from the page's layout. */
+  async #positions(lineNodes: LineNode[]): Promise<{
+    positions: Position[];
+    viewport: { top: number; height: number; pageHeight: number };
+  }> {
+    const [left, top, width, height, pageHeight] = (await this.#evaluate(
+      "[scrollX, scrollY, innerWidth, innerHeight, document.documentElement.scrollHeight]",
+    )) as number[];
+    // Layout bounds are in page coordinates; fixed elements appear at the current scroll.
+    const { documents } = await this.#send<{
+      documents: { nodes: { backendNodeId: number[] }; layout: { nodeIndex: number[]; bounds: number[][] } }[];
+    }>("DOMSnapshot.captureSnapshot", { computedStyles: [] });
+    const main = documents[0];
+    const boxes = new Map<number, [number, number, number, number]>(); // left, top, right, bottom
+    main?.layout.nodeIndex.forEach((nodeIndex, i) => {
+      const [x, y, w, h] = main.layout.bounds[i];
+      if (w <= 0 && h <= 0) return;
+      const id = main.nodes.backendNodeId[nodeIndex];
+      const box = boxes.get(id);
+      boxes.set(id, box ? [Math.min(box[0], x), Math.min(box[1], y), Math.max(box[2], x + w), Math.max(box[3], y + h)] : [x, y, x + w, y + h]);
+    });
+    const positions = lineNodes.map(({ backendNodeId }): Position => {
+      const box = backendNodeId === undefined ? undefined : boxes.get(backendNodeId);
+      if (!box) return undefined;
+      if (box[3] <= top) return "above";
+      if (box[1] >= top + height) return "below";
+      if (box[2] <= left || box[0] >= left + width) return "beside";
+      return "visible";
+    });
+    return { positions, viewport: { top: Math.round(top), height: Math.round(height), pageHeight: Math.round(pageHeight) } };
+  }
+
+  /**
+   * What an action changed, so the agent rarely needs a separate snapshot. A move to another
+   * page is one line, also when the site navigates without reloading (GitHub, most apps):
+   * a diff of the whole page would cost hundreds of tokens and help nobody.
+   */
+  async #observe(urlBefore?: string): Promise<string> {
     await this.#evaluate(WAIT_FOR_QUIET_DOM).catch(() => {}); // Fails if the page navigated.
     if (!OBSERVE || !this.#state.refsLoaderId) return "";
     if (this.#state.refsLoaderId !== (await this.#loaderId())) {
@@ -332,9 +410,17 @@ export class Page {
     }
     const { lines, previous } = await this.#capture();
     if (!previous) return "";
+    const url = await this.url();
+    if (urlBefore && withoutHash(url) !== withoutHash(urlBefore)) {
+      return `\nthe page changed to ${url}; run "open-eyes snapshot" to see it`;
+    }
     const changes = diffLines(previous, lines);
     if (!changes) return `\nthe page changed a lot; run "open-eyes snapshot" to see it`;
     if (!changes.length) return "\nno visible changes";
+    const changed = changes.filter((line) => !line.startsWith("  ")).length;
+    if (changed > Math.max(PAGE_CHANGE_LINES, PAGE_CHANGE_SHARE * Math.max(previous.length, lines.length))) {
+      return `\nmost of the page changed (${changed} lines); run "open-eyes snapshot" to see it`;
+    }
     const more = changes.length - OBSERVE_LIMIT;
     const tail = more > 0 ? [`… ${more} more changed lines; run "open-eyes snapshot" to see the page`] : [];
     return `\nchanges:\n${[...changes.slice(0, OBSERVE_LIMIT), ...tail].join("\n")}`;

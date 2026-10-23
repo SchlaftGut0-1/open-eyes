@@ -12,6 +12,7 @@ test("keeps well-formed state", () => {
     refsLoaderId: TARGET,
     nextRef: 3,
     daemonPid: 4242,
+    showTokens: true,
     refs: { 1: { backendNodeId: 7, label: 'button "Go"' } },
   };
   assert.deepEqual(parseState(state), state);
@@ -25,9 +26,10 @@ test("drops malformed fields instead of trusting them", () => {
       refsLoaderId: 42,
       nextRef: -1,
       daemonPid: "4242",
+      showTokens: "yes",
       refs: { 1: { backendNodeId: "7", label: "x" }, x: { backendNodeId: 1, label: "y" }, 2: null },
     }),
-    { port: undefined, targetId: undefined, refsLoaderId: undefined, nextRef: undefined, daemonPid: undefined, refs: {} },
+    { port: undefined, targetId: undefined, refsLoaderId: undefined, nextRef: undefined, daemonPid: undefined, showTokens: undefined, refs: {} },
   );
 });
 

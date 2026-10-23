@@ -1,6 +1,8 @@
+Closes #<!-- issue number -->
+
 ## What changed
 
-<!-- A short description of the change and why it is needed. Link the issue it fixes. -->
+<!-- A short description of the change and why it is needed. -->
 
 ## How I tested it
 

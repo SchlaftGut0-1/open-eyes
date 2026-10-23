@@ -20,11 +20,12 @@ what it is doing** as it happens.
 - **Guardrails against prompt injection.** Allow and block lists keep the agent on the
   sites you choose; risky actions (paying, sending, deleting, submitting, typing a
   password) wait for your **Allow / Deny** on screen; every action is logged.
-- **Cheap eyes.** `snapshot` turns the page into compact text with stable `@N` refs, so
-  the model reads structure instead of burning tokens on screenshots. Every action
-  reports only what it changed, and `--find`, `--scope` and `--diff` show just the part
-  that matters. On a Wikipedia article, a click reports ~200 tokens of changes instead
-  of a ~13,000-token page. Screenshots are there when visuals matter.
+- **Cheap eyes.** `snapshot` shows what is on screen as compact text with stable `@N`
+  refs, plus an outline of the rest, so the model reads structure instead of burning
+  tokens on screenshots. Every action reports only what it changed, and `--find`,
+  `--scope` and `--diff` show just the part that matters. On a Wikipedia article the
+  default snapshot is about 1,000 tokens, less than a screenshot. Screenshots are there
+  when visuals matter.
 - **One call, many steps.** Agents can write a short script (`open-eyes run`) instead of
   a slow command-by-command loop.
 - **Linux first**, fully open source (MIT).
@@ -89,8 +90,8 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `disconnect` | Stop using your everyday browser |
 | `status` | Show the browser and the agent window |
 | `open <url>` | Open a URL in the agent window |
-| `snapshot` | Print the page as text; actionable elements get `@N` refs |
-| `snapshot --find <text>` / `--scope @N` / `--diff` | Only matching lines, one element, or what changed |
+| `snapshot` | Print what is on screen as text, plus an outline of the rest; actionable elements get `@N` refs |
+| `snapshot --find <text>` / `--scope @N` / `--diff` / `--full` / `--interactive` | Matching lines, one element, what changed, the whole page, or only what can be acted on |
 | `click <@N>` | Click an element |
 | `fill <@N> <text>` | Replace a field's content |
 | `press <key>` | Press a key |
@@ -101,6 +102,7 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `wait` | Wait until the user hands back control they took |
 | `policy [allow\|block\|remove\|confirm\|reset]` | Show or change which sites are allowed and what needs approval |
 | `log` | Show the last actions the agent took |
+| `usage [show\|hide\|reset]` | Tokens each command cost the agent; `show` puts a live counter in the agent window |
 | `close` | Close the agent window |
 
 Set `OPEN_EYES_SLOWMO=0` to drop the pause that lets you follow each action.
