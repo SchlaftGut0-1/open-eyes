@@ -23,7 +23,9 @@ On Node 23.6+ you can skip the build while iterating: `npm run dev -- snapshot`.
 
 1. Fork the repo and create a branch from `main`.
 2. Make your change. Keep the code in the style of the surrounding files.
-3. Run `npm run typecheck` and try your change against a real browser.
+3. Run `npm run typecheck` and `npm test`. The end-to-end tests start a headless
+   Chromium on a random port with a throwaway profile; they never touch your browser.
+   Add or update tests for what you changed, and try it against a real browser.
 4. Open a pull request describing what changed and how you tested it.
 
 Pull requests are squash-merged, so the PR title becomes the commit message. Please

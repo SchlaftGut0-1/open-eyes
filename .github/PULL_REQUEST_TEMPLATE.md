@@ -6,5 +6,5 @@
 
 <!-- Commands you ran and what you saw in the browser. -->
 
-- [ ] `npm run typecheck` passes
+- [ ] `npm run typecheck` and `npm test` pass
 - [ ] Tried against a real browser

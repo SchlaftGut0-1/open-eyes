@@ -16,6 +16,9 @@ open-eyes status     # is a browser running?
 open-eyes launch     # if not: starts a visible browser with the open-eyes profile
 ```
 
+Use `open-eyes launch --headless` only when the user asks for background work with no
+window; by default the user should be able to watch you.
+
 The open-eyes profile keeps its logins between runs. If a site needs the user to log
 in, open the page, tell the user, and wait for them to do it in that window.
 

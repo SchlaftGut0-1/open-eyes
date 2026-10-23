@@ -40,7 +40,7 @@ To use it from an agent, copy `skills/open-eyes` into your agent's skills direct
 
 | Command | Does |
 |---|---|
-| `launch` | Start a visible browser with the open-eyes profile |
+| `launch [--headless]` | Start a browser with the open-eyes profile (visible unless `--headless`) |
 | `status` | Show the browser and the agent window |
 | `open <url>` | Open a URL in the agent window |
 | `snapshot` | Print the page as text; actionable elements get `@N` refs |
