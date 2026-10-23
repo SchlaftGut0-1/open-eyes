@@ -55,6 +55,7 @@ jobs:
           echo "file=$file" >> "$GITHUB_OUTPUT"
 
       - name: Attest build provenance
+        id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ${{ steps.pack.outputs.file }}
@@ -63,7 +64,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           FILE: ${{ steps.pack.outputs.file }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
+          # Attach the provenance to the release itself, so tools that only look at release
+          # assets (such as OpenSSF Scorecard) find it: the full Sigstore bundle, and its
+          # signed in-toto statement in the usual SLSA .intoto.jsonl form.
+          cp "$BUNDLE" "$FILE.sigstore.json"
+          jq -c .dsseEnvelope "$BUNDLE" > "$FILE.intoto.jsonl"
+
           version="${GITHUB_REF_NAME#v}"
           awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then
@@ -76,10 +84,11 @@ jobs:
 
           Download \`$FILE\` below, then \`npm install -g ./$FILE\`. Requires Node.js 22+ and a
           Chromium-based browser. Verify where it was built with
-          \`gh attestation verify $FILE --repo $GITHUB_REPOSITORY\`.
+          \`gh attestation verify $FILE --repo $GITHUB_REPOSITORY\`, or offline with the attached
+          bundle: \`gh attestation verify $FILE --bundle $FILE.sigstore.json --repo $GITHUB_REPOSITORY\`.
           EOF
           # A pre-release version (1.2.3-beta.1) must not become the "Latest" release.
           prerelease=()
           if [[ "$version" == *-* ]]; then prerelease=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" "$FILE" "$FILE.sha256" "${prerelease[@]}" \
+          gh release create "$GITHUB_REF_NAME" "$FILE" "$FILE.sha256" "$FILE.sigstore.json" "$FILE.intoto.jsonl" "${prerelease[@]}" \
             --title "open-eyes $version" --notes-file notes.md --verify-tag
