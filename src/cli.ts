@@ -39,6 +39,7 @@ Page (works in the agent's own window)
                          actionable elements get @N refs, which stay the same for an
                          element while the page is loaded
     --full               The whole page instead of what is on screen
+    --interactive        Only what can be clicked or typed into, plus headings
     --diff               Only what changed since the last snapshot
     --find <text>        Only lines containing <text>, with their parents
     --scope <@N>         Only the element @N and what is inside it
@@ -284,6 +285,7 @@ async function main([command, ...args]: string[]): Promise<void> {
       const original = [...args];
       const options = {
         full: takeFlag(args, "--full"),
+        interactive: takeFlag(args, "--interactive"),
         diff: takeFlag(args, "--diff"),
         find: takeOption(args, "--find"),
         scope: takeOption(args, "--scope"),

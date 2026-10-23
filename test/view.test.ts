@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
-import { diffLines, findLines, paginate, subtree, viewportView, type Position } from "../src/view.ts";
+import { diffLines, findLines, interactiveIndexes, paginate, subtree, viewportView, type Position } from "../src/view.ts";
 
 const page = [
   '- heading "Shop"',
@@ -148,5 +148,16 @@ describe("viewportView", () => {
     const { shown, outline } = viewportView(lines, roles, positions);
     assert.deepEqual(shown, ["main", "  heading Bottom", "  button Go @2"]);
     assert.deepEqual(outline, ["navigation Site (above)", "heading Top (above)"]);
+  });
+});
+
+describe("interactiveIndexes", () => {
+  test("keeps refs, headings and the containers that place them", () => {
+    const lines = ["banner", "  navigation Site", "    link Home @1", '    "Welcome"', "main", "  heading News", '  "Long article text"', "  form Search", "    textbox Query @2"];
+    const roles = ["banner", "navigation", "link", "StaticText", "main", "heading", "StaticText", "form", "textbox"];
+    assert.deepEqual(
+      interactiveIndexes(lines, roles).map((i) => lines[i]),
+      ["banner", "  navigation Site", "    link Home @1", "main", "  heading News", "  form Search", "    textbox Query @2"],
+    );
   });
 });

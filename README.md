@@ -91,7 +91,7 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `status` | Show the browser and the agent window |
 | `open <url>` | Open a URL in the agent window |
 | `snapshot` | Print what is on screen as text, plus an outline of the rest; actionable elements get `@N` refs |
-| `snapshot --find <text>` / `--scope @N` / `--diff` / `--full` | Matching lines, one element, what changed, or the whole page |
+| `snapshot --find <text>` / `--scope @N` / `--diff` / `--full` / `--interactive` | Matching lines, one element, what changed, the whole page, or only what can be acted on |
 | `click <@N>` | Click an element |
 | `fill <@N> <text>` | Replace a field's content |
 | `press <key>` | Press a key |

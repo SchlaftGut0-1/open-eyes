@@ -147,3 +147,16 @@ export function viewportView(
         : outline,
   };
 }
+
+/**
+ * Indexes of the lines an agent needs to act: elements with a ref, headings, and the
+ * containers above them so each one can still be placed on the page.
+ */
+export function interactiveIndexes(lines: string[], roles: string[]): number[] {
+  const keep = new Set<number>();
+  lines.forEach((line, i) => {
+    if (!/ @\d+$/.test(line) && roles[i] !== "heading") return;
+    for (let at = i; at !== -1 && !keep.has(at); at = parentIndex(lines, at)) keep.add(at);
+  });
+  return [...keep].sort((a, b) => a - b);
+}
