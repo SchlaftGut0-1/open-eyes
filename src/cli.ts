@@ -50,6 +50,9 @@ Page (works in the agent's own window)
   press <key>            Press a key (Enter, Tab, Escape, ArrowDown, a, ...)
   select <@N> <option>   Choose an option by its text in a dropdown (native or custom)
   hover <@N>             Move the mouse over an element and report what appeared
+  upload <@N> <file...>  Attach local files to a file input (asks the user first)
+                         Downloads started by click or press are saved in
+                         ~/Downloads/open-eyes (OPEN_EYES_DOWNLOADS) and reported
   scroll [@N] [down|up] [pixels]
                          Scroll the page (default: down one screen); with @N, scroll
                          the list or panel holding it, or with no direction bring
@@ -61,6 +64,7 @@ Page (works in the agent's own window)
 Scripts (open-eyes run): \`page\` methods, all async
   goto(url)  snapshot({ full, find, scope, diff, interactive, limit, page })
   click("@N")  fill("@N", text)  press(key)  select("@N", option)  hover("@N")
+  upload("@N", [paths])
   scroll(ref?, "down"|"up", px?)
   waitForText(text, ms?)  wait(ms)
   eval(js)  screenshot(path?)  handoff(message?, ms?)  url()
@@ -317,6 +321,12 @@ async function main([command, ...args]: string[]): Promise<void> {
     }
     case "press":
       return withPage(`press ${args[0] ?? ""}`, (page) => page.press(need(args[0], "press <key>")));
+    case "upload": {
+      const ref = need(args[0], "upload <@N> <file...>");
+      if (args.length < 2) throw new Error("usage: open-eyes upload <@N> <file...>");
+      const files = args.slice(1);
+      return withPage(`upload ${ref} ${files.map((f) => f.split("/").pop()).join(" ")}`, (page) => page.upload(ref, files));
+    }
     case "hover":
       return withPage(`hover ${args[0] ?? ""}`, (page) => page.hover(need(args[0], "hover <@N>")));
     case "select": {

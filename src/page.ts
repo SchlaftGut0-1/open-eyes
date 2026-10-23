@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { audit, type AuditEntry } from "./audit.ts";
 import type { CDP } from "./cdp.ts";
@@ -106,6 +107,25 @@ const SELECT_CONTENTS = `function () {
   }
 }`;
 
+/** Where downloads started by agent actions are saved. */
+const DOWNLOADS_DIR = process.env.OPEN_EYES_DOWNLOADS ?? join(homedir(), "Downloads", "open-eyes");
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
+// The file input an upload goes to: the element itself, one inside it, the control of a
+// label, or the only file input of its form or page (styled "Attach" buttons hide theirs).
+const FIND_FILE_INPUT = `function () {
+  const isFile = (el) => el instanceof HTMLInputElement && el.type === "file";
+  if (isFile(this)) return this;
+  const inside = this.querySelector?.('input[type="file"]');
+  if (inside) return inside;
+  if (isFile(this.control)) return this.control;
+  for (const scope of [this.closest?.("form"), document]) {
+    const inputs = scope ? scope.querySelectorAll('input[type="file"]') : [];
+    if (inputs.length === 1) return inputs[0];
+  }
+  return null;
+}`;
+
 /** How long a risky action waits for the user to allow it before it is denied. */
 const CONFIRM_TIMEOUT_MS = 120_000;
 
@@ -203,6 +223,7 @@ export class Page {
       const y = box.y + box.height / 2;
       await this.#announce({ label: `click ${label}`, x, y, box, busy: true });
       await this.#confirm(`click ${label}`, isRiskyClick(label));
+      const finishDownload = await this.#watchDownloads();
       await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
       for (const type of ["mousePressed", "mouseReleased"]) {
         await this.#send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
@@ -211,7 +232,10 @@ export class Page {
       await sleep(150);
       await this.#settle(10_000);
       await this.#leaveIfBlocked();
-      return `clicked ${label}${await this.#observe(entry.url)}`;
+      const observed = await this.#observe(entry.url);
+      const download = await finishDownload();
+      if (download.saved) entry.target += ` (downloaded ${basename(download.saved)})`;
+      return `clicked ${label}${observed}${download.report}`;
     });
   }
 
@@ -255,10 +279,40 @@ export class Page {
       await this.#announce({ label: `press ${key}` });
       const submits = key === "Enter" && (await this.#evaluate(`!!document.activeElement?.closest?.("form")`));
       await this.#confirm("press Enter, which submits a form", submits === true);
+      const finishDownload = await this.#watchDownloads();
       await dispatch();
       await this.#settle(10_000);
       await this.#leaveIfBlocked();
-      return `pressed ${key}${await this.#observe(entry.url)}`;
+      const observed = await this.#observe(entry.url);
+      const download = await finishDownload();
+      if (download.saved) entry.target += ` (downloaded ${basename(download.saved)})`;
+      return `pressed ${key}${observed}${download.report}`;
+    });
+  }
+
+  /**
+   * Sets local files on a file input, after the user allows it: it sends files to the site.
+   * The audit log gets the file names, never their contents.
+   */
+  upload(ref: string, files: string[]): Promise<string> {
+    return this.#audited("upload", ref, async (entry) => {
+      await this.#guard();
+      const paths = files.map((file) => resolve(file));
+      for (const path of paths) {
+        if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`no such file: ${path}`);
+      }
+      const names = paths.map((path) => basename(path)).join(", ");
+      const { backendNodeId, label } = await this.#resolve(ref);
+      entry.target = `${label} <- ${names}`;
+      const box = await this.#locate(backendNodeId, ref);
+      await this.#announce({ label: `upload ${names} to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+      const { object } = await this.#send<{ object: { objectId: string } }>("DOM.resolveNode", { backendNodeId });
+      const { result } = await this.#send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: FIND_FILE_INPUT });
+      if (!result.objectId) throw new Error(`${label} is not a file input and no file input belongs to it`);
+      const host = URL.parse(await this.url())?.host || "this page";
+      await this.#confirm(`upload ${names} to ${host}`, true);
+      await this.#send("DOM.setFileInputFiles", { files: paths, objectId: result.objectId });
+      return `uploaded ${names} to ${label}${await this.#observe(entry.url)}`;
     });
   }
 
@@ -556,6 +610,42 @@ export class Page {
     const more = changes.length - OBSERVE_LIMIT;
     const tail = more > 0 ? [`… ${more} more changed lines; run "open-eyes snapshot" to see the page`] : [];
     return `\nchanges:\n${[...changes.slice(0, OBSERVE_LIMIT), ...tail].join("\n")}`;
+  }
+
+  /**
+   * Routes downloads to DOWNLOADS_DIR while an action runs. The returned function waits for a
+   * download the action started, saves it under its suggested name (made unique) and puts
+   * the browser's download behavior back to normal, so the user's own downloads are untouched.
+   */
+  async #watchDownloads(): Promise<() => Promise<{ saved?: string; report: string }>> {
+    let began: { guid: string; name: string } | undefined;
+    let state: string | undefined;
+    const stopBegin = this.#cdp.on("Browser.downloadWillBegin", (p) => (began ??= { guid: p.guid, name: p.suggestedFilename }));
+    const stopProgress = this.#cdp.on("Browser.downloadProgress", (p) => {
+      if (began && p.guid === began.guid && p.state !== "inProgress") state = p.state;
+    });
+    mkdirSync(DOWNLOADS_DIR, { recursive: true });
+    await this.#cdp.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: DOWNLOADS_DIR, eventsEnabled: true });
+    return async () => {
+      try {
+        if (!began) return { report: "" };
+        const deadline = Date.now() + DOWNLOAD_TIMEOUT_MS;
+        while (!state && Date.now() < deadline) await sleep(100);
+        if (state !== "completed") return { report: `\nthe download of ${began.name} did not finish (${state ?? "timed out"})` };
+        // allowAndName saves under the download's id; give it its real name without overwriting.
+        const name = basename(began.name) || "download";
+        let saved = join(DOWNLOADS_DIR, name);
+        for (let n = 1; existsSync(saved); n++) {
+          saved = join(DOWNLOADS_DIR, `${basename(name, extname(name))} (${n})${extname(name)}`);
+        }
+        renameSync(join(DOWNLOADS_DIR, began.guid), saved);
+        return { saved, report: `\ndownloaded ${saved}` };
+      } finally {
+        stopBegin();
+        stopProgress();
+        await this.#cdp.send("Browser.setDownloadBehavior", { behavior: "default" }).catch(() => {});
+      }
+    };
   }
 
   /** Runs an action and records it in the audit log, whatever the outcome. */
