@@ -6,6 +6,29 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-23
+
+### Added
+
+- **Use your everyday browser.** `open-eyes connect` attaches to the browser you already
+  use, with your logins, once remote debugging is enabled at
+  `chrome://inspect/#remote-debugging` (Chrome 144+, Chromium, Brave, Edge). A background
+  daemon holds the single connection you approve, so the browser asks only once.
+  `open-eyes disconnect` closes the agent window and stops it.
+- **Guardrails against prompt injection.** `open-eyes policy` sets which sites the agent
+  may use (allow and block lists). Risky actions (buying, sending, deleting, publishing,
+  submitting a form with Enter, typing a password) wait for your Allow / Deny in the
+  agent window; only real clicks answer. `open-eyes log` shows an audit log of every
+  action, never the text typed.
+- Releases are published automatically from version tags, with the package, a checksum
+  and a signed build provenance attestation.
+
+### Fixed
+
+- `status` no longer opens an agent window when there is none.
+- The connected browser is named correctly: Chromium-based browsers report themselves as
+  "Chrome".
+
 ## [0.2.0] - 2026-10-23
 
 ### Added
@@ -48,6 +71,7 @@ All notable changes to open-eyes are documented here. The format follows
   `eval`, multi-step `run` scripts, a live overlay showing each action, and an agent
   skill.
 
-[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/2bbe51e...v0.2.0
 [0.1.0]: https://github.com/SchlaftGut0-1/open-eyes/commit/2bbe51e

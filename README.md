@@ -9,13 +9,17 @@ agent with a terminal see and drive a **real, visible browser**, and lets **you 
 what it is doing** as it happens.
 
 - **Your browser, no fork.** Works with stock Chromium, Chrome, Brave, or Edge over the
-  Chrome DevTools Protocol.
+  Chrome DevTools Protocol. Use a dedicated profile (`launch`) or your everyday browser
+  with all your logins (`connect`).
 - **You can see the agent.** It works in its own window with a live overlay: a cursor
   that moves to each target, a highlight on the element it is about to touch, and a
   banner describing the step.
 - **Take control any time.** Press **Take control** in the agent's window to pause it,
   do what you need, and hand it back. Agents can also ask for help with
   `open-eyes handoff "Please log in"` and wait for you.
+- **Guardrails against prompt injection.** Allow and block lists keep the agent on the
+  sites you choose; risky actions (paying, sending, deleting, submitting, typing a
+  password) wait for your **Allow / Deny** on screen; every action is logged.
 - **Cheap eyes.** `snapshot` turns the page into compact text with stable `@N` refs, so
   the model reads structure instead of burning tokens on screenshots. Every action
   reports only what it changed, and `--find`, `--scope` and `--diff` show just the part
@@ -41,11 +45,48 @@ open-eyes click @12
 To use it from an agent, copy `skills/open-eyes` into your agent's skills directory
 (for Claude Code: `~/.claude/skills/open-eyes`).
 
+## Use your everyday browser
+
+Chrome 144+ (and Chromium, Brave, Edge) can let tools connect to the browser you already
+use:
+
+1. Open `chrome://inspect/#remote-debugging` and turn remote debugging on.
+2. Run `open-eyes connect` and approve the prompt in your browser.
+
+Chrome asks for approval on every new connection, so open-eyes keeps a single approved
+connection in a small background daemon and routes commands through a private local
+socket (readable only by your user). The agent works in its own window; your tabs are
+left alone. `open-eyes disconnect` closes that window and stops the daemon.
+
+## Safety
+
+Web pages can hide instructions meant to hijack an agent, and there is no complete fix
+for that. open-eyes limits the damage:
+
+```bash
+open-eyes policy allow github.com docs.python.org   # only these sites (and subdomains)
+open-eyes policy block mybank.com                   # never these, even if allowed
+open-eyes policy confirm risky                      # default: ask before risky actions
+open-eyes log                                       # what the agent did
+```
+
+- The agent cannot open, read or act on a site outside the policy, and open-eyes leaves
+  the page if a click or redirect lands there.
+- Before a risky action, the window highlights the target and asks **Allow / Deny**.
+  Only real clicks from you count; page scripts cannot answer. `confirm always` asks for
+  every action; `confirm never` turns questions off (for unattended runs).
+- The audit log records every action and its outcome, never the text typed into fields.
+
+These guardrails stop pages from steering a well-behaved agent. They cannot stop an
+agent that is itself compromised: it has a shell and could edit the policy file.
+
 ## Commands
 
 | Command | Does |
 |---|---|
 | `launch [--headless]` | Start a browser with the open-eyes profile (visible unless `--headless`) |
+| `connect [--browser <name>]` | Use your everyday browser, with your logins |
+| `disconnect` | Stop using your everyday browser |
 | `status` | Show the browser and the agent window |
 | `open <url>` | Open a URL in the agent window |
 | `snapshot` | Print the page as text; actionable elements get `@N` refs |
@@ -58,6 +99,8 @@ To use it from an agent, copy `skills/open-eyes` into your agent's skills direct
 | `run <file\|->` | Run a multi-step script with `page` in scope |
 | `handoff <message>` | Ask the user to take over, wait until they hand control back |
 | `wait` | Wait until the user hands back control they took |
+| `policy [allow\|block\|remove\|confirm\|reset]` | Show or change which sites are allowed and what needs approval |
+| `log` | Show the last actions the agent took |
 | `close` | Close the agent window |
 
 Set `OPEN_EYES_SLOWMO=0` to drop the pause that lets you follow each action.
@@ -81,6 +124,5 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 
 ## Status
 
-Early MVP. Next up: attaching to your everyday browser profile, guardrails against
-prompt injection, snapshots inside iframes, and several parallel agent windows
-("spaces").
+Early MVP. Next up: snapshots inside iframes, more commands (scroll, hover, select,
+upload), and several parallel agent windows ("spaces").

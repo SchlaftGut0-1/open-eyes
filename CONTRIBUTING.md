@@ -36,6 +36,21 @@ Both `main` and `develop` are protected: changes land only through pull requests
 CI on Node 22 and 24 and CodeQL passing. Pull requests into `main` must come from
 `release/*` or `hotfix/*`; the `gitflow` check rejects anything else.
 
+### Releasing (maintainers)
+
+1. From `develop`, create `release/X.Y.Z`. Run `npm version X.Y.Z --no-git-tag-version`
+   and move the `[Unreleased]` notes in `CHANGELOG.md` under a new `[X.Y.Z]` heading.
+2. Open a pull request into `main` and merge it with a merge commit once checks pass.
+3. Tag the merge on `main` and push the tag:
+   ```bash
+   git switch main && git pull
+   git tag -a vX.Y.Z -m "open-eyes X.Y.Z" && git push origin vX.Y.Z
+   ```
+   The Release workflow checks the tag matches `package.json` and is on `main`, runs the
+   tests, packs the package, signs its build provenance and publishes the GitHub release
+   with the `CHANGELOG.md` notes.
+4. Open a pull request from `main` into `develop` and merge it with a merge commit.
+
 ### Contributing a change
 
 1. Fork the repo and create `feature/<short-name>` from `develop`.
