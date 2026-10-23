@@ -5,8 +5,9 @@ on:
   branch_protection_rule:
   schedule:
     - cron: "27 6 * * 1"
+  # Scorecard only runs on the default branch, which is develop under git flow.
   push:
-    branches: [main]
+    branches: [develop]
 
 permissions: read-all
 

@@ -19,17 +19,47 @@ open-eyes launch     # if not: starts a visible browser with the open-eyes profi
 Use `open-eyes launch --headless` only when the user asks for background work with no
 window; by default the user should be able to watch you.
 
-The open-eyes profile keeps its logins between runs. If a site needs the user to log
-in, open the page, tell the user, and wait for them to do it in that window.
+The open-eyes profile keeps its logins between runs.
+
+## Working with the user
+
+The user can press **Take control** in your window at any time. While they are in
+control, every action fails with "the user has taken control". Do not retry: run
+`open-eyes wait` and continue once it returns.
+
+When you need the user (a login, a captcha, 2FA, a choice only they can make), ask:
+
+```bash
+open-eyes handoff "Please log in to GitHub, then hand control back"
+```
+
+It shows your message in the window and blocks until the user presses **Hand back to
+agent** (default timeout 600s; change it with `--timeout <seconds>`). Run it with a tool
+timeout at least that long, or in the background. Take a new snapshot afterwards: the
+user may have navigated.
 
 ## Core loop
 
 1. `open-eyes open <url>`
 2. `open-eyes snapshot`: the page as indented text. Every actionable element ends with
-   a ref like `@7`.
+   a ref like `@7`. An element keeps its ref while the page stays loaded.
 3. Act with refs: `open-eyes click @7`, `open-eyes fill @3 "some text"`, `open-eyes press Enter`.
-4. Snapshot again after anything that changes the page. Refs from an old snapshot go
-   stale when the page changes; the CLI tells you when that happens.
+   Each action prints the **changes** it caused (`+` added, `-` removed, under their
+   parent), so you usually do not need another snapshot.
+4. After a navigation ("the page changed to ..."), take a new snapshot: refs from the
+   old page are rejected.
+
+## Keep snapshots small
+
+Snapshots are capped at 400 lines per page. Prefer narrow views over reading everything:
+
+| Command | Shows |
+|---|---|
+| `snapshot --find "<text>"` | Only lines containing the text, with their parents. Best way to locate an element |
+| `snapshot --scope @N` | Only element `@N` and what is inside it (a form, a list, a dialog) |
+| `snapshot --diff` | Only what changed since your last snapshot |
+| `snapshot --page 2` | The next page of a long snapshot |
+| `snapshot --limit 0` | Everything (expensive on big pages) |
 
 Use `open-eyes screenshot` when layout or visuals matter (it prints a PNG path you can
 read). Prefer `snapshot` for everything else: it is far cheaper.
@@ -52,7 +82,7 @@ EOF
 | Method | Does |
 |---|---|
 | `goto(url)` | Open a URL, wait for load, return the final URL |
-| `snapshot()` | Return the page text with fresh `@N` refs |
+| `snapshot(options?)` | Return the page text with `@N` refs; options `{ diff, find, scope, limit, page }` |
 | `click("@N")` | Click an element |
 | `fill("@N", text)` | Replace a field's content |
 | `press(key)` | `Enter`, `Tab`, `Escape`, arrows, or one character |
@@ -60,6 +90,7 @@ EOF
 | `wait(ms)` | Sleep |
 | `eval(js)` | Evaluate an expression in the page, return its JSON value |
 | `screenshot(path?)` | Save a PNG, return its path |
+| `handoff(message?, ms?)` | Ask the user to take over and wait for them (no message: wait only if they took control) |
 | `url()` | Current URL |
 
 Refs only exist after a `snapshot()`, so inside a script take a snapshot before clicking

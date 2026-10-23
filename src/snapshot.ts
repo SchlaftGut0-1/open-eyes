@@ -49,15 +49,22 @@ function states(node: AXNode): string[] {
   return out;
 }
 
+/** Refs handed out earlier for the same document, so elements keep their @N. */
+export type KnownRefs = { byNode: Map<number, number>; nextRef: number };
+
 /**
  * Turns Chromium's accessibility tree into compact, indented text the model can read,
- * and numbers every actionable node so later commands can target it as @N.
+ * and numbers every actionable node so later commands can target it as @N. Elements
+ * seen before keep their number, which keeps diffs between snapshots meaningful.
  */
-export function formatSnapshot(nodes: AXNode[]): { text: string; refs: Record<string, Ref> } {
+export function formatSnapshot(
+  nodes: AXNode[],
+  known: KnownRefs = { byNode: new Map(), nextRef: 1 },
+): { text: string; refs: Record<string, Ref>; nextRef: number } {
   const byId = new Map(nodes.map((node) => [node.nodeId, node]));
   const refs: Record<string, Ref> = {};
   const lines: string[] = [];
-  let nextRef = 1;
+  let nextRef = known.nextRef;
 
   const visit = (node: AXNode, depth: number, parentName: string): void => {
     const role = node.role?.value ?? "";
@@ -87,7 +94,7 @@ export function formatSnapshot(nodes: AXNode[]): { text: string; refs: Record<st
     const flags = states(node);
     if (flags.length) line += ` [${flags.join(", ")}]`;
     if (interactive) {
-      const ref = nextRef++;
+      const ref = known.byNode.get(node.backendDOMNodeId!) ?? nextRef++;
       refs[ref] = { backendNodeId: node.backendDOMNodeId!, label: `${role} ${JSON.stringify(truncate(name))}` };
       line += ` @${ref}`;
     }
@@ -101,5 +108,5 @@ export function formatSnapshot(nodes: AXNode[]): { text: string; refs: Record<st
     const children = (root.childIds ?? []).flatMap((id) => byId.get(id) ?? []);
     children.forEach((child) => visit(child, 0, ""));
   }
-  return { text: lines.join("\n"), refs };
+  return { text: lines.join("\n"), refs, nextRef };
 }

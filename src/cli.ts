@@ -17,7 +17,13 @@ Browser
 
 Page (works in the agent's own window)
   open <url>             Open a URL
-  snapshot               Print the page as text; actionable elements get @N refs
+  snapshot               Print the page as text; actionable elements get @N refs,
+                         which stay the same for an element while the page is loaded
+    --diff               Only what changed since the last snapshot
+    --find <text>        Only lines containing <text>, with their parents
+    --scope <@N>         Only the element @N and what is inside it
+    --limit <lines>      Lines per page (default 400, 0 for all)
+    --page <n>           Page to show when the snapshot is longer than --limit
   click <@N>             Click an element from the last snapshot
   fill <@N> <text>       Replace the content of a field
   press <key>            Press a key (Enter, Tab, Escape, ArrowDown, a, ...)
@@ -25,14 +31,54 @@ Page (works in the agent's own window)
   eval <js>              Evaluate a JavaScript expression in the page
   run <file|->           Run a script with \`page\` in scope (- reads stdin)
 
+Working with the user
+  handoff <message>      Ask the user to take over (log in, solve a captcha...)
+                         and wait until they hand control back
+  wait                   Wait until the user hands back control they took
+                         Both accept --timeout <seconds> (default 600)
+
 Environment
   OPEN_EYES_PORT         Remote debugging port (default 9222)
   OPEN_EYES_BROWSER      Browser binary to launch
-  OPEN_EYES_SLOWMO       Pause in ms after showing each action (default 400)`;
+  OPEN_EYES_SLOWMO       Pause in ms after showing each action (default 400)
+  OPEN_EYES_SNAPSHOT_LIMIT  Default snapshot page size in lines (default 400)
+  OPEN_EYES_OBSERVE      Set to 0 to stop actions from reporting page changes`;
 
 function print(value: unknown): void {
   if (value === undefined) return;
   console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
+}
+
+/** Removes `--name <value>` from args and returns the value. */
+function takeOption(args: string[], name: string): string | undefined {
+  const i = args.indexOf(name);
+  if (i === -1) return undefined;
+  const value = args[i + 1];
+  if (value === undefined) throw new Error(`${name} needs a value`);
+  args.splice(i, 2);
+  return value;
+}
+
+/** Removes `--name <number>` from args and returns the number, at least `min`. */
+function takeNumber(args: string[], name: string, min: number): number | undefined {
+  const value = takeOption(args, name);
+  if (value === undefined) return undefined;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min) throw new Error(`${name} needs a whole number of at least ${min}`);
+  return number;
+}
+
+/** Removes `--name` from args and returns whether it was there. */
+function takeFlag(args: string[], name: string): boolean {
+  const i = args.indexOf(name);
+  if (i !== -1) args.splice(i, 1);
+  return i !== -1;
+}
+
+/** Removes `--timeout <seconds>` from args and returns it in milliseconds. */
+function takeTimeout(args: string[]): number | undefined {
+  const seconds = takeNumber(args, "--timeout", 1);
+  return seconds === undefined ? undefined : seconds * 1000;
 }
 
 function need(arg: string | undefined, usage: string): string {
@@ -69,7 +115,10 @@ async function main([command, ...args]: string[]): Promise<void> {
       const version = await browserVersion(state.port);
       if (!version) return print(`no browser on port ${state.port}; run "open-eyes launch"`);
       print(`browser: ${version.Browser} on port ${state.port}`);
-      return withPage(async (page) => `agent window: ${await page.url()}`);
+      return withPage(async (page) => {
+        const inControl = (await page.owner()) === "user" ? "the user" : "the agent";
+        return `agent window: ${await page.url()}\nin control: ${inControl}`;
+      });
     }
     case "close": {
       const state = loadState();
@@ -79,8 +128,17 @@ async function main([command, ...args]: string[]): Promise<void> {
     }
     case "open":
       return withPage((page) => page.goto(need(args[0], "open <url>")));
-    case "snapshot":
-      return withPage((page) => page.snapshot());
+    case "snapshot": {
+      const options = {
+        diff: takeFlag(args, "--diff"),
+        find: takeOption(args, "--find"),
+        scope: takeOption(args, "--scope"),
+        limit: takeNumber(args, "--limit", 0),
+        page: takeNumber(args, "--page", 1),
+      };
+      if (args.length) throw new Error(`unknown snapshot option "${args[0]}"; see "open-eyes help"`);
+      return withPage((page) => page.snapshot(options));
+    }
     case "click":
       return withPage((page) => page.click(need(args[0], "click <@N>")));
     case "fill": {
@@ -97,6 +155,15 @@ async function main([command, ...args]: string[]): Promise<void> {
       const file = need(args[0], "run <file|->");
       const source = readFileSync(file === "-" ? 0 : file, "utf8");
       return withPage((page) => runScript(page, source));
+    }
+    case "handoff": {
+      const timeout = takeTimeout(args);
+      const message = need(args.join(" ") || undefined, "handoff <message> [--timeout <seconds>]");
+      return withPage((page) => page.handoff(message, timeout));
+    }
+    case "wait": {
+      const timeout = takeTimeout(args);
+      return withPage((page) => page.handoff(undefined, timeout));
     }
     case undefined:
     case "help":

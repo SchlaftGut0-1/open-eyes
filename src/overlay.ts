@@ -2,12 +2,47 @@ import type { Box } from "./page.ts";
 
 export type OverlayAction = { label: string; x?: number; y?: number; box?: Box };
 
-// Runs inside the page. Built with DOM/CSSOM calls only (no innerHTML or <style>) so it
-// survives strict CSP and Trusted Types. It is aria-hidden, so snapshots never see it,
-// and pointer-events:none, so our synthetic clicks pass straight through it.
-const DRAW_OVERLAY = String.raw`(action) => {
+/** Who drives the agent window. null: unknown, e.g. a navigation wiped the page state. */
+export type Owner = "agent" | "user" | null;
+
+export type OverlayCommand =
+  | ({ type: "action"; busy?: boolean } & OverlayAction)
+  | { type: "idle" } // Re-enable the overlay buttons after a synthetic mouse event.
+  | { type: "show" }
+  | { type: "hide" }
+  | { type: "handoff"; message?: string } // Give control to the user.
+  | { type: "claim"; message?: string }; // Keep the user in control if a navigation forgot it.
+
+const OWNER_KEY = "open-eyes:owner";
+const MESSAGE_KEY = "open-eyes:message";
+
+// Runs inside the page and returns the current owner. Built with DOM/CSSOM calls only (no
+// innerHTML or <style>) so it survives strict CSP and Trusted Types. It is aria-hidden, so
+// snapshots never see it, and pointer-events:none except on its buttons, which are disabled
+// while the agent clicks so synthetic clicks pass straight through. Ownership lives in
+// sessionStorage so it survives reloads, and only trusted (real user) clicks change it.
+const OVERLAY = String.raw`(cmd) => {
   const ID = "__open_eyes__";
-  const ACCENT = "#7c5cff";
+  const AGENT = "#7c5cff";
+  const USER = "#16a34a";
+  const store = {
+    get(key) { try { return sessionStorage.getItem(key); } catch { return null; } },
+    set(key, value) {
+      try { value == null ? sessionStorage.removeItem(key) : sessionStorage.setItem(key, value); } catch {}
+    },
+  };
+  const state = (window.__openEyes ??= {
+    owner: store.get(${JSON.stringify(OWNER_KEY)}),
+    message: store.get(${JSON.stringify(MESSAGE_KEY)}),
+    label: "agent working",
+  });
+  const setOwner = (owner, message) => {
+    state.owner = owner;
+    state.message = message ?? null;
+    store.set(${JSON.stringify(OWNER_KEY)}, owner);
+    store.set(${JSON.stringify(MESSAGE_KEY)}, state.message);
+  };
+
   let host = document.getElementById(ID);
   if (!host) {
     host = document.createElement("div");
@@ -16,11 +51,12 @@ const DRAW_OVERLAY = String.raw`(action) => {
     host.style.cssText = "all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;";
     const root = host.attachShadow({ mode: "open" });
     const part = (el, name, css) => { el.dataset.part = name; el.style.cssText = css; root.appendChild(el); return el; };
+    const font = "font:500 13px/1.4 system-ui,sans-serif;";
+    const pill = "border-radius:999px;color:#fff;box-shadow:0 4px 16px rgb(0 0 0 / .25);" + font;
 
-    part(document.createElement("div"), "frame",
-      "position:fixed;inset:0;box-shadow:inset 0 0 0 3px " + ACCENT + ";");
+    part(document.createElement("div"), "frame", "position:fixed;inset:0;");
     part(document.createElement("div"), "box",
-      "position:fixed;opacity:0;border:2px solid " + ACCENT + ";border-radius:4px;" +
+      "position:fixed;opacity:0;border:2px solid " + AGENT + ";border-radius:4px;" +
       "background:rgb(124 92 255 / .12);transition:all .25s ease;");
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("viewBox", "0 0 24 24");
@@ -28,7 +64,7 @@ const DRAW_OVERLAY = String.raw`(action) => {
     svg.setAttribute("height", "24");
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", "M3 2l17 9-7.5 2L9 20.5z");
-    path.setAttribute("fill", ACCENT);
+    path.setAttribute("fill", AGENT);
     path.setAttribute("stroke", "#fff");
     path.setAttribute("stroke-width", "1.5");
     path.setAttribute("stroke-linejoin", "round");
@@ -38,35 +74,103 @@ const DRAW_OVERLAY = String.raw`(action) => {
       "filter:drop-shadow(0 2px 3px rgb(0 0 0 / .35));" +
       "transform:translate(" + innerWidth / 2 + "px," + innerHeight / 2 + "px);");
     part(document.createElement("div"), "banner",
-      "position:fixed;top:10px;left:50%;transform:translateX(-50%);max-width:80vw;" +
-      "padding:6px 14px;border-radius:999px;background:" + ACCENT + ";color:#fff;" +
-      "font:500 13px/1.4 system-ui,sans-serif;white-space:nowrap;overflow:hidden;" +
-      "text-overflow:ellipsis;box-shadow:0 4px 16px rgb(0 0 0 / .25);");
+      "position:fixed;top:10px;left:50%;transform:translateX(-50%);max-width:80vw;padding:6px 14px;" +
+      "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" + pill);
+
+    const take = part(document.createElement("button"), "take",
+      "position:fixed;right:16px;bottom:16px;padding:8px 14px;border:0;cursor:pointer;" +
+      "pointer-events:auto;background:" + AGENT + ";" + pill);
+    take.textContent = "✋ Take control";
+    take.addEventListener("click", (event) => {
+      if (!event.isTrusted) return; // Page scripts cannot take control on the user's behalf.
+      setOwner("user", null);
+      render();
+    });
+
+    const panel = part(document.createElement("div"), "panel",
+      "position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:min(480px,90vw);" +
+      "padding:14px 16px;border-radius:12px;background:#fff;color:#111;pointer-events:auto;" +
+      "box-shadow:0 8px 32px rgb(0 0 0 / .3);border:2px solid " + USER + ";" + font);
+    const message = document.createElement("div");
+    message.dataset.part = "message";
+    message.style.cssText = "margin-bottom:10px;white-space:pre-wrap;";
+    panel.appendChild(message);
+    const back = document.createElement("button");
+    back.dataset.part = "back";
+    back.textContent = "Hand back to agent ↩";
+    back.style.cssText = "padding:8px 14px;border:0;cursor:pointer;background:" + USER + ";" + pill;
+    back.addEventListener("click", (event) => {
+      if (!event.isTrusted) return;
+      setOwner("agent", null);
+      render();
+    });
+    panel.appendChild(back);
+
     (document.body ?? document.documentElement).appendChild(host);
   }
-
-  if (!action) { host.style.display = "none"; return; }
-  host.style.display = "";
   const get = (name) => host.shadowRoot.querySelector('[data-part="' + name + '"]');
 
-  get("banner").textContent = "\u{1F441} open-eyes · " + action.label;
-  const box = get("box");
-  if (action.box) {
-    Object.assign(box.style, {
-      left: action.box.x - 3 + "px", top: action.box.y - 3 + "px",
-      width: action.box.width + 6 + "px", height: action.box.height + 6 + "px", opacity: "1",
-    });
-  } else {
-    box.style.opacity = "0";
+  function render() {
+    const user = state.owner === "user";
+    get("frame").style.boxShadow = "inset 0 0 0 3px " + (user ? USER : AGENT);
+    const banner = get("banner");
+    banner.style.background = user ? USER : AGENT;
+    banner.textContent = user
+      ? "\u{1F464} You are in control · the agent is paused"
+      : "\u{1F441} open-eyes · " + state.label;
+    get("take").style.display = user ? "none" : "";
+    get("panel").style.display = user ? "" : "none";
+    get("message").textContent = state.message || "Do what you need, then hand control back to the agent.";
+    if (user) {
+      get("box").style.opacity = "0";
+      get("cursor").style.opacity = "0";
+    }
   }
-  if (action.x !== undefined) {
-    const cursor = get("cursor");
-    cursor.style.opacity = "1";
-    cursor.style.transform = "translate(" + (action.x - 3) + "px," + (action.y - 2) + "px)";
+
+  switch (cmd.type) {
+    case "hide":
+      host.style.display = "none";
+      return state.owner;
+    case "handoff":
+      setOwner("user", cmd.message);
+      break;
+    case "claim":
+      if (state.owner == null) setOwner("user", cmd.message);
+      break;
+    case "idle":
+      get("take").style.pointerEvents = "auto";
+      break;
+    case "action": {
+      if (state.owner === "user") break;
+      state.label = cmd.label;
+      get("take").style.pointerEvents = cmd.busy ? "none" : "auto";
+      const box = get("box");
+      if (cmd.box) {
+        Object.assign(box.style, {
+          left: cmd.box.x - 3 + "px", top: cmd.box.y - 3 + "px",
+          width: cmd.box.width + 6 + "px", height: cmd.box.height + 6 + "px", opacity: "1",
+        });
+      } else {
+        box.style.opacity = "0";
+      }
+      if (cmd.x !== undefined) {
+        const cursor = get("cursor");
+        cursor.style.opacity = "1";
+        cursor.style.transform = "translate(" + (cmd.x - 3) + "px," + (cmd.y - 2) + "px)";
+      }
+      break;
+    }
   }
+  host.style.display = "";
+  render();
+  return state.owner;
 }`;
 
-/** Shows what the agent is doing, or hides the overlay when `action` is null. */
-export function overlayExpression(action: OverlayAction | null): string {
-  return `(${DRAW_OVERLAY})(${JSON.stringify(action)})`;
+export function overlayExpression(cmd: OverlayCommand): string {
+  return `(${OVERLAY})(${JSON.stringify(cmd)})`;
 }
+
+/** Reads the owner without drawing anything. */
+export const OWNER_EXPRESSION = `window.__openEyes?.owner ?? (() => {
+  try { return sessionStorage.getItem(${JSON.stringify(OWNER_KEY)}); } catch { return null; }
+})()`;

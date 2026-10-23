@@ -45,6 +45,50 @@ const refOf = (snapshot: string, entry: string) => {
   return ref;
 };
 
+async function until<T>(check: () => Promise<T>, what: string, timeoutMs = 10_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await check().catch(() => undefined);
+    if (value) return value;
+    await sleep(100);
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+/** Acts as the human: a separate DevTools connection to the agent window with real clicks. */
+async function humanAt(): Promise<{
+  evaluate: (expression: string) => Promise<any>;
+  click: (part: string) => Promise<void>;
+  navigate: (url: string) => Promise<void>;
+  close: () => void;
+}> {
+  const { targetId } = JSON.parse(readFileSync(join(env.XDG_STATE_HOME, "open-eyes", "state.json"), "utf8"));
+  const cdp = await CDP.connect((await browserVersion(port))!.webSocketDebuggerUrl);
+  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+  const evaluate = async (expression: string) =>
+    (await cdp.send("Runtime.evaluate", { expression, returnByValue: true }, sessionId)).result.value;
+  const part = (name: string) =>
+    `document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="${name}"]')`;
+  return {
+    evaluate,
+    async click(name) {
+      const point = await until(
+        () => evaluate(`(() => { const el = ${part(name)}; if (!el?.checkVisibility()) return null;
+          const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`),
+        `the overlay "${name}" button`,
+      );
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await cdp.send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 }, sessionId);
+      }
+    },
+    async navigate(url) {
+      await cdp.send("Page.navigate", { url }, sessionId);
+      await until(() => evaluate(`location.href === ${JSON.stringify(url)} && document.readyState === "complete"`), url);
+    },
+    close: () => cdp.close(),
+  };
+}
+
 describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no Chromium-based browser" }, () => {
   before(() => cli("launch", "--headless"));
 
@@ -80,10 +124,38 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.equal(await cli("eval", "document.getElementById('out').textContent"), "Hello, Ana (accepted)");
   });
 
+  test("refs stay stable and actions report what changed", async () => {
+    await cli("open", fixture("form.html"));
+    const first = await cli("snapshot");
+    const send = refOf(first, 'button "Send"');
+
+    assert.match(await cli("fill", refOf(first, 'textbox "Name"'), "Bo"), /changes:\n.*value="Bo"/s);
+    assert.match(await cli("click", send), /clicked button "Send"\nchanges:\n.*\+ - text "Hello, Bo"/s);
+
+    assert.equal(refOf(await cli("snapshot"), 'button "Send"'), send);
+    assert.match(await cli("snapshot", "--diff"), /no changes since the last snapshot/);
+  });
+
+  test("snapshots can be searched, scoped and paged", async () => {
+    const all = await cli("snapshot");
+    const found = await cli("snapshot", "--find", "terms");
+    assert.match(found, /checkbox "Accept terms"/);
+    assert.doesNotMatch(found, /heading "Sign up"/);
+
+    const name = refOf(all, 'textbox "Name"');
+    const scoped = (await cli("snapshot", "--scope", name)).split("\n\n")[1];
+    assert.match(scoped, new RegExp(`^- textbox "Name".* ${name}`));
+    assert.doesNotMatch(scoped, /button/);
+
+    assert.match(await cli("snapshot", "--limit", "2"), /page 1 of \d+ .*next: --page 2/);
+    assert.match(await cli("snapshot", "--limit", "2", "--page", "2"), /page 2 of/);
+    assert.match(await cliError("snapshot", "--bogus"), /unknown snapshot option/);
+  });
+
   test("refs from a page that is gone are rejected", async () => {
     const snapshot = await cli("snapshot");
     const name = refOf(snapshot, 'textbox "Name"');
-    await cli("click", refOf(snapshot, 'link "Next page"'));
+    assert.match(await cli("click", refOf(snapshot, 'link "Next page"')), /the page changed to .*second\.html/);
     assert.match(await cliError("fill", name, "x"), /no longer loaded/);
     assert.match(await cliError("click", "@999"), /unknown ref/);
   });
@@ -98,6 +170,55 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
        return page.eval("document.querySelector('input').value");`,
     );
     assert.equal(await cli("run", script), "open-eyes");
+  });
+
+  test("the user can take control, and the agent waits for them", async () => {
+    await cli("open", fixture("form.html"));
+    const snapshot = await cli("snapshot");
+    const send = refOf(snapshot, 'button "Send"');
+    const human = await humanAt();
+    try {
+      await human.click("take");
+      assert.match(await cliError("click", send), /taken control/);
+      assert.match(await cli("status"), /in control: the user/);
+
+      const waiting = cli("wait", "--timeout", "20");
+      await sleep(1000);
+      await human.click("back");
+      assert.match(await waiting, /handed control back/);
+      assert.match(await cli("click", send), /clicked/);
+    } finally {
+      human.close();
+    }
+  });
+
+  test("page scripts cannot take control", async () => {
+    const human = await humanAt();
+    try {
+      await human.evaluate(`document.getElementById("__open_eyes__").shadowRoot.querySelector('[data-part="take"]').click()`);
+      assert.match(await cli("status"), /in control: the agent/);
+    } finally {
+      human.close();
+    }
+  });
+
+  test("handoff asks the user for help and survives their navigation", async () => {
+    const human = await humanAt();
+    try {
+      const asking = cli("handoff", "Please log in", "--timeout", "30");
+      const message = `document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="message"]')?.textContent`;
+      const asked = async () => (await human.evaluate(message)) === "Please log in";
+      await until(asked, "the handoff panel");
+
+      await human.navigate(fixture("second.html"));
+      // The navigation wiped the page; the waiting agent must put the user back in control.
+      await until(asked, "the handoff panel after navigating");
+
+      await human.click("back");
+      assert.match(await asking, /handed control back; now on .*second\.html/);
+    } finally {
+      human.close();
+    }
   });
 
   test("screenshot writes a PNG", async () => {
