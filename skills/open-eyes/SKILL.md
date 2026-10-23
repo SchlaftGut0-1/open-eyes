@@ -32,7 +32,8 @@ Cheaper than reading everything:
 - `snapshot --full`: the whole page (expensive)
 - `screenshot`: only when visuals matter
 
-Off-screen refs are clickable. For many steps, write one `open-eyes run -` script with
+Off-screen refs are clickable. `open-eyes scroll [down|up]` moves the page and shows
+what is on screen; `scroll @N down` scrolls the list or panel holding `@N`. For many steps, write one `open-eyes run -` script with
 `page` in scope; `open-eyes help` lists its methods and every option.
 
 ## The user

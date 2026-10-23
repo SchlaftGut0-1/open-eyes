@@ -48,13 +48,18 @@ Page (works in the agent's own window)
   click <@N>             Click an element from the last snapshot
   fill <@N> <text>       Replace the content of a field
   press <key>            Press a key (Enter, Tab, Escape, ArrowDown, a, ...)
+  scroll [@N] [down|up] [pixels]
+                         Scroll the page (default: down one screen); with @N, scroll
+                         the list or panel holding it, or with no direction bring
+                         @N into view. Prints what is on screen afterwards
   screenshot [path]      Save a PNG of the page and print its path
   eval <js>              Evaluate a JavaScript expression in the page
   run <file|->           Run a script with \`page\` in scope (- reads stdin)
 
 Scripts (open-eyes run): \`page\` methods, all async
   goto(url)  snapshot({ full, find, scope, diff, interactive, limit, page })
-  click("@N")  fill("@N", text)  press(key)  waitForText(text, ms?)  wait(ms)
+  click("@N")  fill("@N", text)  press(key)  scroll(ref?, "down"|"up", px?)
+  waitForText(text, ms?)  wait(ms)
   eval(js)  screenshot(path?)  handoff(message?, ms?)  url()
   Refs come from snapshot(): take one before clicking and after the page changes.
 
@@ -309,6 +314,18 @@ async function main([command, ...args]: string[]): Promise<void> {
     }
     case "press":
       return withPage(`press ${args[0] ?? ""}`, (page) => page.press(need(args[0], "press <key>")));
+    case "scroll": {
+      let ref: string | undefined;
+      let direction: "down" | "up" | undefined;
+      let pixels: number | undefined;
+      for (const arg of args) {
+        if (/^@\d+$/.test(arg) && ref === undefined) ref = arg;
+        else if (arg === "down" || arg === "up") direction = arg;
+        else if (/^\d+$/.test(arg)) pixels = Number(arg);
+        else throw new Error("usage: open-eyes scroll [@N] [down|up] [pixels]");
+      }
+      return withPage(`scroll ${args.join(" ")}`.trim(), (page) => page.scroll(ref, direction, pixels));
+    }
     case "screenshot":
       return withPage("screenshot", (page) => page.screenshot(args[0]));
     case "eval":

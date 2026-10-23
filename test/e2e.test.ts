@@ -433,6 +433,30 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("snapshot", "--interactive", "--diff"), /cannot be combined/);
   });
 
+  test("scroll moves the page or a container and shows what is on screen", async () => {
+    await cli("open", fixture("tall.html"));
+    const down = await cli("scroll", "down", "3000");
+    assert.match(down, /^scrolled down 3000 px in the page$/m);
+    assert.match(down, /button Bottom button @\d+/);
+    assert.match(down, /^heading Top \(above\)$/m);
+
+    assert.match(await cli("scroll", "up", "99999"), /scrolled up 99999 px/);
+    assert.match(await cli("scroll", "up"), /the page did not move \(already at the top/);
+
+    const button = refOf(await cli("snapshot", "--find", "Bottom button"), "button Bottom button");
+    const intoView = await cli("scroll", button);
+    assert.match(intoView, /^scrolled to button "Bottom button"$/m);
+    assert.match(intoView, /button Bottom button/);
+
+    await cli("open", fixture("list.html"));
+    const first = refOf(await cli("snapshot"), "button Message 1 ");
+    const inList = await cli("scroll", first, "down", "400");
+    assert.match(inList, /scrolled down 400 px in the area of button "Message 1"/);
+    assert.ok(Number(await cli("eval", "document.getElementById('list').scrollTop")) > 0, "the list scrolled");
+    assert.match(inList, /button Message 1\d @\d+/);
+    assert.match(await cliError("scroll", "sideways"), /usage: open-eyes scroll/);
+  });
+
   test("screenshot writes a PNG", async () => {
     const file = await cli("screenshot", join(root, "shot.png"));
     assert.ok(existsSync(file));

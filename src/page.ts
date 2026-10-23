@@ -245,6 +245,52 @@ export class Page {
     });
   }
 
+  /**
+   * Scrolls with real mouse-wheel events, so lazy loading triggers and apps that scroll
+   * inside a container move too. Without a ref the wheel turns at the center of the page;
+   * with one it turns over that element, scrolling whatever container holds it; a ref and
+   * no direction brings the element into view. Returns what is on screen afterwards.
+   */
+  scroll(ref?: string, direction?: "down" | "up", pixels?: number): Promise<string> {
+    const target = [ref, direction, pixels].filter((part) => part !== undefined).join(" ") || "down";
+    return this.#audited("scroll", target, async (entry) => {
+      await this.#guard();
+      const [width, height, before] = (await this.#evaluate("[innerWidth, innerHeight, scrollY]")) as number[];
+      let summary: string;
+      if (ref && !direction) {
+        const { backendNodeId, label } = await this.#resolve(ref);
+        entry.target = label;
+        const box = await this.#locate(backendNodeId, ref); // Scrolls it into view.
+        await this.#announce({ label: `scroll to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+        summary = `scrolled to ${label}`;
+      } else {
+        let x = width / 2;
+        let y = height / 2;
+        let where = "the page";
+        if (ref) {
+          const { backendNodeId, label } = await this.#resolve(ref);
+          const box = await this.#locate(backendNodeId, ref);
+          x = box.x + box.width / 2;
+          y = box.y + box.height / 2;
+          where = `the area of ${label}`;
+        }
+        const distance = Math.round(pixels ?? height * 0.85);
+        const dir = direction ?? "down";
+        await this.#announce({ label: `scroll ${dir} ${where}`, x, y, busy: true });
+        await this.#send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: dir === "down" ? distance : -distance });
+        await this.#overlay({ type: "idle" });
+        summary = `scrolled ${dir} ${distance} px in ${where}`;
+      }
+      await this.#evaluate(WAIT_FOR_QUIET_DOM).catch(() => {});
+      await sleep(150); // Let smooth scrolling settle.
+      const after = (await this.#evaluate("scrollY")) as number;
+      if (!ref && after === before) {
+        summary += ` but the page did not move (already at the ${direction === "up" ? "top" : "bottom"}, or the content scrolls inside a container: try scroll @N ${direction ?? "down"})`;
+      }
+      return `${summary}\n${await this.snapshot()}`;
+    });
+  }
+
   /** Saves a PNG of the visible page (without the overlay) and returns its path. */
   async screenshot(path?: string): Promise<string> {
     await this.#guard();
