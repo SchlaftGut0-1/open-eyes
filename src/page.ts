@@ -1,15 +1,36 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { CDP } from "./cdp.ts";
 import { OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
 import { formatSnapshot, type AXNode } from "./snapshot.ts";
 import { stateDir, type Ref, type State } from "./state.ts";
+import { diffLines, findLines, paginate, subtree } from "./view.ts";
 
 export type Box = { x: number; y: number; width: number; height: number };
 
 /** Pause after showing an action so the human can follow along. 0 disables it. */
 const SLOWMO_MS = Number(process.env.OPEN_EYES_SLOWMO ?? 400);
+
+/** Default snapshot page size in lines; 0 shows everything. */
+const SNAPSHOT_LIMIT = Number(process.env.OPEN_EYES_SNAPSHOT_LIMIT ?? 400);
+/** After an action, report what changed on the page (off with OPEN_EYES_OBSERVE=0). */
+const OBSERVE = process.env.OPEN_EYES_OBSERVE !== "0";
+const OBSERVE_LIMIT = 80;
+/** The last snapshot's text, the baseline for diffs. */
+const baselineFile = join(stateDir, "snapshot.txt");
+
+export type SnapshotOptions = {
+  /** Only what changed since the last snapshot of this page. */
+  diff?: boolean;
+  /** Page size in lines; 0 shows everything. */
+  limit?: number;
+  page?: number;
+  /** Only the element with this ref and what is inside it. */
+  scope?: string;
+  /** Only lines containing this text, with their ancestors. */
+  find?: string;
+};
 
 const USER_IN_CONTROL =
   'the user has taken control of the agent window; run "open-eyes wait" to wait until they hand it back';
@@ -30,6 +51,19 @@ const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
   PageUp: { code: "PageUp", keyCode: 33 },
   PageDown: { code: "PageDown", keyCode: 34 },
 };
+
+// Resolves once the DOM has gone QUIET_MS without changes (or after MAX_MS for pages that
+// never stop, like carousels), so frameworks can finish re-rendering after an action.
+const QUIET_MS = 300;
+const MAX_QUIET_WAIT_MS = 2000;
+const WAIT_FOR_QUIET_DOM = `new Promise((resolve) => {
+  let timer;
+  const done = () => { observer.disconnect(); clearTimeout(timer); clearTimeout(cap); resolve(true); };
+  const observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, ${QUIET_MS}); });
+  observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+  timer = setTimeout(done, ${QUIET_MS});
+  const cap = setTimeout(done, ${MAX_QUIET_WAIT_MS});
+})`;
 
 const SELECT_CONTENTS = `function () {
   if (typeof this.select === "function") return this.select();
@@ -71,14 +105,24 @@ export class Page {
     return current;
   }
 
-  async snapshot(): Promise<string> {
-    await this.#send("Accessibility.enable");
-    const { nodes } = await this.#send<{ nodes: AXNode[] }>("Accessibility.getFullAXTree");
-    const { text, refs } = formatSnapshot(nodes);
-    this.#state.refs = refs;
-    this.#state.refsLoaderId = await this.#loaderId();
+  async snapshot(options: SnapshotOptions = {}): Promise<string> {
+    const { lines, previous } = await this.#capture();
+    let body: string[];
+    if (options.diff) {
+      const changes = previous && diffLines(previous, lines);
+      if (!previous) body = ["(first snapshot of this page, so all of it)", ...lines];
+      else if (!changes) body = ["(too many changes to diff, so all of it)", ...lines];
+      else body = changes.length ? changes : ["no changes since the last snapshot"];
+    } else {
+      body = options.scope ? subtree(lines, options.scope) : lines;
+      if (options.find) {
+        body = findLines(body, options.find);
+        if (!body.length) body = [`nothing matches "${options.find}"`];
+      }
+    }
     const title = await this.eval("document.title");
-    return `url: ${await this.url()}\ntitle: ${JSON.stringify(title)}\n\n${text}`;
+    const shown = paginate(body, options.limit ?? SNAPSHOT_LIMIT, options.page);
+    return `url: ${await this.url()}\ntitle: ${JSON.stringify(title)}\n\n${shown.join("\n")}`;
   }
 
   async click(ref: string): Promise<string> {
@@ -94,7 +138,7 @@ export class Page {
     await this.#overlay({ type: "idle" });
     await sleep(150);
     await this.#settle(10_000);
-    return `clicked ${label}`;
+    return `clicked ${label}${await this.#observe()}`;
   }
 
   async fill(ref: string, text: string): Promise<string> {
@@ -107,7 +151,7 @@ export class Page {
     // Inserting over the selection replaces existing content and fires real input events.
     if (text) await this.#send("Input.insertText", { text });
     else await this.press("Backspace", false);
-    return `filled ${label}`;
+    return `filled ${label}${await this.#observe()}`;
   }
 
   async press(key: string, announce = true): Promise<string> {
@@ -117,8 +161,9 @@ export class Page {
     const common = { key: key === "Space" ? " " : key, code: def.code, windowsVirtualKeyCode: def.keyCode };
     await this.#send("Input.dispatchKeyEvent", { type: def.text ? "keyDown" : "rawKeyDown", text: def.text, ...common });
     await this.#send("Input.dispatchKeyEvent", { type: "keyUp", ...common });
-    if (announce) await this.#settle(10_000);
-    return `pressed ${key}`;
+    if (!announce) return `pressed ${key}`;
+    await this.#settle(10_000);
+    return `pressed ${key}${await this.#observe()}`;
   }
 
   /** Saves a PNG of the visible page (without the overlay) and returns its path. */
@@ -195,6 +240,56 @@ export class Page {
       throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
     }
     return result.value;
+  }
+
+  /**
+   * Reads the page and numbers its elements, keeping the refs of elements already seen
+   * on this document. Returns the lines and, for the same document, the previous ones.
+   */
+  async #capture(): Promise<{ lines: string[]; previous?: string[] }> {
+    const loaderId = await this.#loaderId();
+    const sameDocument = this.#state.refsLoaderId === loaderId;
+    const byNode = new Map<number, number>();
+    if (sameDocument) {
+      for (const [ref, { backendNodeId }] of Object.entries(this.#state.refs)) byNode.set(backendNodeId, Number(ref));
+    }
+    await this.#send("Accessibility.enable");
+    const { nodes } = await this.#send<{ nodes: AXNode[] }>("Accessibility.getFullAXTree");
+    const { text, refs, nextRef } = formatSnapshot(nodes, {
+      byNode,
+      nextRef: sameDocument ? (this.#state.nextRef ?? 1) : 1,
+    });
+
+    let previous: string[] | undefined;
+    if (sameDocument) {
+      try {
+        const saved = readFileSync(baselineFile, "utf8");
+        previous = saved ? saved.split("\n") : [];
+      } catch {
+        // No baseline yet.
+      }
+    }
+    Object.assign(this.#state, { refs, refsLoaderId: loaderId, nextRef });
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(baselineFile, text);
+    return { lines: text ? text.split("\n") : [], previous };
+  }
+
+  /** What an action changed, so the agent rarely needs a separate snapshot. */
+  async #observe(): Promise<string> {
+    await this.#evaluate(WAIT_FOR_QUIET_DOM).catch(() => {}); // Fails if the page navigated.
+    if (!OBSERVE || !this.#state.refsLoaderId) return "";
+    if (this.#state.refsLoaderId !== (await this.#loaderId())) {
+      return `\nthe page changed to ${await this.url()}; run "open-eyes snapshot" to see it`;
+    }
+    const { lines, previous } = await this.#capture();
+    if (!previous) return "";
+    const changes = diffLines(previous, lines);
+    if (!changes) return `\nthe page changed a lot; run "open-eyes snapshot" to see it`;
+    if (!changes.length) return "\nno visible changes";
+    const more = changes.length - OBSERVE_LIMIT;
+    const tail = more > 0 ? [`… ${more} more changed lines; run "open-eyes snapshot" to see the page`] : [];
+    return `\nchanges:\n${[...changes.slice(0, OBSERVE_LIMIT), ...tail].join("\n")}`;
   }
 
   /** Updates the overlay and returns who is in control; never fails over drawing. */

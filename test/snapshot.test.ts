@@ -71,6 +71,17 @@ describe("formatSnapshot", () => {
     assert.equal(text, ['- checkbox "Terms" [checked, disabled] @1', '- button "Menu" [collapsed] @2'].join("\n"));
   });
 
+  test("keeps the refs of elements it has seen before", () => {
+    const nodes = page(
+      el("button", "New", { backendDOMNodeId: 30 }),
+      el("button", "Old", { backendDOMNodeId: 20 }),
+    );
+    const { text, refs, nextRef } = formatSnapshot(nodes, { byNode: new Map([[20, 4]]), nextRef: 7 });
+    assert.equal(text, ['- button "New" @7', '- button "Old" @4'].join("\n"));
+    assert.deepEqual(Object.keys(refs), ["4", "7"]);
+    assert.equal(nextRef, 8);
+  });
+
   test("truncates long text", () => {
     const { text } = formatSnapshot(page(el("heading", "x".repeat(500))));
     assert.equal(text, `- heading "${"x".repeat(120)}…"`);
