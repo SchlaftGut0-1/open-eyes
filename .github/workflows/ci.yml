@@ -17,6 +17,8 @@ jobs:
     name: build (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
+      # Let every Node version report, so one failure does not hide the others.
+      fail-fast: false
       matrix:
         node: [22, 24]
     steps:
