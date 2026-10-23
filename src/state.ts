@@ -32,6 +32,8 @@ export type State = {
   nextRef?: number;
   /** Set while connected to the user's browser through the daemon (`open-eyes connect`). */
   daemonPid?: number;
+  /** Show the token counter in the agent window (`open-eyes usage show`). */
+  showTokens?: boolean;
 };
 
 const TARGET_ID = /^[0-9A-F]{32}$/i;
@@ -62,6 +64,7 @@ export function parseState(raw: unknown): Omit<State, "port"> & { port?: number 
     refsLoaderId: typeof saved.refsLoaderId === "string" && TARGET_ID.test(saved.refsLoaderId) ? saved.refsLoaderId : undefined,
     nextRef: Number.isInteger(saved.nextRef) && (saved.nextRef as number) > 0 ? (saved.nextRef as number) : undefined,
     daemonPid: Number.isInteger(saved.daemonPid) && (saved.daemonPid as number) > 0 ? (saved.daemonPid as number) : undefined,
+    showTokens: saved.showTokens === true ? true : undefined,
   };
 }
 

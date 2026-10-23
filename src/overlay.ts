@@ -12,7 +12,8 @@ export type OverlayCommand =
   | { type: "hide" }
   | { type: "handoff"; message?: string } // Give control to the user.
   | { type: "claim"; message?: string } // Keep the user in control if a navigation forgot it.
-  | { type: "confirm"; id: string; message: string }; // Ask the user to allow a risky action.
+  | { type: "confirm"; id: string; message: string } // Ask the user to allow a risky action.
+  | { type: "usage"; text: string | null }; // Token counter; null hides it.
 
 const OWNER_KEY = "open-eyes:owner";
 const MESSAGE_KEY = "open-eyes:message";
@@ -38,6 +39,7 @@ const OVERLAY = String.raw`(cmd) => {
     label: "agent working",
     confirm: null,
     decisions: {},
+    usage: null,
   });
   const setOwner = (owner, message) => {
     state.owner = owner;
@@ -146,6 +148,11 @@ const OVERLAY = String.raw`(cmd) => {
     choice("allow", "Allow", USER);
     choice("deny", "Deny", "#dc2626");
 
+    part(document.createElement("div"), "usage",
+      "position:fixed;left:16px;bottom:16px;padding:6px 12px;border-radius:8px;" +
+      "background:rgb(17 17 17 / .85);color:#fff;font:500 12px/1.4 ui-monospace,monospace;" +
+      "box-shadow:0 4px 16px rgb(0 0 0 / .25);");
+
     (document.body ?? document.documentElement).appendChild(host);
   }
   const get = (name) => host.shadowRoot.querySelector('[data-part="' + name + '"]');
@@ -162,6 +169,8 @@ const OVERLAY = String.raw`(cmd) => {
     get("take").style.display = user || asking ? "none" : "";
     get("panel").style.display = user ? "" : "none";
     get("ask").style.display = asking ? "" : "none";
+    get("usage").style.display = state.usage ? "" : "none";
+    get("usage").textContent = state.usage ? "\u{1FA99} " + state.usage : "";
     if (asking) get("question").textContent = "\u26A0\uFE0F The agent wants to " + state.confirm.message + ". Allow it?";
     get("message").textContent = state.message || "Do what you need, then hand control back to the agent.";
     if (user) {
@@ -182,6 +191,9 @@ const OVERLAY = String.raw`(cmd) => {
       break;
     case "confirm":
       if (!(cmd.id in state.decisions)) state.confirm = { id: cmd.id, message: cmd.message };
+      break;
+    case "usage":
+      state.usage = cmd.text;
       break;
     case "idle":
       get("take").style.pointerEvents = "auto";
