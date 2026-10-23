@@ -42,10 +42,24 @@ user may have navigated.
 
 1. `open-eyes open <url>`
 2. `open-eyes snapshot`: the page as indented text. Every actionable element ends with
-   a ref like `@7`.
+   a ref like `@7`. An element keeps its ref while the page stays loaded.
 3. Act with refs: `open-eyes click @7`, `open-eyes fill @3 "some text"`, `open-eyes press Enter`.
-4. Snapshot again after anything that changes the page. Refs from an old snapshot go
-   stale when the page changes; the CLI tells you when that happens.
+   Each action prints the **changes** it caused (`+` added, `-` removed, under their
+   parent), so you usually do not need another snapshot.
+4. After a navigation ("the page changed to ..."), take a new snapshot: refs from the
+   old page are rejected.
+
+## Keep snapshots small
+
+Snapshots are capped at 400 lines per page. Prefer narrow views over reading everything:
+
+| Command | Shows |
+|---|---|
+| `snapshot --find "<text>"` | Only lines containing the text, with their parents. Best way to locate an element |
+| `snapshot --scope @N` | Only element `@N` and what is inside it (a form, a list, a dialog) |
+| `snapshot --diff` | Only what changed since your last snapshot |
+| `snapshot --page 2` | The next page of a long snapshot |
+| `snapshot --limit 0` | Everything (expensive on big pages) |
 
 Use `open-eyes screenshot` when layout or visuals matter (it prints a PNG path you can
 read). Prefer `snapshot` for everything else: it is far cheaper.
@@ -68,7 +82,7 @@ EOF
 | Method | Does |
 |---|---|
 | `goto(url)` | Open a URL, wait for load, return the final URL |
-| `snapshot()` | Return the page text with fresh `@N` refs |
+| `snapshot(options?)` | Return the page text with `@N` refs; options `{ diff, find, scope, limit, page }` |
 | `click("@N")` | Click an element |
 | `fill("@N", text)` | Replace a field's content |
 | `press(key)` | `Enter`, `Tab`, `Escape`, arrows, or one character |

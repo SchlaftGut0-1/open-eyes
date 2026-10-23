@@ -17,6 +17,8 @@ export type State = {
   refs: Record<string, Ref>;
   /** The document the refs belong to; a navigation makes them stale. */
   refsLoaderId?: string;
+  /** Next ref number for this document; numbers are never reused within it. */
+  nextRef?: number;
 };
 
 const TARGET_ID = /^[0-9A-F]{32}$/i;
@@ -45,6 +47,7 @@ export function parseState(raw: unknown): Omit<State, "port"> & { port?: number 
     targetId: typeof saved.targetId === "string" && TARGET_ID.test(saved.targetId) ? saved.targetId : undefined,
     refs,
     refsLoaderId: typeof saved.refsLoaderId === "string" && TARGET_ID.test(saved.refsLoaderId) ? saved.refsLoaderId : undefined,
+    nextRef: Number.isInteger(saved.nextRef) && (saved.nextRef as number) > 0 ? (saved.nextRef as number) : undefined,
   };
 }
 

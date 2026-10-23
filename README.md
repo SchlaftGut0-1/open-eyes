@@ -16,9 +16,11 @@ what it is doing** as it happens.
 - **Take control any time.** Press **Take control** in the agent's window to pause it,
   do what you need, and hand it back. Agents can also ask for help with
   `open-eyes handoff "Please log in"` and wait for you.
-- **Cheap eyes.** `snapshot` turns the page into compact text with `@N` refs, so the
-  model reads structure instead of burning tokens on screenshots. Screenshots are there
-  when visuals matter.
+- **Cheap eyes.** `snapshot` turns the page into compact text with stable `@N` refs, so
+  the model reads structure instead of burning tokens on screenshots. Every action
+  reports only what it changed, and `--find`, `--scope` and `--diff` show just the part
+  that matters. On a Wikipedia article, a click reports ~200 tokens of changes instead
+  of a ~13,000-token page. Screenshots are there when visuals matter.
 - **One call, many steps.** Agents can write a short script (`open-eyes run`) instead of
   a slow command-by-command loop.
 - **Linux first**, fully open source (MIT).
@@ -47,6 +49,7 @@ To use it from an agent, copy `skills/open-eyes` into your agent's skills direct
 | `status` | Show the browser and the agent window |
 | `open <url>` | Open a URL in the agent window |
 | `snapshot` | Print the page as text; actionable elements get `@N` refs |
+| `snapshot --find <text>` / `--scope @N` / `--diff` | Only matching lines, one element, or what changed |
 | `click <@N>` | Click an element |
 | `fill <@N> <text>` | Replace a field's content |
 | `press <key>` | Press a key |
@@ -78,6 +81,6 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 
 ## Status
 
-Early MVP. Next up: smaller snapshots (diffs and size limits), attaching to your
-everyday browser profile, guardrails against prompt injection, snapshots inside
-iframes, and several parallel agent windows ("spaces").
+Early MVP. Next up: attaching to your everyday browser profile, guardrails against
+prompt injection, snapshots inside iframes, and several parallel agent windows
+("spaces").

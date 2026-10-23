@@ -124,10 +124,38 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.equal(await cli("eval", "document.getElementById('out').textContent"), "Hello, Ana (accepted)");
   });
 
+  test("refs stay stable and actions report what changed", async () => {
+    await cli("open", fixture("form.html"));
+    const first = await cli("snapshot");
+    const send = refOf(first, 'button "Send"');
+
+    assert.match(await cli("fill", refOf(first, 'textbox "Name"'), "Bo"), /changes:\n.*value="Bo"/s);
+    assert.match(await cli("click", send), /clicked button "Send"\nchanges:\n.*\+ - text "Hello, Bo"/s);
+
+    assert.equal(refOf(await cli("snapshot"), 'button "Send"'), send);
+    assert.match(await cli("snapshot", "--diff"), /no changes since the last snapshot/);
+  });
+
+  test("snapshots can be searched, scoped and paged", async () => {
+    const all = await cli("snapshot");
+    const found = await cli("snapshot", "--find", "terms");
+    assert.match(found, /checkbox "Accept terms"/);
+    assert.doesNotMatch(found, /heading "Sign up"/);
+
+    const name = refOf(all, 'textbox "Name"');
+    const scoped = (await cli("snapshot", "--scope", name)).split("\n\n")[1];
+    assert.match(scoped, new RegExp(`^- textbox "Name".* ${name}`));
+    assert.doesNotMatch(scoped, /button/);
+
+    assert.match(await cli("snapshot", "--limit", "2"), /page 1 of \d+ .*next: --page 2/);
+    assert.match(await cli("snapshot", "--limit", "2", "--page", "2"), /page 2 of/);
+    assert.match(await cliError("snapshot", "--bogus"), /unknown snapshot option/);
+  });
+
   test("refs from a page that is gone are rejected", async () => {
     const snapshot = await cli("snapshot");
     const name = refOf(snapshot, 'textbox "Name"');
-    await cli("click", refOf(snapshot, 'link "Next page"'));
+    assert.match(await cli("click", refOf(snapshot, 'link "Next page"')), /the page changed to .*second\.html/);
     assert.match(await cliError("fill", name, "x"), /no longer loaded/);
     assert.match(await cliError("click", "@999"), /unknown ref/);
   });
