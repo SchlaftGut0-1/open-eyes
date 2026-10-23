@@ -457,6 +457,21 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("scroll", "sideways"), /usage: open-eyes scroll/);
   });
 
+  test("select chooses options in native and custom dropdowns", async () => {
+    await cli("open", fixture("dropdowns.html"));
+    const snapshot = await cli("snapshot");
+    const country = refOf(snapshot, "combobox Country");
+
+    assert.match(await cli("select", country, "argentina"), /^chose "Argentina" in combobox "Country"/);
+    assert.equal(await cli("eval", "document.getElementById('picked').textContent"), "Picked ar");
+    assert.match(await cliError("select", country, "Peru"), /no option "Peru" in combobox "Country"; options: Choose one, Ecuador, Argentina/);
+
+    const size = refOf(snapshot, "button Size: none");
+    assert.match(await cli("select", size, "Large"), /^chose "Large" in button "Size: none"/);
+    assert.equal(await cli("eval", "document.getElementById('size').textContent"), "Size: Large");
+    assert.match(await cliError("select", size, "Huge"), /no option "Huge".*options: Small, Large/);
+  });
+
   test("screenshot writes a PNG", async () => {
     const file = await cli("screenshot", join(root, "shot.png"));
     assert.ok(existsSync(file));
