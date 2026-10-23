@@ -262,6 +262,23 @@ export class Page {
     });
   }
 
+  /** Moves the mouse over an element (menus, tooltips) and reports what appeared. */
+  hover(ref: string): Promise<string> {
+    return this.#audited("hover", ref, async (entry) => {
+      await this.#guard();
+      const { backendNodeId, label } = await this.#resolve(ref);
+      entry.target = label;
+      const box = await this.#locate(backendNodeId, ref);
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await this.#announce({ label: `hover over ${label}`, x, y, box, busy: true });
+      // A real mouse move fires CSS :hover and mouseenter/mouseover listeners alike.
+      await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+      await this.#overlay({ type: "idle" });
+      return `hovered over ${label}${await this.#observe(entry.url)}`;
+    });
+  }
+
   /**
    * Chooses `option` (by its visible text) in a dropdown: a native <select> directly, or a
    * custom listbox/combobox by opening it and clicking the matching option.

@@ -20,7 +20,7 @@ the user asks). To use the user's everyday browser with their logins: `open-eyes
 1. `open-eyes open <url>`
 2. `open-eyes snapshot`: what is on screen, one element per line like `button Save @3`;
    quoted lines are text; an outline lists the headings off screen.
-3. `open-eyes click @3`, `fill @4 "text"`, `select @5 "Option"`, `press Enter`. Each prints
+3. `open-eyes click @3`, `fill @4 "text"`, `select @5 "Option"`, `hover @6`, `press Enter`. Each prints
    what changed, so you rarely need another snapshot. After "the page changed to ...",
    take a new one: old refs are rejected.
 
