@@ -101,8 +101,8 @@ function need(arg: string | undefined, usage: string): string {
 }
 
 const CONNECT_HELP = `no browser with remote debugging enabled was found.
-In Chrome 144+ (or Chromium, Brave, Edge), open chrome://inspect/#remote-debugging,
-turn on remote debugging, and run "open-eyes connect" again.`;
+In Chrome 144+ (or Chromium, Brave, Edge), type chrome://inspect/#remote-debugging in the
+address bar, turn on remote debugging there, and run "open-eyes connect" again.`;
 
 async function withPage(action: (page: Page) => Promise<unknown>): Promise<void> {
   const state = loadState();
@@ -158,7 +158,9 @@ async function main([command, ...args]: string[]): Promise<void> {
       console.error(`connecting to ${name}; approve the remote debugging prompt in your browser if it appears...`);
       const product = await connectBrowser(state, endpoint);
       saveState(state);
-      return print(`connected to ${product}. Agent commands now use your browser; "open-eyes disconnect" to stop.`);
+      // Chromium-based browsers all report themselves as "Chrome/<version>".
+      const label = name === endpoint ? product : `${name} (${product.replace("Chrome/", "version ")})`;
+      return print(`connected to ${label}. Agent commands now use your browser; "open-eyes disconnect" to stop.`);
     }
     case "disconnect": {
       const state = loadState();
