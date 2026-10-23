@@ -72,6 +72,9 @@ function states(node: AXNode): string[] {
   return out;
 }
 
+/** The DOM node and role behind each snapshot line, to place it on the page. */
+export type LineNode = { backendNodeId?: number; role: string };
+
 /** Refs handed out earlier for the same document, so elements keep their @N. */
 export type KnownRefs = { byNode: Map<number, number>; nextRef: number };
 
@@ -83,10 +86,15 @@ export type KnownRefs = { byNode: Map<number, number>; nextRef: number };
 export function formatSnapshot(
   nodes: AXNode[],
   known: KnownRefs = { byNode: new Map(), nextRef: 1 },
-): { text: string; refs: Record<string, Ref>; nextRef: number } {
+): { text: string; refs: Record<string, Ref>; nextRef: number; lineNodes: LineNode[] } {
   const byId = new Map(nodes.map((node) => [node.nodeId, node]));
   const refs: Record<string, Ref> = {};
   const lines: string[] = [];
+  const lineNodes: LineNode[] = [];
+  const emit = (line: string, node: AXNode, role: string) => {
+    lines.push(line);
+    lineNodes.push({ backendNodeId: node.backendDOMNodeId, role });
+  };
   let nextRef = known.nextRef;
 
   const visit = (node: AXNode, depth: number, parentName: string): void => {
@@ -102,7 +110,7 @@ export function formatSnapshot(
     if (role === "StaticText") {
       // Text already shown as its parent's name (a link's label, a heading) is noise.
       // Text is always quoted, so it can never be mistaken for an element line.
-      if (name && !parentName.includes(name)) lines.push(`${indent}${JSON.stringify(truncate(name))}`);
+      if (name && !parentName.includes(name)) emit(`${indent}${JSON.stringify(truncate(name))}`, node, role);
       return;
     }
 
@@ -122,7 +130,7 @@ export function formatSnapshot(
       refs[ref] = { backendNodeId: node.backendDOMNodeId!, label: `${role} ${JSON.stringify(truncate(name))}` };
       line += ` @${ref}`;
     }
-    lines.push(line);
+    emit(line, node, role);
     visitChildren(depth + 1, `${name} ${value ?? ""}`.trim() || parentName);
   };
 
@@ -132,5 +140,5 @@ export function formatSnapshot(
     const children = (root.childIds ?? []).flatMap((id) => byId.get(id) ?? []);
     children.forEach((child) => visit(child, 0, ""));
   }
-  return { text: lines.join("\n"), refs, nextRef };
+  return { text: lines.join("\n"), refs, nextRef, lineNodes };
 }
