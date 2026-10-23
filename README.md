@@ -17,6 +17,9 @@ what it is doing** as it happens.
 - **Take control any time.** Press **Take control** in the agent's window to pause it,
   do what you need, and hand it back. Agents can also ask for help with
   `open-eyes handoff "Please log in"` and wait for you.
+- **Guardrails against prompt injection.** Allow and block lists keep the agent on the
+  sites you choose; risky actions (paying, sending, deleting, submitting, typing a
+  password) wait for your **Allow / Deny** on screen; every action is logged.
 - **Cheap eyes.** `snapshot` turns the page into compact text with stable `@N` refs, so
   the model reads structure instead of burning tokens on screenshots. Every action
   reports only what it changed, and `--find`, `--scope` and `--diff` show just the part
@@ -55,6 +58,28 @@ connection in a small background daemon and routes commands through a private lo
 socket (readable only by your user). The agent works in its own window; your tabs are
 left alone. `open-eyes disconnect` closes that window and stops the daemon.
 
+## Safety
+
+Web pages can hide instructions meant to hijack an agent, and there is no complete fix
+for that. open-eyes limits the damage:
+
+```bash
+open-eyes policy allow github.com docs.python.org   # only these sites (and subdomains)
+open-eyes policy block mybank.com                   # never these, even if allowed
+open-eyes policy confirm risky                      # default: ask before risky actions
+open-eyes log                                       # what the agent did
+```
+
+- The agent cannot open, read or act on a site outside the policy, and open-eyes leaves
+  the page if a click or redirect lands there.
+- Before a risky action, the window highlights the target and asks **Allow / Deny**.
+  Only real clicks from you count; page scripts cannot answer. `confirm always` asks for
+  every action; `confirm never` turns questions off (for unattended runs).
+- The audit log records every action and its outcome, never the text typed into fields.
+
+These guardrails stop pages from steering a well-behaved agent. They cannot stop an
+agent that is itself compromised: it has a shell and could edit the policy file.
+
 ## Commands
 
 | Command | Does |
@@ -74,6 +99,8 @@ left alone. `open-eyes disconnect` closes that window and stops the daemon.
 | `run <file\|->` | Run a multi-step script with `page` in scope |
 | `handoff <message>` | Ask the user to take over, wait until they hand control back |
 | `wait` | Wait until the user hands back control they took |
+| `policy [allow\|block\|remove\|confirm\|reset]` | Show or change which sites are allowed and what needs approval |
+| `log` | Show the last actions the agent took |
 | `close` | Close the agent window |
 
 Set `OPEN_EYES_SLOWMO=0` to drop the pause that lets you follow each action.
@@ -97,5 +124,5 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 
 ## Status
 
-Early MVP. Next up: guardrails against prompt injection, snapshots inside iframes, and
-several parallel agent windows ("spaces").
+Early MVP. Next up: snapshots inside iframes, more commands (scroll, hover, select,
+upload), and several parallel agent windows ("spaces").

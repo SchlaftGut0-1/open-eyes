@@ -1,8 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { audit, type AuditEntry } from "./audit.ts";
 import type { CDP } from "./cdp.ts";
-import { OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
+import { decisionExpression, OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
+import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
 import { formatSnapshot, type AXNode } from "./snapshot.ts";
 import { stateDir, type Ref, type State } from "./state.ts";
 import { diffLines, findLines, paginate, subtree } from "./view.ts";
@@ -76,16 +79,21 @@ const SELECT_CONTENTS = `function () {
   }
 }`;
 
+/** How long a risky action waits for the user to allow it before it is denied. */
+const CONFIRM_TIMEOUT_MS = 120_000;
+
 /** The agent's window. Every action is drawn on the page before it happens. */
 export class Page {
   #cdp: CDP;
   #sessionId: string;
   #state: State;
+  #policy: Policy;
 
   constructor(cdp: CDP, sessionId: string, state: State) {
     this.#cdp = cdp;
     this.#sessionId = sessionId;
     this.#state = state;
+    this.#policy = loadPolicy();
   }
 
   async init(): Promise<void> {
@@ -93,19 +101,25 @@ export class Page {
     await this.#send("Emulation.setFocusEmulationEnabled", { enabled: true });
   }
 
-  async goto(url: string): Promise<string> {
+  goto(url: string): Promise<string> {
     const target = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`;
-    await this.#announce({ label: `opening ${target}` });
-    const { errorText } = await this.#send<{ errorText?: string }>("Page.navigate", { url: target });
-    if (errorText) throw new Error(`could not open ${target}: ${errorText}`);
-    this.#state.refs = {};
-    await this.#settle(30_000);
-    const current = await this.url();
-    await this.#announce({ label: `on ${current}` }, false);
-    return current;
+    return this.#audited("open", target, async () => {
+      const reason = blockedReason(this.#policy, target);
+      if (reason) throw new PolicyError("blocked", reason);
+      await this.#announce({ label: `opening ${target}` });
+      const { errorText } = await this.#send<{ errorText?: string }>("Page.navigate", { url: target });
+      if (errorText) throw new Error(`could not open ${target}: ${errorText}`);
+      this.#state.refs = {};
+      await this.#settle(30_000);
+      await this.#leaveIfBlocked(); // A redirect may have gone somewhere else.
+      const current = await this.url();
+      await this.#announce({ label: `on ${current}` }, false);
+      return current;
+    });
   }
 
   async snapshot(options: SnapshotOptions = {}): Promise<string> {
+    await this.#guard();
     const { lines, previous } = await this.#capture();
     let body: string[];
     if (options.diff) {
@@ -120,54 +134,83 @@ export class Page {
         if (!body.length) body = [`nothing matches "${options.find}"`];
       }
     }
-    const title = await this.eval("document.title");
+    const title = await this.#evaluate("document.title");
     const shown = paginate(body, options.limit ?? SNAPSHOT_LIMIT, options.page);
     return `url: ${await this.url()}\ntitle: ${JSON.stringify(title)}\n\n${shown.join("\n")}`;
   }
 
-  async click(ref: string): Promise<string> {
-    const { backendNodeId, label } = await this.#resolve(ref);
-    const box = await this.#locate(backendNodeId, ref);
-    const x = box.x + box.width / 2;
-    const y = box.y + box.height / 2;
-    await this.#announce({ label: `click ${label}`, x, y, box, busy: true });
-    await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
-    for (const type of ["mousePressed", "mouseReleased"]) {
-      await this.#send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
-    }
-    await this.#overlay({ type: "idle" });
-    await sleep(150);
-    await this.#settle(10_000);
-    return `clicked ${label}${await this.#observe()}`;
+  click(ref: string): Promise<string> {
+    return this.#audited("click", ref, async (entry) => {
+      await this.#guard();
+      const { backendNodeId, label } = await this.#resolve(ref);
+      entry.target = label;
+      const box = await this.#locate(backendNodeId, ref);
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await this.#announce({ label: `click ${label}`, x, y, box, busy: true });
+      await this.#confirm(`click ${label}`, isRiskyClick(label));
+      await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await this.#send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+      }
+      await this.#overlay({ type: "idle" });
+      await sleep(150);
+      await this.#settle(10_000);
+      await this.#leaveIfBlocked();
+      return `clicked ${label}${await this.#observe()}`;
+    });
   }
 
-  async fill(ref: string, text: string): Promise<string> {
-    const { backendNodeId, label } = await this.#resolve(ref);
-    const box = await this.#locate(backendNodeId, ref);
-    await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2, box });
-    await this.#send("DOM.focus", { backendNodeId });
-    const { object } = await this.#send<{ object: { objectId: string } }>("DOM.resolveNode", { backendNodeId });
-    await this.#send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: SELECT_CONTENTS });
-    // Inserting over the selection replaces existing content and fires real input events.
-    if (text) await this.#send("Input.insertText", { text });
-    else await this.press("Backspace", false);
-    return `filled ${label}${await this.#observe()}`;
+  fill(ref: string, text: string): Promise<string> {
+    return this.#audited("fill", ref, async (entry) => {
+      await this.#guard();
+      const { backendNodeId, label } = await this.#resolve(ref);
+      entry.target = `${label} (${text.length} characters)`; // Never the text: it may be a secret.
+      const box = await this.#locate(backendNodeId, ref);
+      await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2, box });
+      const { object } = await this.#send<{ object: { objectId: string } }>("DOM.resolveNode", { backendNodeId });
+      const { result } = await this.#send("Runtime.callFunctionOn", {
+        objectId: object.objectId,
+        functionDeclaration: `function () { return this.type === "password"; }`,
+        returnByValue: true,
+      });
+      await this.#confirm(`type into ${label}, a password field`, result.value === true);
+      await this.#send("DOM.focus", { backendNodeId });
+      await this.#send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: SELECT_CONTENTS });
+      // Inserting over the selection replaces existing content and fires real input events.
+      if (text) await this.#send("Input.insertText", { text });
+      else await this.press("Backspace", false);
+      return `filled ${label}${await this.#observe()}`;
+    });
   }
 
   async press(key: string, announce = true): Promise<string> {
     const def = KEYS[key] ?? (key.length === 1 ? { code: "", keyCode: key.toUpperCase().charCodeAt(0), text: key } : null);
     if (!def) throw new Error(`unknown key "${key}"; use a single character or one of: ${Object.keys(KEYS).join(", ")}`);
-    if (announce) await this.#announce({ label: `press ${key}` });
-    const common = { key: key === "Space" ? " " : key, code: def.code, windowsVirtualKeyCode: def.keyCode };
-    await this.#send("Input.dispatchKeyEvent", { type: def.text ? "keyDown" : "rawKeyDown", text: def.text, ...common });
-    await this.#send("Input.dispatchKeyEvent", { type: "keyUp", ...common });
-    if (!announce) return `pressed ${key}`;
-    await this.#settle(10_000);
-    return `pressed ${key}${await this.#observe()}`;
+    const dispatch = async () => {
+      const common = { key: key === "Space" ? " " : key, code: def.code, windowsVirtualKeyCode: def.keyCode };
+      await this.#send("Input.dispatchKeyEvent", { type: def.text ? "keyDown" : "rawKeyDown", text: def.text, ...common });
+      await this.#send("Input.dispatchKeyEvent", { type: "keyUp", ...common });
+    };
+    if (!announce) {
+      await dispatch(); // Part of another action, which was already checked.
+      return `pressed ${key}`;
+    }
+    return this.#audited("press", key, async () => {
+      await this.#guard();
+      await this.#announce({ label: `press ${key}` });
+      const submits = key === "Enter" && (await this.#evaluate(`!!document.activeElement?.closest?.("form")`));
+      await this.#confirm("press Enter, which submits a form", submits === true);
+      await dispatch();
+      await this.#settle(10_000);
+      await this.#leaveIfBlocked();
+      return `pressed ${key}${await this.#observe()}`;
+    });
   }
 
   /** Saves a PNG of the visible page (without the overlay) and returns its path. */
   async screenshot(path?: string): Promise<string> {
+    await this.#guard();
     const file = path ?? join(stateDir, "screenshots", `${new Date().toISOString().replace(/[:.]/g, "-")}.png`);
     await this.#overlay({ type: "hide" });
     try {
@@ -182,10 +225,15 @@ export class Page {
 
   /** Evaluates a JavaScript expression in the page and returns its JSON value. */
   eval(expression: string): Promise<unknown> {
-    return this.#evaluate(expression);
+    const target = expression.length > 200 ? `${expression.slice(0, 200)}…` : expression;
+    return this.#audited("eval", target, async () => {
+      await this.#guard();
+      return this.#evaluate(expression);
+    });
   }
 
   async waitForText(text: string, timeoutMs = 10_000): Promise<void> {
+    await this.#guard();
     await this.#announce({ label: `waiting for "${text}"` });
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -290,6 +338,54 @@ export class Page {
     const more = changes.length - OBSERVE_LIMIT;
     const tail = more > 0 ? [`… ${more} more changed lines; run "open-eyes snapshot" to see the page`] : [];
     return `\nchanges:\n${[...changes.slice(0, OBSERVE_LIMIT), ...tail].join("\n")}`;
+  }
+
+  /** Runs an action and records it in the audit log, whatever the outcome. */
+  async #audited<T>(action: string, target: string, run: (entry: AuditEntry) => Promise<T>): Promise<T> {
+    const entry: AuditEntry = { action, target, outcome: "ok" };
+    entry.url = await this.url().catch(() => undefined);
+    try {
+      return await run(entry);
+    } catch (error) {
+      entry.outcome = error instanceof PolicyError ? error.outcome : "error";
+      entry.detail = (error as Error).message;
+      throw error;
+    } finally {
+      audit(entry);
+    }
+  }
+
+  /** Refuses to read or act on a page the policy does not allow. */
+  async #guard(): Promise<void> {
+    const reason = blockedReason(this.#policy, await this.url());
+    if (reason) throw new PolicyError("blocked", `${reason}; open a page that is allowed`);
+  }
+
+  /** After an action that may navigate: if it landed somewhere not allowed, leave. */
+  async #leaveIfBlocked(): Promise<void> {
+    const url = await this.url().catch(() => "about:blank");
+    const reason = blockedReason(this.#policy, url);
+    if (!reason) return;
+    await this.#send("Page.navigate", { url: "about:blank" });
+    this.#state.refs = {};
+    throw new PolicyError("blocked", `the page went to ${url}, but ${reason}; open-eyes left it`);
+  }
+
+  /** Waits for the user to allow a risky action on screen; throws if they deny it. */
+  async #confirm(action: string, risky: boolean): Promise<void> {
+    const mode = this.#policy.confirm;
+    if (mode === "never" || (mode === "risky" && !risky)) return;
+    const id = randomUUID();
+    const deadline = Date.now() + CONFIRM_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      // Asked again every round, so the question comes back if the page reloads.
+      await this.#overlay({ type: "confirm", id, message: action });
+      const decision = await this.#evaluate(decisionExpression(id)).catch(() => null);
+      if (decision === "allow") return;
+      if (decision === "deny") throw new PolicyError("denied", `the user denied: ${action}`);
+      await sleep(300);
+    }
+    throw new PolicyError("denied", `the user did not allow "${action}" within ${CONFIRM_TIMEOUT_MS / 1000}s`);
   }
 
   /** Updates the overlay and returns who is in control; never fails over drawing. */
