@@ -21,6 +21,8 @@ const MAC_BROWSERS = [
   "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
 ];
 
+const LAUNCH_TIMEOUT_MS = 30_000;
+
 export type BrowserVersion = { Browser: string; webSocketDebuggerUrl: string };
 
 export function findBrowser(): string | undefined {
@@ -73,12 +75,14 @@ export async function launch(
   child.once("error", (error) => (spawnError = error));
   child.unref();
 
-  for (let attempt = 0; attempt < 50; attempt++) {
+  // A cold start can take well over 10s on a busy machine or CI runner.
+  const deadline = Date.now() + LAUNCH_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     if (spawnError) throw new Error(`could not start ${binary}: ${spawnError.message}`);
     if (await browserVersion(port)) return { binary, alreadyRunning: false };
     await sleep(200);
   }
-  throw new Error(`${binary} started but is not answering on port ${port}`);
+  throw new Error(`${binary} started but is not answering on port ${port} after ${LAUNCH_TIMEOUT_MS / 1000}s`);
 }
 
 /** Connects to the browser and attaches to the agent's window, opening one if needed. */
