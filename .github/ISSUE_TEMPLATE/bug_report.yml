@@ -1,0 +1,40 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. open-eyes launch
+        2. open-eyes open example.com
+        3. open-eyes snapshot
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: open-eyes version or commit
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Chromium 155
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Arch Linux, macOS 16, Windows 11
+  - type: input
+    id: agent
+    attributes:
+      label: Agent (if any)
+      placeholder: Claude Code, Codex, Cursor...

@@ -1,0 +1,42 @@
+{
+  "name": "open-eyes",
+  "version": "0.1.0",
+  "description": "Give your AI agents eyes: let them see and drive your real browser while you watch.",
+  "keywords": [
+    "ai-agent",
+    "browser-automation",
+    "cdp",
+    "chromium",
+    "claude-code",
+    "codex",
+    "agent-skills"
+  ],
+  "homepage": "https://github.com/SchlaftGut0-1/open-eyes#readme",
+  "bugs": "https://github.com/SchlaftGut0-1/open-eyes/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SchlaftGut0-1/open-eyes.git"
+  },
+  "author": "Andrés Cedeño",
+  "type": "module",
+  "bin": {
+    "open-eyes": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli.js",
+    "dev": "node src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2"
+  }
+}

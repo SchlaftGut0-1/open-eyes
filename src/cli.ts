@@ -1,0 +1,113 @@
+#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { browserVersion, closeAgentWindow, connectPage, launch } from "./browser.ts";
+import type { Page } from "./page.ts";
+import { runScript } from "./run.ts";
+import { loadState, profileDir, saveState } from "./state.ts";
+
+const HELP = `open-eyes: give your AI agent eyes on a real browser, while you watch.
+
+Usage: open-eyes <command> [args]
+
+Browser
+  launch                 Start a visible browser with the open-eyes profile
+  status                 Show the browser and the agent window
+  close                  Close the agent window
+
+Page (works in the agent's own window)
+  open <url>             Open a URL
+  snapshot               Print the page as text; actionable elements get @N refs
+  click <@N>             Click an element from the last snapshot
+  fill <@N> <text>       Replace the content of a field
+  press <key>            Press a key (Enter, Tab, Escape, ArrowDown, a, ...)
+  screenshot [path]      Save a PNG of the page and print its path
+  eval <js>              Evaluate a JavaScript expression in the page
+  run <file|->           Run a script with \`page\` in scope (- reads stdin)
+
+Environment
+  OPEN_EYES_PORT         Remote debugging port (default 9222)
+  OPEN_EYES_BROWSER      Browser binary to launch
+  OPEN_EYES_SLOWMO       Pause in ms after showing each action (default 400)`;
+
+function print(value: unknown): void {
+  if (value === undefined) return;
+  console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
+}
+
+function need(arg: string | undefined, usage: string): string {
+  if (arg === undefined) throw new Error(`usage: open-eyes ${usage}`);
+  return arg;
+}
+
+async function withPage(action: (page: Page) => Promise<unknown>): Promise<void> {
+  const state = loadState();
+  const { cdp, page } = await connectPage(state);
+  try {
+    print(await action(page));
+  } finally {
+    saveState(state);
+    cdp.close();
+  }
+}
+
+async function main([command, ...args]: string[]): Promise<void> {
+  switch (command) {
+    case "launch": {
+      const state = loadState();
+      const { binary, alreadyRunning } = await launch(state.port);
+      saveState(state);
+      print(
+        alreadyRunning
+          ? `browser already running on port ${state.port}`
+          : `launched ${binary} on port ${state.port}\nprofile: ${profileDir}`,
+      );
+      return;
+    }
+    case "status": {
+      const state = loadState();
+      const version = await browserVersion(state.port);
+      if (!version) return print(`no browser on port ${state.port}; run "open-eyes launch"`);
+      print(`browser: ${version.Browser} on port ${state.port}`);
+      return withPage(async (page) => `agent window: ${await page.url()}`);
+    }
+    case "close": {
+      const state = loadState();
+      const closed = await closeAgentWindow(state);
+      saveState(state);
+      return print(closed ? "closed the agent window" : "no agent window to close");
+    }
+    case "open":
+      return withPage((page) => page.goto(need(args[0], "open <url>")));
+    case "snapshot":
+      return withPage((page) => page.snapshot());
+    case "click":
+      return withPage((page) => page.click(need(args[0], "click <@N>")));
+    case "fill": {
+      const ref = need(args[0], "fill <@N> <text>");
+      return withPage((page) => page.fill(ref, args.slice(1).join(" ")));
+    }
+    case "press":
+      return withPage((page) => page.press(need(args[0], "press <key>")));
+    case "screenshot":
+      return withPage((page) => page.screenshot(args[0]));
+    case "eval":
+      return withPage((page) => page.eval(need(args[0], "eval <js>")));
+    case "run": {
+      const file = need(args[0], "run <file|->");
+      const source = readFileSync(file === "-" ? 0 : file, "utf8");
+      return withPage((page) => runScript(page, source));
+    }
+    case undefined:
+    case "help":
+    case "--help":
+    case "-h":
+      return print(HELP);
+    default:
+      throw new Error(`unknown command "${command}"; see "open-eyes help"`);
+  }
+}
+
+main(process.argv.slice(2)).catch((error: Error) => {
+  console.error(`error: ${error.message}`);
+  process.exit(1);
+});

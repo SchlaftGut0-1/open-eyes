@@ -1,0 +1,78 @@
+# open-eyes
+
+[![CI](https://github.com/SchlaftGut0-1/open-eyes/actions/workflows/ci.yml/badge.svg)](https://github.com/SchlaftGut0-1/open-eyes/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/SchlaftGut0-1/open-eyes/badge)](https://scorecard.dev/viewer/?uri=github.com/SchlaftGut0-1/open-eyes)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+Give your AI agents eyes. `open-eyes` lets Claude Code, Codex, Cursor, opencode, or any
+agent with a terminal see and drive a **real, visible browser**, and lets **you watch
+what it is doing** as it happens.
+
+- **Your browser, no fork.** Works with stock Chromium, Chrome, Brave, or Edge over the
+  Chrome DevTools Protocol.
+- **You can see the agent.** It works in its own window with a live overlay: a cursor
+  that moves to each target, a highlight on the element it is about to touch, and a
+  banner describing the step.
+- **Cheap eyes.** `snapshot` turns the page into compact text with `@N` refs, so the
+  model reads structure instead of burning tokens on screenshots. Screenshots are there
+  when visuals matter.
+- **One call, many steps.** Agents can write a short script (`open-eyes run`) instead of
+  a slow command-by-command loop.
+- **Linux first**, fully open source (MIT).
+
+## Quick start
+
+```bash
+npm install
+npm run build
+npm link              # puts `open-eyes` on your PATH
+
+open-eyes launch      # visible browser with its own open-eyes profile
+open-eyes open news.ycombinator.com
+open-eyes snapshot
+open-eyes click @12
+```
+
+To use it from an agent, copy `skills/open-eyes` into your agent's skills directory
+(for Claude Code: `~/.claude/skills/open-eyes`).
+
+## Commands
+
+| Command | Does |
+|---|---|
+| `launch` | Start a visible browser with the open-eyes profile |
+| `status` | Show the browser and the agent window |
+| `open <url>` | Open a URL in the agent window |
+| `snapshot` | Print the page as text; actionable elements get `@N` refs |
+| `click <@N>` | Click an element |
+| `fill <@N> <text>` | Replace a field's content |
+| `press <key>` | Press a key |
+| `screenshot [path]` | Save a PNG and print its path |
+| `eval <js>` | Evaluate JavaScript in the page |
+| `run <file\|->` | Run a multi-step script with `page` in scope |
+| `close` | Close the agent window |
+
+Set `OPEN_EYES_SLOWMO=0` to drop the pause that lets you follow each action.
+
+## How it works
+
+```
+agent ──shell──▶ open-eyes CLI ──CDP (WebSocket)──▶ your Chromium
+                                                     └─ agent window + overlay
+```
+
+Each command is a short-lived process. It attaches to the agent's window (creating it
+if needed), reads the accessibility tree or acts on the page, and exits. Refs from the
+last snapshot are kept in `~/.local/state/open-eyes/state.json`.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in
+[SECURITY.md](SECURITY.md).
+
+## Status
+
+Early MVP. Next up: snapshots inside iframes, handing control back and forth between
+you and the agent, several parallel agent windows ("spaces"), and attaching to your
+everyday browser profile.
