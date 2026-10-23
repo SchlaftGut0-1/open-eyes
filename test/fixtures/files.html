@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Files</title>
+<form id="resume">
+  <label>Resume <input type="file" id="cv" multiple /></label>
+</form>
+<form id="attach">
+  <button type="button" onclick="document.getElementById('hidden').click()">Attach</button>
+  <input type="file" id="hidden" hidden />
+</form>
+<p id="names"></p>
+<a href="data:text/plain,hello%20from%20open-eyes" download="notes.txt">Download notes</a>
+<script>
+  for (const input of document.querySelectorAll("input[type=file]")) {
+    input.addEventListener("change", () => {
+      document.getElementById("names").textContent = `${input.id}: ${[...input.files].map((f) => f.name).join(", ")}`;
+    });
+  }
+</script>

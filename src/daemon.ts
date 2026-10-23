@@ -22,6 +22,7 @@ export async function runDaemon(upstreamUrl: string, socketPath: string): Promis
   let nextId = 1;
   const routes = new Map<number, Route>();
   const owners = new Map<string, Client>(); // sessionId -> client that attached it
+  const clients = new Set<Client>();
 
   const forward = (message: object) => upstream.send(JSON.stringify(message));
   const reply = (client: Client, message: object) => {
@@ -31,7 +32,9 @@ export async function runDaemon(upstreamUrl: string, socketPath: string): Promis
   upstream.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data));
     if (message.id === undefined) {
-      // Events go to the client that owns the session; browser-wide events are not used.
+      // Session events go to the client that owns the session; browser-wide events (such as
+      // downloads) go to every client.
+      if (!message.sessionId) for (const client of clients) reply(client, message);
       const owner = message.sessionId && owners.get(message.sessionId);
       if (owner) reply(owner, message);
       return;
@@ -52,6 +55,7 @@ export async function runDaemon(upstreamUrl: string, socketPath: string): Promis
 
   const server = createServer((socket) => {
     const client: Client = { socket, sessions: new Set() };
+    clients.add(client);
     socket.setEncoding("utf8");
     let buffer = "";
     socket.on("data", (chunk: string) => {
@@ -73,6 +77,7 @@ export async function runDaemon(upstreamUrl: string, socketPath: string): Promis
       }
     });
     socket.on("close", () => {
+      clients.delete(client);
       for (const sessionId of client.sessions) {
         owners.delete(sessionId);
         forward({ id: nextId++, method: "Target.detachFromTarget", params: { sessionId } });

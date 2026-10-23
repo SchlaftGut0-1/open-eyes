@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -23,6 +23,7 @@ const env = {
   XDG_STATE_HOME: join(root, "state"),
   XDG_DATA_HOME: join(root, "data"),
   XDG_CONFIG_HOME: join(root, "config"),
+  OPEN_EYES_DOWNLOADS: join(root, "downloads"),
   OPEN_EYES_CONFIRM: "never", // Tests that need approvals turn it on.
 };
 
@@ -245,6 +246,9 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       await cli("fill", refOf(snapshot, 'textbox Name'), "Daemon");
       assert.match(await cli("click", refOf(snapshot, 'button Send')), /Hello, Daemon/);
       assert.match(await cliError("connect", "--endpoint", endpoint), /already connected/);
+      // Download events are browser-wide: the daemon must pass them on.
+      await cli("open", fixture("files.html"));
+      assert.match(await cli("click", refOf(await cli("snapshot"), "link Download notes")), /downloaded .*notes/);
     } finally {
       assert.match(await cli("disconnect"), /disconnected/);
     }
@@ -484,6 +488,51 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
 
     const tip = await cli("hover", refOf(snapshot, "button Help"));
     assert.match(tip, /\+ +tooltip Opens the user guide/);
+  });
+
+  test("upload attaches files after the user allows it, and logs only their names", async () => {
+    const file = join(root, "cv-secret-contents.pdf");
+    writeFileSync(file, "top secret file body");
+    await cli("open", fixture("files.html"));
+    const snapshot = await cli("snapshot");
+    const resume = refOf(snapshot, "button Resume");
+
+    assert.match(await cli("upload", resume, file), /^uploaded cv-secret-contents\.pdf to button "Resume"/);
+    assert.equal(await cli("eval", "document.getElementById('names').textContent"), "cv: cv-secret-contents.pdf");
+
+    // A styled button whose file input is hidden: the form's only file input is used.
+    await cli("upload", refOf(snapshot, "button Attach"), file);
+    assert.equal(await cli("eval", "document.getElementById('names').textContent"), "hidden: cv-secret-contents.pdf");
+
+    assert.match(await cliError("upload", resume, join(root, "missing.pdf")), /no such file/);
+    assert.match(await cliError("upload", refOf(snapshot, "link Download notes"), file), /no file input belongs to it/);
+
+    const human = await humanAt();
+    try {
+      const asking = cliErrorWith({ OPEN_EYES_CONFIRM: "risky" }, "upload", resume, file);
+      await human.click("deny");
+      assert.match(await asking, /the user denied: upload cv-secret-contents\.pdf/);
+    } finally {
+      human.close();
+    }
+    const log = await cli("log", "--limit", "10");
+    assert.match(log, /upload +button "Resume" <- cv-secret-contents\.pdf/);
+    assert.doesNotMatch(log, /top secret file body/);
+  });
+
+  test("downloads are saved to a known folder and reported", async () => {
+    await cli("open", fixture("files.html"));
+    const link = refOf(await cli("snapshot"), "link Download notes");
+    const first = await cli("click", link);
+    const saved = first.match(/\ndownloaded (.+)$/)?.[1] ?? "";
+    assert.equal(dirname(saved), env.OPEN_EYES_DOWNLOADS);
+    assert.match(basename(saved), /^notes( \(\d+\))?\.txt$/);
+    assert.equal(readFileSync(saved, "utf8"), "hello from open-eyes");
+    // Another download never overwrites an earlier one.
+    const second = (await cli("click", link)).match(/\ndownloaded (.+)$/)?.[1];
+    assert.ok(second && second !== saved, `a new file, not ${saved}`);
+    assert.equal(readFileSync(second, "utf8"), "hello from open-eyes");
+    assert.match(await cli("log", "--limit", "1"), /click +link "Download notes" \(downloaded notes \(\d+\)\.txt\)/);
   });
 
   test("screenshot writes a PNG", async () => {
