@@ -169,7 +169,8 @@ const OVERLAY = String.raw`(cmd) => {
     get("take").style.display = user || asking ? "none" : "";
     get("panel").style.display = user ? "" : "none";
     get("ask").style.display = asking ? "" : "none";
-    get("usage").style.display = state.usage ? "" : "none";
+    // Panels come first: the counter must never cover Allow, Deny or Hand back.
+    get("usage").style.display = state.usage && !asking && !user ? "" : "none";
     get("usage").textContent = state.usage ? "\u{1FA99} " + state.usage : "";
     if (asking) get("question").textContent = "\u26A0\uFE0F The agent wants to " + state.confirm.message + ". Allow it?";
     get("message").textContent = state.message || "Do what you need, then hand control back to the agent.";

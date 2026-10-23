@@ -318,6 +318,27 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     }
   });
 
+  test("the token counter steps aside while a panel asks the user", async () => {
+    await cli("usage", "show");
+    await cli("open", fixture("search.html"));
+    await cli("fill", refOf(await cli("snapshot"), "textbox Query"), "x");
+    const human = await humanAt();
+    const visible = (part: string) =>
+      human.evaluate(`!!document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="${part}"]')?.checkVisibility()`);
+    try {
+      assert.equal(await visible("usage"), true);
+      const pressing = cliWith({ OPEN_EYES_CONFIRM: "risky" }, "press", "Enter");
+      await until(() => visible("allow"), "the question");
+      assert.equal(await visible("usage"), false, "the counter must not cover Allow or Deny");
+      await human.click("deny");
+      await pressing.catch(() => {});
+      await until(() => visible("usage"), "the counter coming back");
+    } finally {
+      human.close();
+      await cli("usage", "hide");
+    }
+  });
+
   test("the audit log records actions and outcomes, never typed text", async () => {
     const log = await cli("log", "--limit", "50");
     assert.match(log, /OK +click +button "Send"/);
