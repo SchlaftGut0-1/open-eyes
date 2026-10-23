@@ -20,6 +20,12 @@ const SNAPSHOT_LIMIT = Number(process.env.OPEN_EYES_SNAPSHOT_LIMIT ?? 400);
 /** After an action, report what changed on the page (off with OPEN_EYES_OBSERVE=0). */
 const OBSERVE = process.env.OPEN_EYES_OBSERVE !== "0";
 const OBSERVE_LIMIT = 80;
+/** A diff this large (in changed lines, and as a share of the page) is reported as a page change. */
+const PAGE_CHANGE_LINES = 40;
+const PAGE_CHANGE_SHARE = 0.5;
+
+/** The URL without its #fragment: jumping to a section is not a page change. */
+const withoutHash = (url: string) => url.replace(/#.*$/, "");
 /** The last snapshot's text, the baseline for diffs. */
 const baselineFile = join(stateDir, "snapshot.txt");
 
@@ -178,7 +184,7 @@ export class Page {
       await sleep(150);
       await this.#settle(10_000);
       await this.#leaveIfBlocked();
-      return `clicked ${label}${await this.#observe()}`;
+      return `clicked ${label}${await this.#observe(entry.url)}`;
     });
   }
 
@@ -201,7 +207,7 @@ export class Page {
       // Inserting over the selection replaces existing content and fires real input events.
       if (text) await this.#send("Input.insertText", { text });
       else await this.press("Backspace", false);
-      return `filled ${label}${await this.#observe()}`;
+      return `filled ${label}${await this.#observe(entry.url)}`;
     });
   }
 
@@ -217,7 +223,7 @@ export class Page {
       await dispatch(); // Part of another action, which was already checked.
       return `pressed ${key}`;
     }
-    return this.#audited("press", key, async () => {
+    return this.#audited("press", key, async (entry) => {
       await this.#guard();
       await this.#announce({ label: `press ${key}` });
       const submits = key === "Enter" && (await this.#evaluate(`!!document.activeElement?.closest?.("form")`));
@@ -225,7 +231,7 @@ export class Page {
       await dispatch();
       await this.#settle(10_000);
       await this.#leaveIfBlocked();
-      return `pressed ${key}${await this.#observe()}`;
+      return `pressed ${key}${await this.#observe(entry.url)}`;
     });
   }
 
@@ -381,8 +387,12 @@ export class Page {
     return { positions, viewport: { top: Math.round(top), height: Math.round(height), pageHeight: Math.round(pageHeight) } };
   }
 
-  /** What an action changed, so the agent rarely needs a separate snapshot. */
-  async #observe(): Promise<string> {
+  /**
+   * What an action changed, so the agent rarely needs a separate snapshot. A move to another
+   * page is one line, also when the site navigates without reloading (GitHub, most apps):
+   * a diff of the whole page would cost hundreds of tokens and help nobody.
+   */
+  async #observe(urlBefore?: string): Promise<string> {
     await this.#evaluate(WAIT_FOR_QUIET_DOM).catch(() => {}); // Fails if the page navigated.
     if (!OBSERVE || !this.#state.refsLoaderId) return "";
     if (this.#state.refsLoaderId !== (await this.#loaderId())) {
@@ -390,9 +400,17 @@ export class Page {
     }
     const { lines, previous } = await this.#capture();
     if (!previous) return "";
+    const url = await this.url();
+    if (urlBefore && withoutHash(url) !== withoutHash(urlBefore)) {
+      return `\nthe page changed to ${url}; run "open-eyes snapshot" to see it`;
+    }
     const changes = diffLines(previous, lines);
     if (!changes) return `\nthe page changed a lot; run "open-eyes snapshot" to see it`;
     if (!changes.length) return "\nno visible changes";
+    const changed = changes.filter((line) => !line.startsWith("  ")).length;
+    if (changed > Math.max(PAGE_CHANGE_LINES, PAGE_CHANGE_SHARE * Math.max(previous.length, lines.length))) {
+      return `\nmost of the page changed (${changed} lines); run "open-eyes snapshot" to see it`;
+    }
     const more = changes.length - OBSERVE_LIMIT;
     const tail = more > 0 ? [`… ${more} more changed lines; run "open-eyes snapshot" to see the page`] : [];
     return `\nchanges:\n${[...changes.slice(0, OBSERVE_LIMIT), ...tail].join("\n")}`;
