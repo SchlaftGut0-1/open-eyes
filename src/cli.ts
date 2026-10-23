@@ -9,8 +9,10 @@ import {
   findEverydayBrowser,
   launch,
 } from "./browser.ts";
+import { readAudit } from "./audit.ts";
 import { runDaemon } from "./daemon.ts";
 import type { Page } from "./page.ts";
+import { CONFIRM_MODES, loadPolicy, normalizeSite, policyFile, savePolicy, type ConfirmMode } from "./policy.ts";
 import { runScript } from "./run.ts";
 import { loadState, profileDir, saveState, socketPath } from "./state.ts";
 
@@ -51,12 +53,23 @@ Working with the user
   wait                   Wait until the user hands back control they took
                          Both accept --timeout <seconds> (default 600)
 
+Safety
+  policy                 Show which sites the agent may use and what needs approval
+  policy allow <site...> Only allow these sites (and their subdomains)
+  policy block <site...> Never allow these sites
+  policy remove <site...>  Remove sites from both lists
+  policy confirm <mode>  Ask before risky actions (risky, default), every action
+                         (always) or never (never)
+  policy reset           Back to defaults: every site allowed, confirm risky
+  log [--limit <n>]      Show the last actions the agent took (default 20)
+
 Environment
   OPEN_EYES_PORT         Remote debugging port (default 9222)
   OPEN_EYES_BROWSER      Browser binary to launch
   OPEN_EYES_SLOWMO       Pause in ms after showing each action (default 400)
   OPEN_EYES_SNAPSHOT_LIMIT  Default snapshot page size in lines (default 400)
-  OPEN_EYES_OBSERVE      Set to 0 to stop actions from reporting page changes`;
+  OPEN_EYES_OBSERVE      Set to 0 to stop actions from reporting page changes
+  OPEN_EYES_CONFIRM      Override the confirm mode (risky, always, never)`;
 
 function print(value: unknown): void {
   if (value === undefined) return;
@@ -167,6 +180,41 @@ async function main([command, ...args]: string[]): Promise<void> {
       const disconnected = await disconnectBrowser(state);
       saveState(state);
       return print(disconnected ? "disconnected from your browser" : "not connected to a browser");
+    }
+    case "policy": {
+      const policy = loadPolicy();
+      const [action, ...sites] = args;
+      if (action === "allow" || action === "block") {
+        const list = policy[action];
+        for (const site of sites.map(normalizeSite)) if (!list.includes(site)) list.push(site);
+        if (!sites.length) throw new Error(`usage: open-eyes policy ${action} <site...>`);
+      } else if (action === "remove") {
+        const drop = new Set(sites.map(normalizeSite));
+        policy.allow = policy.allow.filter((site) => !drop.has(site));
+        policy.block = policy.block.filter((site) => !drop.has(site));
+      } else if (action === "confirm") {
+        const mode = sites[0] as ConfirmMode;
+        if (!CONFIRM_MODES.includes(mode)) throw new Error(`usage: open-eyes policy confirm <${CONFIRM_MODES.join("|")}>`);
+        policy.confirm = mode;
+      } else if (action === "reset") {
+        Object.assign(policy, { allow: [], block: [], confirm: "risky" });
+      } else if (action !== undefined) {
+        throw new Error(`unknown policy action "${action}"; see "open-eyes help"`);
+      }
+      if (action !== undefined) savePolicy(policy);
+      return print(
+        [
+          `allowed sites: ${policy.allow.length ? policy.allow.join(", ") : "all"}`,
+          `blocked sites: ${policy.block.length ? policy.block.join(", ") : "none"}`,
+          `ask before: ${{ risky: "risky actions", always: "every action", never: "nothing" }[policy.confirm]}`,
+          `file: ${policyFile}`,
+        ].join("\n"),
+      );
+    }
+    case "log": {
+      const limit = takeNumber(args, "--limit", 1) ?? 20;
+      const entries = readAudit(limit);
+      return print(entries.length ? entries.join("\n") : "no actions recorded yet");
     }
     case "__daemon": // Started by "connect"; not for direct use.
       return runDaemon(need(args[0], "__daemon <ws-url>"), socketPath);

@@ -11,7 +11,8 @@ export type OverlayCommand =
   | { type: "show" }
   | { type: "hide" }
   | { type: "handoff"; message?: string } // Give control to the user.
-  | { type: "claim"; message?: string }; // Keep the user in control if a navigation forgot it.
+  | { type: "claim"; message?: string } // Keep the user in control if a navigation forgot it.
+  | { type: "confirm"; id: string; message: string }; // Ask the user to allow a risky action.
 
 const OWNER_KEY = "open-eyes:owner";
 const MESSAGE_KEY = "open-eyes:message";
@@ -35,6 +36,8 @@ const OVERLAY = String.raw`(cmd) => {
     owner: store.get(${JSON.stringify(OWNER_KEY)}),
     message: store.get(${JSON.stringify(MESSAGE_KEY)}),
     label: "agent working",
+    confirm: null,
+    decisions: {},
   });
   const setOwner = (owner, message) => {
     state.owner = owner;
@@ -106,6 +109,30 @@ const OVERLAY = String.raw`(cmd) => {
     });
     panel.appendChild(back);
 
+    const ask = part(document.createElement("div"), "ask",
+      "position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:min(480px,90vw);" +
+      "padding:14px 16px;border-radius:12px;background:#fff;color:#111;pointer-events:auto;" +
+      "box-shadow:0 8px 32px rgb(0 0 0 / .3);border:2px solid " + AGENT + ";" + font);
+    const question = document.createElement("div");
+    question.dataset.part = "question";
+    question.style.cssText = "margin-bottom:10px;white-space:pre-wrap;";
+    ask.appendChild(question);
+    const decide = (name, label, color, decision) => {
+      const button = document.createElement("button");
+      button.dataset.part = name;
+      button.textContent = label;
+      button.style.cssText = "margin-right:8px;padding:8px 14px;border:0;cursor:pointer;background:" + color + ";" + pill;
+      button.addEventListener("click", (event) => {
+        if (!event.isTrusted || !state.confirm) return; // Only the user decides.
+        state.decisions[state.confirm.id] = decision;
+        state.confirm = null;
+        render();
+      });
+      ask.appendChild(button);
+    };
+    decide("allow", "Allow", USER, "allow");
+    decide("deny", "Deny", "#dc2626", "deny");
+
     (document.body ?? document.documentElement).appendChild(host);
   }
   const get = (name) => host.shadowRoot.querySelector('[data-part="' + name + '"]');
@@ -118,8 +145,11 @@ const OVERLAY = String.raw`(cmd) => {
     banner.textContent = user
       ? "\u{1F464} You are in control · the agent is paused"
       : "\u{1F441} open-eyes · " + state.label;
-    get("take").style.display = user ? "none" : "";
+    const asking = !user && state.confirm;
+    get("take").style.display = user || asking ? "none" : "";
     get("panel").style.display = user ? "" : "none";
+    get("ask").style.display = asking ? "" : "none";
+    if (asking) get("question").textContent = "\u26A0\uFE0F The agent wants to " + state.confirm.message + ". Allow it?";
     get("message").textContent = state.message || "Do what you need, then hand control back to the agent.";
     if (user) {
       get("box").style.opacity = "0";
@@ -136,6 +166,9 @@ const OVERLAY = String.raw`(cmd) => {
       break;
     case "claim":
       if (state.owner == null) setOwner("user", cmd.message);
+      break;
+    case "confirm":
+      if (!(cmd.id in state.decisions)) state.confirm = { id: cmd.id, message: cmd.message };
       break;
     case "idle":
       get("take").style.pointerEvents = "auto";
@@ -168,6 +201,11 @@ const OVERLAY = String.raw`(cmd) => {
 
 export function overlayExpression(cmd: OverlayCommand): string {
   return `(${OVERLAY})(${JSON.stringify(cmd)})`;
+}
+
+/** The user's answer to confirmation `id`: "allow", "deny", or null while undecided. */
+export function decisionExpression(id: string): string {
+  return `window.__openEyes?.decisions?.[${JSON.stringify(id)}] ?? null`;
 }
 
 /** Reads the owner without drawing anything. */

@@ -22,16 +22,26 @@ const env = {
   OPEN_EYES_SLOWMO: "0",
   XDG_STATE_HOME: join(root, "state"),
   XDG_DATA_HOME: join(root, "data"),
+  XDG_CONFIG_HOME: join(root, "config"),
+  OPEN_EYES_CONFIRM: "never", // Tests that need approvals turn it on.
 };
 
 async function cli(...args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync(process.execPath, [CLI, ...args], { env });
+  return cliWith({}, ...args);
+}
+
+async function cliWith(extra: Record<string, string>, ...args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync(process.execPath, [CLI, ...args], { env: { ...env, ...extra } });
   return stdout.trim();
 }
 
 async function cliError(...args: string[]): Promise<string> {
+  return cliErrorWith({}, ...args);
+}
+
+async function cliErrorWith(extra: Record<string, string>, ...args: string[]): Promise<string> {
   try {
-    await cli(...args);
+    await cliWith(extra, ...args);
   } catch (error) {
     return (error as { stderr: string }).stderr.trim();
   }
@@ -242,6 +252,63 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
 
   test("connect refuses endpoints on other machines", async () => {
     assert.match(await cliError("connect", "--endpoint", "ws://example.com:9222/devtools/browser/x"), /non-local/);
+  });
+
+  test("the policy keeps the agent off sites it does not allow", async () => {
+    await cli("open", fixture("form.html"));
+    try {
+      await cli("policy", "block", "example.com");
+      assert.match(await cliError("open", "https://www.example.com/"), /www\.example\.com is blocked/);
+
+      await cli("policy", "allow", "example.org");
+      assert.match(await cliError("snapshot"), /not in your open-eyes allow list/);
+      assert.match(await cliError("open", fixture("second.html")), /not in your open-eyes allow list/);
+    } finally {
+      await cli("policy", "reset");
+    }
+    assert.match(await cli("snapshot"), /heading "Sign up"/);
+  });
+
+  test("risky actions wait for the user to allow them on screen", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    await cli("open", fixture("form.html"));
+    const snapshot = await cli("snapshot");
+    const human = await humanAt();
+    try {
+      // Not risky: goes through without asking.
+      await cliWith(ask, "click", refOf(snapshot, 'checkbox "Accept terms"'));
+
+      const sending = cliWith(ask, "click", refOf(snapshot, 'button "Send"'));
+      await human.click("allow");
+      assert.match(await sending, /clicked button "Send"/);
+
+      const again = cliErrorWith(ask, "click", refOf(snapshot, 'button "Send"'));
+      await human.click("deny");
+      assert.match(await again, /the user denied: click button "Send"/);
+
+      const password = cliWith(ask, "fill", refOf(snapshot, 'textbox "Password"'), "hunter2-secret");
+      await human.click("allow");
+      assert.match(await password, /filled textbox "Password"/);
+
+      // A page script cannot answer for the user.
+      const sneaky = cliErrorWith({ ...ask }, "click", refOf(snapshot, 'button "Send"'));
+      await until(() => human.evaluate(`!!document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="allow"]')?.checkVisibility()`), "the question");
+      await human.evaluate(`document.getElementById("__open_eyes__").shadowRoot.querySelector('[data-part="allow"]').click()`);
+      await sleep(1000);
+      await human.click("deny");
+      assert.match(await sneaky, /denied/);
+    } finally {
+      human.close();
+    }
+  });
+
+  test("the audit log records actions and outcomes, never typed text", async () => {
+    const log = await cli("log", "--limit", "50");
+    assert.match(log, /OK +click +button "Send"/);
+    assert.match(log, /DENIED +click +button "Send"/);
+    assert.match(log, /BLOCKED +open +https:\/\/www\.example\.com\//);
+    assert.match(log, /fill +textbox "Password" \(14 characters\)/);
+    assert.doesNotMatch(log, /hunter2-secret/);
   });
 
   test("screenshot writes a PNG", async () => {
