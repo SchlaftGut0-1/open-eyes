@@ -1,6 +1,8 @@
 // Ways to look at part of a snapshot. Snapshot lines are indented two spaces per level,
 // so a line's ancestors are the closest earlier lines with less indentation.
 
+import type { Ref } from "./state.ts";
+
 const indentOf = (line: string) => line.length - line.trimStart().length;
 
 /** Index of the closest earlier line that is an ancestor of `lines[index]`. */
@@ -159,4 +161,20 @@ export function interactiveIndexes(lines: string[], roles: string[]): number[] {
     for (let at = i; at !== -1 && !keep.has(at); at = parentIndex(lines, at)) keep.add(at);
   });
   return [...keep].sort((a, b) => a - b);
+}
+
+/**
+ * Refs whose element has the accessible name `name` (case-insensitive), and role `role` if
+ * given. Exact names win; otherwise names that contain it.
+ */
+export function refsByName(refs: Record<string, Ref>, name: string, role?: string): string[] {
+  const wanted = name.trim().toLowerCase();
+  const candidates = Object.entries(refs).flatMap(([ref, { label }]) => {
+    const space = label.indexOf(" ");
+    const labelRole = label.slice(0, space);
+    if (role && labelRole.toLowerCase() !== role.trim().toLowerCase()) return [];
+    return [{ ref, name: (JSON.parse(label.slice(space + 1)) as string).toLowerCase() }];
+  });
+  const exact = candidates.filter((c) => c.name === wanted);
+  return (exact.length ? exact : candidates.filter((c) => c.name.includes(wanted))).map((c) => `@${c.ref}`);
 }

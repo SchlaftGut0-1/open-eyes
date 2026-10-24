@@ -591,4 +591,20 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     captured.forEach((px, i) => assert.ok(Math.abs(px - size[i]) <= 1, `captured ${captured} for an element of ${size}`)); // Fractional sizes round either way.
     assert.match(await cliError("screenshot", "--scope", "@99999"), /@99999/);
   });
+
+  test("actions find elements by name, without a snapshot", async () => {
+    await cli("open", fixture("form.html"));
+    assert.match(await cli("fill", "--name", "Name", "Eva"), /filled textbox "Name"/);
+    await cli("click", "--name", "accept terms", "--role", "checkbox");
+    await cli("click", "--name", "Send");
+    assert.equal(await cli("eval", "document.getElementById('out').textContent"), "Hello, Eva (accepted)");
+    const ambiguous = await cliError("click", "--name", "e");
+    assert.match(ambiguous, /elements match "e"; use a ref or add a role/);
+    assert.match(ambiguous, /button "Send" @\d+/);
+    assert.match(await cliError("click", "--name", "Nowhere"), /nothing named "Nowhere"/);
+    assert.match(await cliError("click", "--name", "Send", "--role", "link"), /nothing named link "Send"/);
+    const script = join(root, "by-name.js");
+    writeFileSync(script, `await page.click({ name: "Next page", role: "link" }); return page.url();`);
+    assert.match(await cli("run", script), /second\.html$/);
+  });
 });

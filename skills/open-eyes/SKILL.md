@@ -22,11 +22,12 @@ the user asks). To use the user's everyday browser with their logins: `open-eyes
    quoted lines are text; an outline lists the headings off screen.
 3. `open-eyes click @3`, `fill @4 "text"`, `select @5 "Option"`, `hover @6`,
    `upload @7 file.pdf`, `press Enter`. Each prints what changed, so you rarely need
-   another snapshot. After "the page changed to ...", take a new one: old refs are rejected.
+   another snapshot. After "the page changed to ...", old refs are rejected.
+   No ref? `click --name "Save"`.
 
 Cheaper than reading everything:
 
-- `snapshot --find "text"`: matching lines anywhere on the page; best way to locate an element
+- `snapshot --find "text"`: matching lines anywhere on the page
 - `snapshot --interactive`: only what you can click or type into, plus headings
 - `snapshot --scope @N`: one element and its contents
 - `snapshot --full`: the whole page (expensive)

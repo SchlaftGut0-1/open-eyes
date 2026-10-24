@@ -9,9 +9,14 @@ import { decisionExpression, OWNER_EXPRESSION, overlayExpression, type OverlayAc
 import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
 import { formatSnapshot, type AXNode, type LineNode } from "./snapshot.ts";
 import { stateDir, type Ref, type State } from "./state.ts";
-import { diffLines, findLines, interactiveIndexes, paginate, subtree, viewportView, type Position } from "./view.ts";
+import { diffLines, findLines, interactiveIndexes, paginate, refsByName, subtree, viewportView, type Position } from "./view.ts";
 
 export type Box = { x: number; y: number; width: number; height: number };
+
+/** An element to act on: a ref from a snapshot ("@3"), or its accessible name and role. */
+export type Target = string | { name: string; role?: string };
+const describeTarget = (target: Target) =>
+  typeof target === "string" ? target : `${target.role ? `${target.role} ` : ""}${JSON.stringify(target.name)}`;
 
 /** Pause after showing an action so the human can follow along. 0 disables it. */
 const SLOWMO_MS = Number(process.env.OPEN_EYES_SLOWMO ?? 400);
@@ -220,10 +225,10 @@ export class Page {
     return `url: ${await this.url()}\ntitle: ${JSON.stringify(title)}${header}\n\n${shown.join("\n")}`;
   }
 
-  click(ref: string): Promise<string> {
-    return this.#audited("click", ref, async (entry) => {
+  click(target: Target): Promise<string> {
+    return this.#audited("click", describeTarget(target), async (entry) => {
       await this.#guard();
-      const { backendNodeId, label } = await this.#resolve(ref);
+      const { backendNodeId, label, ref } = await this.#resolve(target);
       entry.target = label;
       const box = await this.#locate(backendNodeId, ref);
       const x = box.x + box.width / 2;
@@ -247,10 +252,10 @@ export class Page {
     });
   }
 
-  fill(ref: string, text: string): Promise<string> {
-    return this.#audited("fill", ref, async (entry) => {
+  fill(target: Target, text: string): Promise<string> {
+    return this.#audited("fill", describeTarget(target), async (entry) => {
       await this.#guard();
-      const { backendNodeId, label } = await this.#resolve(ref);
+      const { backendNodeId, label, ref } = await this.#resolve(target);
       entry.target = `${label} (${text.length} characters)`; // Never the text: it may be a secret.
       const box = await this.#locate(backendNodeId, ref);
       await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2, box });
@@ -304,15 +309,15 @@ export class Page {
    * Sets local files on a file input, after the user allows it: it sends files to the site.
    * The audit log gets the file names, never their contents.
    */
-  upload(ref: string, files: string[]): Promise<string> {
-    return this.#audited("upload", ref, async (entry) => {
+  upload(target: Target, files: string[]): Promise<string> {
+    return this.#audited("upload", describeTarget(target), async (entry) => {
       await this.#guard();
       const paths = files.map((file) => resolve(file));
       for (const path of paths) {
         if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`no such file: ${path}`);
       }
       const names = paths.map((path) => basename(path)).join(", ");
-      const { backendNodeId, label } = await this.#resolve(ref);
+      const { backendNodeId, label, ref } = await this.#resolve(target);
       entry.target = `${label} <- ${names}`;
       const box = await this.#locate(backendNodeId, ref);
       await this.#announce({ label: `upload ${names} to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
@@ -327,10 +332,10 @@ export class Page {
   }
 
   /** Moves the mouse over an element (menus, tooltips) and reports what appeared. */
-  hover(ref: string): Promise<string> {
-    return this.#audited("hover", ref, async (entry) => {
+  hover(target: Target): Promise<string> {
+    return this.#audited("hover", describeTarget(target), async (entry) => {
       await this.#guard();
-      const { backendNodeId, label } = await this.#resolve(ref);
+      const { backendNodeId, label, ref } = await this.#resolve(target);
       entry.target = label;
       const box = await this.#locate(backendNodeId, ref);
       const x = box.x + box.width / 2;
@@ -348,10 +353,10 @@ export class Page {
    * Chooses `option` (by its visible text) in a dropdown: a native <select> directly, or a
    * custom listbox/combobox by opening it and clicking the matching option.
    */
-  select(ref: string, option: string): Promise<string> {
-    return this.#audited("select", ref, async (entry) => {
+  select(target: Target, option: string): Promise<string> {
+    return this.#audited("select", describeTarget(target), async (entry) => {
       await this.#guard();
-      const { backendNodeId, label } = await this.#resolve(ref);
+      const { backendNodeId, label, ref } = await this.#resolve(target);
       entry.target = `${label} → ${option}`;
       const box = await this.#locate(backendNodeId, ref);
       await this.#announce({ label: `choose "${option}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
@@ -777,8 +782,20 @@ export class Page {
     if (pause && SLOWMO_MS > 0) await sleep(SLOWMO_MS);
   }
 
-  async #resolve(ref: string): Promise<Ref> {
-    const key = ref.replace(/^@/, "");
+  async #resolve(target: Target): Promise<Ref & { ref: string }> {
+    if (typeof target !== "string") {
+      await this.#capture(); // Fresh refs for the page as it is now.
+      const matches = refsByName(this.#state.refs, target.name, target.role);
+      const what = describeTarget(target);
+      if (!matches.length) throw new Error(`nothing named ${what} on the page; try "open-eyes snapshot --find"`);
+      if (matches.length > 1) {
+        const shown = matches.slice(0, 10).map((ref) => `  ${this.#state.refs[ref.slice(1)].label} ${ref}`);
+        const more = matches.length > 10 ? [`  ... and ${matches.length - 10} more`] : [];
+        throw new Error([`${matches.length} elements match ${what}; use a ref or add a role:`, ...shown, ...more].join("\n"));
+      }
+      target = matches[0];
+    }
+    const key = target.replace(/^@/, "");
     const found = this.#state.refs[key];
     if (!found) throw new Error(`unknown ref @${key}; run "open-eyes snapshot" to get current refs`);
     // Node ids can be reused by a new document, so a ref from before a navigation
@@ -786,7 +803,7 @@ export class Page {
     if (this.#state.refsLoaderId !== (await this.#loaderId())) {
       throw new Error(`@${key} is from a page that is no longer loaded; run "open-eyes snapshot" again`);
     }
-    return found;
+    return { ...found, ref: `@${key}` };
   }
 
   async #loaderId(): Promise<string> {

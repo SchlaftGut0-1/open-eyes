@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
-import { diffLines, findLines, interactiveIndexes, paginate, subtree, viewportView, type Position } from "../src/view.ts";
+import { diffLines, findLines, interactiveIndexes, paginate, refsByName, subtree, viewportView, type Position } from "../src/view.ts";
 
 const page = [
   '- heading "Shop"',
@@ -159,5 +159,24 @@ describe("interactiveIndexes", () => {
       interactiveIndexes(lines, roles).map((i) => lines[i]),
       ["banner", "  navigation Site", "    link Home @1", "main", "  heading News", "  form Search", "    textbox Query @2"],
     );
+  });
+});
+
+describe("refsByName", () => {
+  const refs = {
+    1: { backendNodeId: 1, label: 'button "Save"' },
+    2: { backendNodeId: 2, label: 'button "Save view"' },
+    3: { backendNodeId: 3, label: 'link "Save"' },
+    4: { backendNodeId: 4, label: 'textbox "Search \\"docs\\""' },
+  };
+  test("prefers exact names, ignoring case, and filters by role", () => {
+    assert.deepEqual(refsByName(refs, "save"), ["@1", "@3"]);
+    assert.deepEqual(refsByName(refs, "Save", "Button"), ["@1"]);
+    assert.deepEqual(refsByName(refs, "view"), ["@2"]);
+  });
+  test("falls back to names that contain the text, and reads quoted names", () => {
+    assert.deepEqual(refsByName(refs, 'search "docs"'), ["@4"]);
+    assert.deepEqual(refsByName(refs, "sav", "link"), ["@3"]);
+    assert.deepEqual(refsByName(refs, "missing"), []);
   });
 });
