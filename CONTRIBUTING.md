@@ -60,6 +60,7 @@ CI on Node 22 and 24 and CodeQL passing. Pull requests into `main` must come fro
 
 1. From `develop`, create `release/X.Y.Z`. Run `npm version X.Y.Z --no-git-tag-version`
    and move the `[Unreleased]` notes in `CHANGELOG.md` under a new `[X.Y.Z]` heading.
+   For a stable release, also update the version in the install commands in `README.md`.
 2. Open a pull request into `main` and merge it with a merge commit once checks pass.
 3. Tag the merge on `main` and push the tag:
    ```bash

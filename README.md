@@ -8,6 +8,8 @@ Give your AI agents eyes. `open-eyes` lets Claude Code, Codex, Cursor, opencode,
 agent with a terminal see and drive a **real, visible browser**, and lets **you watch
 what it is doing** as it happens.
 
+**Site:** https://schlaftgut0-1.github.io/open-eyes/ · [Benchmarks](https://schlaftgut0-1.github.io/open-eyes/benchmarks.html)
+
 - **Your browser, no fork.** Works with stock Chromium, Chrome, Brave, or Edge over the
   Chrome DevTools Protocol. Use a dedicated profile (`launch`) or your everyday browser
   with all your logins (`connect`).
@@ -30,21 +32,42 @@ what it is doing** as it happens.
   a slow command-by-command loop.
 - **Linux first**, fully open source (MIT).
 
+## Install
+
+You need Node.js 22 or newer and Chromium, Chrome, Brave or Edge. Install the package
+from the latest [release](https://github.com/SchlaftGut0-1/open-eyes/releases):
+
+```bash
+npm install -g https://github.com/SchlaftGut0-1/open-eyes/releases/download/v0.4.1/open-eyes-0.4.1.tgz
+```
+
+To check the package first, download it with its checksum and provenance from the
+release page, then:
+
+```bash
+sha256sum -c open-eyes-0.4.1.tgz.sha256
+gh attestation verify open-eyes-0.4.1.tgz -R SchlaftGut0-1/open-eyes
+npm install -g ./open-eyes-0.4.1.tgz
+```
+
+To use it from an agent, copy the skill into your agent's skills directory (for Claude
+Code: `~/.claude/skills/open-eyes`):
+
+```bash
+cp -r "$(npm root -g)/open-eyes/skills/open-eyes" ~/.claude/skills/
+```
+
 ## Quick start
 
 ```bash
-npm install
-npm run build
-npm link              # puts `open-eyes` on your PATH
-
 open-eyes launch      # visible browser with its own open-eyes profile
 open-eyes open news.ycombinator.com
 open-eyes snapshot
 open-eyes click @12
 ```
 
-To use it from an agent, copy `skills/open-eyes` into your agent's skills directory
-(for Claude Code: `~/.claude/skills/open-eyes`).
+To work on open-eyes itself, build it from a clone instead: `npm install`,
+`npm run build`, then `npm link` puts your build on your PATH.
 
 ## Use your everyday browser
 
