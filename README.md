@@ -92,7 +92,7 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `open <url>` | Open a URL in the agent window |
 | `snapshot` | Print what is on screen as text, plus an outline of the rest; actionable elements get `@N` refs |
 | `snapshot --find <text>` / `--scope @N` / `--diff` / `--full` / `--interactive` | Matching lines, one element, what changed, the whole page, or only what can be acted on |
-| `click <@N>` | Click an element |
+| `click <@N>` | Click an element. Instead of `@N`, `click`, `fill`, `select`, `hover` and `upload` take `--name <text> [--role <role>]`: the element with that accessible name, no snapshot needed |
 | `fill <@N> <text>` | Replace a field's content |
 | `press <key>` | Press a key |
 | `select <@N> <option>` | Choose an option by its text in a dropdown (native or custom) |
