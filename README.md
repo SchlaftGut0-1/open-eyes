@@ -99,7 +99,7 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `hover <@N>` | Move the mouse over an element and report the menu or tooltip that appeared |
 | `upload <@N> <file...>` | Attach local files to a file input, after you allow it; downloads are saved to `~/Downloads/open-eyes` |
 | `scroll [@N] [down\|up] [pixels]` | Scroll the page, or the list holding `@N`, and show what is on screen |
-| `screenshot [path]` | Save a PNG and print its path |
+| `screenshot [path] [--scope @N]` | Save a PNG of the page, or of one element, and print its path |
 | `eval <js>` | Evaluate JavaScript in the page |
 | `run <file\|->` | Run a multi-step script with `page` in scope |
 | `handoff <message>` | Ask the user to take over, wait until they hand control back |

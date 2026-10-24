@@ -58,6 +58,7 @@ Page (works in the agent's own window)
                          the list or panel holding it, or with no direction bring
                          @N into view. Prints what is on screen afterwards
   screenshot [path]      Save a PNG of the page and print its path
+    --scope <@N>         Only that element (cheaper for vision models)
   eval <js>              Evaluate a JavaScript expression in the page
   run <file|->           Run a script with \`page\` in scope (- reads stdin)
 
@@ -67,7 +68,7 @@ Scripts (open-eyes run): \`page\` methods, all async
   upload("@N", [paths])
   scroll(ref?, "down"|"up", px?)
   waitForText(text, ms?)  wait(ms)
-  eval(js)  screenshot(path?)  handoff(message?, ms?)  url()
+  eval(js)  screenshot(path?, ref?)  handoff(message?, ms?)  url()
   Refs come from snapshot(): take one before clicking and after the page changes.
 
 Working with the user
@@ -346,8 +347,10 @@ async function main([command, ...args]: string[]): Promise<void> {
       }
       return withPage(`scroll ${args.join(" ")}`.trim(), (page) => page.scroll(ref, direction, pixels));
     }
-    case "screenshot":
-      return withPage("screenshot", (page) => page.screenshot(args[0]));
+    case "screenshot": {
+      const scope = takeOption(args, "--scope");
+      return withPage(scope ? `screenshot --scope ${scope}` : "screenshot", (page) => page.screenshot(args[0], scope));
+    }
     case "eval":
       return withPage("eval", (page) => page.eval(need(args[0], "eval <js>")));
     case "run": {
