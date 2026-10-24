@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
-import { formatSnapshot, type AXNode } from "../src/snapshot.ts";
+import { formatSnapshot, type AXNode, type Frame } from "../src/snapshot.ts";
 
 type Spec = { role: string; name: string; sources?: NonNullable<AXNode["name"]>["sources"]; children: Spec[] } & Omit<
   Partial<AXNode>,
@@ -27,6 +27,20 @@ function page(...children: Spec[]): AXNode[] {
 }
 
 describe("formatSnapshot", () => {
+  test("nests iframe content under the iframe, with refs that tell processes apart", () => {
+    const payment = page(el("button", "Pay", { backendDOMNodeId: 5 }));
+    payment[0].name = { value: "Payment" };
+    const frames = new Map<string, Frame>([
+      ["7", { nodes: payment, url: "https://pay.example/form", frame: "F1" }],
+    ]);
+    const nodes = page(el("button", "Back", { backendDOMNodeId: 5 }), el("Iframe", "", { backendDOMNodeId: 7 }), el("Iframe", "", { backendDOMNodeId: 8 }));
+    const { text, refs, lineNodes } = formatSnapshot(nodes, { byNode: new Map([["F1:5", 9]]), nextRef: 1 }, frames);
+    assert.equal(text, ["button Back @1", "iframe Payment", "  button Pay @9", "iframe"].join("\n"));
+    assert.deepEqual(refs[9], { backendNodeId: 5, label: 'button "Pay"', frame: "F1", url: "https://pay.example/form" });
+    assert.deepEqual(refs[1], { backendNodeId: 5, label: 'button "Back"' });
+    assert.equal(lineNodes[2].backendNodeId, 7, "iframe content is placed by its <iframe>");
+  });
+
   test("numbers actionable elements in document order", () => {
     const { text, refs } = formatSnapshot(
       page(
@@ -81,7 +95,7 @@ describe("formatSnapshot", () => {
       el("button", "New", { backendDOMNodeId: 30 }),
       el("button", "Old", { backendDOMNodeId: 20 }),
     );
-    const { text, refs, nextRef } = formatSnapshot(nodes, { byNode: new Map([[20, 4]]), nextRef: 7 });
+    const { text, refs, nextRef } = formatSnapshot(nodes, { byNode: new Map([["20", 4]]), nextRef: 7 });
     assert.equal(text, ["button New @7", "button Old @4"].join("\n"));
     assert.deepEqual(Object.keys(refs), ["4", "7"]);
     assert.equal(nextRef, 8);

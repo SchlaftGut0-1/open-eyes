@@ -7,7 +7,7 @@ import { audit, type AuditEntry } from "./audit.ts";
 import type { CDP } from "./cdp.ts";
 import { decisionExpression, OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
 import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
-import { formatSnapshot, type AXNode, type LineNode } from "./snapshot.ts";
+import { formatSnapshot, nodeKey, type AXNode, type Frame, type LineNode } from "./snapshot.ts";
 import { stateDir, type Ref, type State } from "./state.ts";
 import { diffLines, findLines, interactiveIndexes, paginate, refsByName, subtree, viewportView, type Position } from "./view.ts";
 
@@ -147,12 +147,24 @@ export class Page {
   #sessionId: string;
   #state: State;
   #policy: Policy;
+  /** Cross-origin iframes, by frame id: their session, the frame holding them, and their <iframe>. */
+  #frames = new Map<string, { session: string; parent?: string; owner?: number }>();
+  /** Sessions already told to attach to their cross-origin iframes. */
+  #autoAttached = new Set<string>();
 
   constructor(cdp: CDP, sessionId: string, state: State) {
     this.#cdp = cdp;
     this.#sessionId = sessionId;
     this.#state = state;
     this.#policy = loadPolicy();
+    cdp.on("Target.attachedToTarget", ({ sessionId: session, targetInfo }, parentSession) => {
+      if (targetInfo.type !== "iframe") return;
+      const parent = [...this.#frames].find(([, info]) => info.session === parentSession)?.[0];
+      if (parentSession === this.#sessionId || parent) this.#frames.set(targetInfo.targetId, { session, parent });
+    });
+    cdp.on("Target.detachedFromTarget", ({ sessionId: session }) => {
+      for (const [frame, info] of this.#frames) if (info.session === session) this.#frames.delete(frame);
+    });
   }
 
   async init(): Promise<void> {
@@ -228,9 +240,9 @@ export class Page {
   click(target: Target): Promise<string> {
     return this.#audited("click", describeTarget(target), async (entry) => {
       await this.#guard();
-      const { backendNodeId, label, ref } = await this.#resolve(target);
+      const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = label;
-      const box = await this.#locate(backendNodeId, ref);
+      const box = await this.#locate(backendNodeId, ref, frame);
       const x = box.x + box.width / 2;
       const y = box.y + box.height / 2;
       await this.#announce({ label: `click ${label}`, x, y, box, busy: true });
@@ -255,20 +267,20 @@ export class Page {
   fill(target: Target, text: string): Promise<string> {
     return this.#audited("fill", describeTarget(target), async (entry) => {
       await this.#guard();
-      const { backendNodeId, label, ref } = await this.#resolve(target);
+      const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = `${label} (${text.length} characters)`; // Never the text: it may be a secret.
-      const box = await this.#locate(backendNodeId, ref);
+      const box = await this.#locate(backendNodeId, ref, frame);
       await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2, box });
-      const { object } = await this.#send<{ object: { objectId: string } }>("DOM.resolveNode", { backendNodeId });
-      const { result } = await this.#send("Runtime.callFunctionOn", {
+      const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
+      const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
         objectId: object.objectId,
         functionDeclaration: `function () { return this.type === "password"; }`,
         returnByValue: true,
       });
       await this.#confirm(`type into ${label}, a password field`, result.value === true);
-      await this.#send("DOM.focus", { backendNodeId });
+      await this.#sendIn(frame, "DOM.focus", { backendNodeId });
       const network = await this.#trackNetwork();
-      await this.#send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: SELECT_CONTENTS });
+      await this.#sendIn(frame, "Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: SELECT_CONTENTS });
       // Inserting over the selection replaces existing content and fires real input events.
       if (text) await this.#send("Input.insertText", { text });
       else await this.press("Backspace", false);
@@ -317,16 +329,16 @@ export class Page {
         if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`no such file: ${path}`);
       }
       const names = paths.map((path) => basename(path)).join(", ");
-      const { backendNodeId, label, ref } = await this.#resolve(target);
+      const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = `${label} <- ${names}`;
-      const box = await this.#locate(backendNodeId, ref);
+      const box = await this.#locate(backendNodeId, ref, frame);
       await this.#announce({ label: `upload ${names} to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
-      const { object } = await this.#send<{ object: { objectId: string } }>("DOM.resolveNode", { backendNodeId });
-      const { result } = await this.#send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: FIND_FILE_INPUT });
+      const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
+      const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: FIND_FILE_INPUT });
       if (!result.objectId) throw new Error(`${label} is not a file input and no file input belongs to it`);
       const host = URL.parse(await this.url())?.host || "this page";
       await this.#confirm(`upload ${names} to ${host}`, true);
-      await this.#send("DOM.setFileInputFiles", { files: paths, objectId: result.objectId });
+      await this.#sendIn(frame, "DOM.setFileInputFiles", { files: paths, objectId: result.objectId });
       return `uploaded ${names} to ${label}${await this.#observe(entry.url)}`;
     });
   }
@@ -335,9 +347,9 @@ export class Page {
   hover(target: Target): Promise<string> {
     return this.#audited("hover", describeTarget(target), async (entry) => {
       await this.#guard();
-      const { backendNodeId, label, ref } = await this.#resolve(target);
+      const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = label;
-      const box = await this.#locate(backendNodeId, ref);
+      const box = await this.#locate(backendNodeId, ref, frame);
       const x = box.x + box.width / 2;
       const y = box.y + box.height / 2;
       await this.#announce({ label: `hover over ${label}`, x, y, box, busy: true });
@@ -356,12 +368,12 @@ export class Page {
   select(target: Target, option: string): Promise<string> {
     return this.#audited("select", describeTarget(target), async (entry) => {
       await this.#guard();
-      const { backendNodeId, label, ref } = await this.#resolve(target);
+      const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = `${label} → ${option}`;
-      const box = await this.#locate(backendNodeId, ref);
+      const box = await this.#locate(backendNodeId, ref, frame);
       await this.#announce({ label: `choose "${option}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
-      const { object } = await this.#send<{ object: { objectId: string } }>("DOM.resolveNode", { backendNodeId });
-      const { result } = await this.#send("Runtime.callFunctionOn", {
+      const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
+      const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
         objectId: object.objectId,
         functionDeclaration: CHOOSE_OPTION,
         arguments: [{ value: option }],
@@ -415,9 +427,9 @@ export class Page {
       let summary: string;
       let network: (() => Promise<boolean>) | undefined;
       if (ref && !direction) {
-        const { backendNodeId, label } = await this.#resolve(ref);
+        const { backendNodeId, label, frame } = await this.#resolve(ref);
         entry.target = label;
-        const box = await this.#locate(backendNodeId, ref); // Scrolls it into view.
+        const box = await this.#locate(backendNodeId, ref, frame); // Scrolls it into view.
         await this.#announce({ label: `scroll to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
         summary = `scrolled to ${label}`;
       } else {
@@ -425,8 +437,8 @@ export class Page {
         let y = height / 2;
         let where = "the page";
         if (ref) {
-          const { backendNodeId, label } = await this.#resolve(ref);
-          const box = await this.#locate(backendNodeId, ref);
+          const { backendNodeId, label, frame } = await this.#resolve(ref);
+          const box = await this.#locate(backendNodeId, ref, frame);
           x = box.x + box.width / 2;
           y = box.y + box.height / 2;
           where = `the area of ${label}`;
@@ -458,8 +470,8 @@ export class Page {
     const file = path ?? join(stateDir, "screenshots", `${new Date().toISOString().replace(/[:.]/g, "-")}.png`);
     let clip: { x: number; y: number; width: number; height: number; scale: number } | undefined;
     if (ref) {
-      const { backendNodeId } = await this.#resolve(ref);
-      const box = await this.#locate(backendNodeId, ref); // Scrolls it into view.
+      const { backendNodeId, frame } = await this.#resolve(ref);
+      const box = await this.#locate(backendNodeId, ref, frame); // Scrolls it into view.
       if (box.width < 1 || box.height < 1) throw new Error(`${ref} has no visible size to capture`);
       // The box is relative to the viewport; the clip is in page coordinates.
       const [scrollX, scrollY] = (await this.#evaluate("[scrollX, scrollY]")) as number[];
@@ -536,6 +548,61 @@ export class Page {
     return this.#cdp.send<T>(method, params, this.#sessionId);
   }
 
+  /** Sends to the session holding `frame`'s nodes: a cross-origin iframe's own, or the page's. */
+  async #sendIn<T = any>(frame: string | undefined, method: string, params: object = {}): Promise<T> {
+    if (frame && !this.#frames.has(frame)) await this.#frameContents(); // Attaches to the iframes.
+    const session = frame ? this.#frames.get(frame)?.session : this.#sessionId;
+    if (!session) throw new Error(`that iframe is gone; run "open-eyes snapshot" again`);
+    return this.#cdp.send<T>(method, params, session);
+  }
+
+  /**
+   * The accessibility trees of every iframe in the page, keyed by their <iframe> element.
+   * Same-process frames are read through their parent's session; cross-origin ones run in
+   * other processes, so each is attached and read through its own.
+   */
+  async #frameContents(): Promise<Map<string, Frame>> {
+    const contents = new Map<string, Frame>();
+    type FrameTree = { frame: { id: string; url: string }; childFrames?: FrameTree[] };
+    const walk = async (frame: string | undefined) => {
+      const send = <T = any>(method: string, params: object = {}) => this.#sendIn<T>(frame, method, params);
+      const local = async (tree: FrameTree) => {
+        for (const child of tree.childFrames ?? []) {
+          try {
+            const { backendNodeId } = await send("DOM.getFrameOwner", { frameId: child.frame.id });
+            const { nodes } = await send("Accessibility.getFullAXTree", { frameId: child.frame.id });
+            contents.set(nodeKey(frame, backendNodeId), { nodes, url: child.frame.url, frame });
+          } catch {
+            continue; // It went away while we looked.
+          }
+          await local(child);
+        }
+      };
+      await local((await send<{ frameTree: FrameTree }>("Page.getFrameTree")).frameTree);
+
+      const session = frame ? this.#frames.get(frame)!.session : this.#sessionId;
+      if (!this.#autoAttached.has(session)) {
+        // Reports the iframes already there before it returns, and new ones as they appear.
+        await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+        this.#autoAttached.add(session);
+      }
+      for (const [child, info] of [...this.#frames].filter(([, info]) => info.parent === frame)) {
+        try {
+          info.owner = (await send<{ backendNodeId: number }>("DOM.getFrameOwner", { frameId: child })).backendNodeId;
+          await this.#sendIn(child, "Accessibility.enable");
+          const { nodes } = await this.#sendIn<{ nodes: AXNode[] }>(child, "Accessibility.getFullAXTree");
+          const { frameTree } = await this.#sendIn<{ frameTree: FrameTree }>(child, "Page.getFrameTree");
+          contents.set(nodeKey(frame, info.owner), { nodes, url: frameTree.frame.url, frame: child });
+        } catch {
+          continue;
+        }
+        await walk(child);
+      }
+    };
+    await walk(undefined);
+    return contents;
+  }
+
   async #evaluate(expression: string): Promise<unknown> {
     const { result, exceptionDetails } = await this.#send("Runtime.evaluate", {
       expression,
@@ -555,16 +622,18 @@ export class Page {
   async #capture(): Promise<{ lines: string[]; previous?: string[]; lineNodes: LineNode[] }> {
     const loaderId = await this.#loaderId();
     const sameDocument = this.#state.refsLoaderId === loaderId;
-    const byNode = new Map<number, number>();
+    const byNode = new Map<string, number>();
     if (sameDocument) {
-      for (const [ref, { backendNodeId }] of Object.entries(this.#state.refs)) byNode.set(backendNodeId, Number(ref));
+      for (const [ref, { backendNodeId, frame }] of Object.entries(this.#state.refs)) byNode.set(nodeKey(frame, backendNodeId), Number(ref));
     }
     await this.#send("Accessibility.enable");
     const { nodes } = await this.#send<{ nodes: AXNode[] }>("Accessibility.getFullAXTree");
-    const { text, refs, nextRef, lineNodes } = formatSnapshot(nodes, {
-      byNode,
-      nextRef: sameDocument ? (this.#state.nextRef ?? 1) : 1,
-    });
+    const frames = await this.#frameContents();
+    const { text, refs, nextRef, lineNodes } = formatSnapshot(
+      nodes,
+      { byNode, nextRef: sameDocument ? (this.#state.nextRef ?? 1) : 1 },
+      frames,
+    );
 
     let previous: string[] | undefined;
     if (sameDocument) {
@@ -803,6 +872,9 @@ export class Page {
     if (this.#state.refsLoaderId !== (await this.#loaderId())) {
       throw new Error(`@${key} is from a page that is no longer loaded; run "open-eyes snapshot" again`);
     }
+    // Content in an iframe comes from the iframe's site, which the policy may not allow.
+    const reason = found.url && blockedReason(this.#policy, found.url);
+    if (reason) throw new PolicyError("blocked", `@${key} is in an iframe from ${found.url}, but ${reason}`);
     return { ...found, ref: `@${key}` };
   }
 
@@ -811,15 +883,35 @@ export class Page {
     return frameTree.frame.loaderId;
   }
 
-  async #locate(backendNodeId: number, ref: string): Promise<Box> {
+  /** Where the element is in the window, after scrolling it (and any iframe holding it) into view. */
+  async #locate(backendNodeId: number, ref: string, frame?: string): Promise<Box> {
     try {
-      await this.#send("DOM.scrollIntoViewIfNeeded", { backendNodeId });
-      const { model } = await this.#send<{ model: { border: number[] } }>("DOM.getBoxModel", { backendNodeId });
+      // A cross-origin iframe measures from its own corner: find where each <iframe> sits.
+      const owners: { frame?: string; owner: number }[] = [];
+      for (let at = frame; at; at = this.#frames.get(at)?.parent) {
+        const info = this.#frames.get(at);
+        if (info?.owner === undefined) await this.#frameContents();
+        const found = this.#frames.get(at);
+        if (found?.owner === undefined) throw new Error("iframe gone");
+        owners.unshift({ frame: found.parent, owner: found.owner });
+      }
+      let offsetX = 0;
+      let offsetY = 0;
+      for (const { frame: parent, owner } of owners) {
+        await this.#sendIn(parent, "DOM.scrollIntoViewIfNeeded", { backendNodeId: owner });
+      }
+      await this.#sendIn(frame, "DOM.scrollIntoViewIfNeeded", { backendNodeId });
+      for (const { frame: parent, owner } of owners) {
+        const { model } = await this.#sendIn<{ model: { content: number[] } }>(parent, "DOM.getBoxModel", { backendNodeId: owner });
+        offsetX += model.content[0];
+        offsetY += model.content[1];
+      }
+      const { model } = await this.#sendIn<{ model: { border: number[] } }>(frame, "DOM.getBoxModel", { backendNodeId });
       const xs = model.border.filter((_, i) => i % 2 === 0);
       const ys = model.border.filter((_, i) => i % 2 === 1);
       const x = Math.min(...xs);
       const y = Math.min(...ys);
-      return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+      return { x: x + offsetX, y: y + offsetY, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
     } catch {
       throw new Error(`${ref} is gone or not visible; the page changed, run "open-eyes snapshot" again`);
     }

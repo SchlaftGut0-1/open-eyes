@@ -607,4 +607,47 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     writeFileSync(script, `await page.click({ name: "Next page", role: "link" }); return page.url();`);
     assert.match(await cli("run", script), /second\.html$/);
   });
+  test("iframes, same-origin and cross-origin, are read and driven like the page", async () => {
+    // localhost and 127.0.0.1 are different sites, so the second iframe runs in its own process.
+    const server = createServer((request, response) => {
+      const port = (server.address() as { port: number }).port;
+      const pages: Record<string, string> = {
+        "/": `<title>Shop</title><h1>Checkout</h1>
+          <iframe src="/same" title="Coupon" style="border: 4px solid; margin: 20px"></iframe>
+          <div style="height: 1500px"></div>
+          <iframe src="http://127.0.0.1:${port}/cross" style="margin-left: 120px" width="400" height="200"></iframe>`,
+        "/same": `<button onclick="this.textContent = 'Applied'">Apply coupon</button>`,
+        "/cross": `<title>Payment</title><div style="height: 100px"></div>
+          <label>Card number <input></label>
+          <button onclick="document.querySelector('p').textContent = 'Paid with ' + document.querySelector('input').value">Pay</button><p></p>`,
+      };
+      response.setHeader("content-type", "text/html");
+      response.end(pages[request.url ?? ""] ?? "");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    try {
+      await cli("open", `http://localhost:${port}/`);
+      const full = await cli("snapshot", "--full");
+      assert.match(full, /^iframe Coupon\n  button Apply coupon @\d+$/m);
+      assert.match(full, /^iframe Payment\n  "Card number"\n  textbox Card number @\d+\n  button Pay @\d+$/m);
+      assert.match(await cli("snapshot", "--find", "Card"), /iframe Payment\n  "Card number"\n  textbox Card number @\d+/);
+      const onScreen = await cli("snapshot");
+      assert.doesNotMatch(onScreen, /Card number/);
+      assert.match(onScreen, /off screen: 4 more lines\. Outline:\niframe Payment \(below\)/);
+
+      // Clicks land at the element's real position in the window, also below the fold.
+      assert.match(await cli("click", refOf(full, "button Apply coupon")), /\+ +button Applied( \[focused\])? @\d+/);
+      await cli("fill", refOf(full, "textbox Card number"), "42424");
+      await cli("press", "Backspace"); // Keys go to the focused field, inside the iframe.
+      assert.match(await cli("click", "--name", "Pay"), /\+ +"Paid with 4242"/);
+      assert.match(await cli("snapshot", "--scope", refOf(full, "button Pay")), /^button Pay( \[focused\])? @\d+$/m);
+
+      await cli("policy", "block", "127.0.0.1");
+      assert.match(await cliError("click", refOf(full, "button Pay")), /in an iframe from http:\/\/127\.0\.0\.1:\d+\/cross, but 127\.0\.0\.1 is blocked/);
+    } finally {
+      await cli("policy", "reset");
+      server.close();
+    }
+  });
 });
