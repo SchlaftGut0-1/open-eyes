@@ -19,6 +19,7 @@ export class CDP {
   #transport: Transport;
   #nextId = 1;
   #pending = new Map<number, Pending>();
+  #listeners = new Map<string, Set<(params: any, sessionId?: string) => void>>();
 
   private constructor(open: (events: TransportEvents) => Transport) {
     this.#transport = open({
@@ -86,13 +87,24 @@ export class CDP {
     return new Promise((resolve, reject) => this.#pending.set(id, { method, resolve, reject }));
   }
 
+  /** Calls `listener` for every `method` event until the returned function is called. */
+  on(method: string, listener: (params: any, sessionId?: string) => void): () => void {
+    const listeners = this.#listeners.get(method) ?? new Set();
+    listeners.add(listener);
+    this.#listeners.set(method, listeners);
+    return () => listeners.delete(listener);
+  }
+
   close(): void {
     this.#transport.close();
   }
 
   #onMessage(raw: string): void {
     const message = JSON.parse(raw);
-    if (message.id === undefined) return; // Events are not used yet.
+    if (message.id === undefined) {
+      for (const listener of this.#listeners.get(message.method) ?? []) listener(message.params, message.sessionId);
+      return;
+    }
     const pending = this.#pending.get(message.id);
     if (!pending) return;
     this.#pending.delete(message.id);

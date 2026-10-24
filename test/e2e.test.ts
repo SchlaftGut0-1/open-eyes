@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -23,6 +24,7 @@ const env = {
   XDG_STATE_HOME: join(root, "state"),
   XDG_DATA_HOME: join(root, "data"),
   XDG_CONFIG_HOME: join(root, "config"),
+  OPEN_EYES_DOWNLOADS: join(root, "downloads"),
   OPEN_EYES_CONFIRM: "never", // Tests that need approvals turn it on.
 };
 
@@ -245,6 +247,9 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       await cli("fill", refOf(snapshot, 'textbox Name'), "Daemon");
       assert.match(await cli("click", refOf(snapshot, 'button Send')), /Hello, Daemon/);
       assert.match(await cliError("connect", "--endpoint", endpoint), /already connected/);
+      // Download events are browser-wide: the daemon must pass them on.
+      await cli("open", fixture("files.html"));
+      assert.match(await cli("click", refOf(await cli("snapshot"), "link Download notes")), /downloaded .*notes/);
     } finally {
       assert.match(await cli("disconnect"), /disconnected/);
     }
@@ -433,9 +438,216 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("snapshot", "--interactive", "--diff"), /cannot be combined/);
   });
 
+  test("scroll moves the page or a container and shows what is on screen", async () => {
+    await cli("open", fixture("tall.html"));
+    const down = await cli("scroll", "down", "3000");
+    assert.match(down, /^scrolled down 3000 px in the page$/m);
+    assert.match(down, /button Bottom button @\d+/);
+    assert.match(down, /^heading Top \(above\)$/m);
+
+    assert.match(await cli("scroll", "up", "99999"), /scrolled up 99999 px/);
+    assert.match(await cli("scroll", "up"), /the page did not move \(already at the top/);
+
+    const button = refOf(await cli("snapshot", "--find", "Bottom button"), "button Bottom button");
+    const intoView = await cli("scroll", button);
+    assert.match(intoView, /^scrolled to button "Bottom button"$/m);
+    assert.match(intoView, /button Bottom button/);
+
+    await cli("open", fixture("list.html"));
+    const first = refOf(await cli("snapshot"), "button Message 1 ");
+    const inList = await cli("scroll", first, "down", "400");
+    assert.match(inList, /scrolled down 400 px in the area of button "Message 1"/);
+    assert.ok(Number(await cli("eval", "document.getElementById('list').scrollTop")) > 0, "the list scrolled");
+    assert.match(inList, /button Message 1\d @\d+/);
+    assert.match(await cliError("scroll", "sideways"), /usage: open-eyes scroll/);
+  });
+
+  test("select chooses options in native and custom dropdowns", async () => {
+    await cli("open", fixture("dropdowns.html"));
+    const snapshot = await cli("snapshot");
+    const country = refOf(snapshot, "combobox Country");
+
+    assert.match(await cli("select", country, "argentina"), /^chose "Argentina" in combobox "Country"/);
+    assert.equal(await cli("eval", "document.getElementById('picked').textContent"), "Picked ar");
+    assert.match(await cliError("select", country, "Peru"), /no option "Peru" in combobox "Country"; options: Choose one, Ecuador, Argentina/);
+
+    const size = refOf(snapshot, "button Size: none");
+    assert.match(await cli("select", size, "Large"), /^chose "Large" in button "Size: none"/);
+    assert.equal(await cli("eval", "document.getElementById('size').textContent"), "Size: Large");
+    assert.match(await cliError("select", size, "Huge"), /no option "Huge".*options: Small, Large/);
+  });
+
+  test("hover opens menus and tooltips and reports them", async () => {
+    await cli("open", fixture("hover.html"));
+    const snapshot = await cli("snapshot");
+    assert.doesNotMatch(snapshot, /Laptops/);
+
+    const menu = await cli("hover", refOf(snapshot, "link Products"));
+    assert.match(menu, /^hovered over link "Products"\nchanges:/);
+    assert.match(menu, /\+ +link Laptops @\d+/);
+    assert.match(menu, /\+ +link Phones @\d+/);
+
+    const tip = await cli("hover", refOf(snapshot, "button Help"));
+    assert.match(tip, /\+ +tooltip Opens the user guide/);
+  });
+
+  test("upload attaches files after the user allows it, and logs only their names", async () => {
+    const file = join(root, "cv-secret-contents.pdf");
+    writeFileSync(file, "top secret file body");
+    await cli("open", fixture("files.html"));
+    const snapshot = await cli("snapshot");
+    const resume = refOf(snapshot, "button Resume");
+
+    assert.match(await cli("upload", resume, file), /^uploaded cv-secret-contents\.pdf to button "Resume"/);
+    assert.equal(await cli("eval", "document.getElementById('names').textContent"), "cv: cv-secret-contents.pdf");
+
+    // A styled button whose file input is hidden: the form's only file input is used.
+    await cli("upload", refOf(snapshot, "button Attach"), file);
+    assert.equal(await cli("eval", "document.getElementById('names').textContent"), "hidden: cv-secret-contents.pdf");
+
+    assert.match(await cliError("upload", resume, join(root, "missing.pdf")), /no such file/);
+    assert.match(await cliError("upload", refOf(snapshot, "link Download notes"), file), /no file input belongs to it/);
+
+    const human = await humanAt();
+    try {
+      const asking = cliErrorWith({ OPEN_EYES_CONFIRM: "risky" }, "upload", resume, file);
+      await human.click("deny");
+      assert.match(await asking, /the user denied: upload cv-secret-contents\.pdf/);
+    } finally {
+      human.close();
+    }
+    const log = await cli("log", "--limit", "10");
+    assert.match(log, /upload +button "Resume" <- cv-secret-contents\.pdf/);
+    assert.doesNotMatch(log, /top secret file body/);
+  });
+
+  test("downloads are saved to a known folder and reported", async () => {
+    await cli("open", fixture("files.html"));
+    const link = refOf(await cli("snapshot"), "link Download notes");
+    const first = await cli("click", link);
+    const saved = first.match(/\ndownloaded (.+)$/)?.[1] ?? "";
+    assert.equal(dirname(saved), env.OPEN_EYES_DOWNLOADS);
+    assert.match(basename(saved), /^notes( \(\d+\))?\.txt$/);
+    assert.equal(readFileSync(saved, "utf8"), "hello from open-eyes");
+    // Another download never overwrites an earlier one.
+    const second = (await cli("click", link)).match(/\ndownloaded (.+)$/)?.[1];
+    assert.ok(second && second !== saved, `a new file, not ${saved}`);
+    assert.equal(readFileSync(second, "utf8"), "hello from open-eyes");
+    assert.match(await cli("log", "--limit", "1"), /click +link "Download notes" \(downloaded notes \(\d+\)\.txt\)/);
+  });
+
+  test("actions wait for the content they fetched, but never hang on a request", async () => {
+    // A search box that, like Wikipedia's, fetches suggestions after a debounce.
+    const page = `<!doctype html><title>Search</title><input aria-label="Query"><button>Poll forever</button><ul></ul>
+      <script>
+        let timer;
+        document.querySelector("input").addEventListener("input", (event) => {
+          clearTimeout(timer);
+          timer = setTimeout(async () => {
+            const items = await (await fetch("/suggest?q=" + event.target.value)).json();
+            document.querySelector("ul").innerHTML = items.map((i) => "<li>" + i + "</li>").join("");
+          }, 200);
+        });
+        document.querySelector("button").addEventListener("click", () => fetch("/never"));
+      </script>`;
+    const server = createServer((request, response) => {
+      if (request.url === "/") return response.end(page);
+      if (request.url?.startsWith("/suggest")) {
+        return setTimeout(() => response.end(JSON.stringify(["Chromium browser", "Chromium element"])), 700);
+      }
+      // /never: keep the request open.
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    try {
+      await cli("open", `http://127.0.0.1:${port}/`);
+      const snapshot = await cli("snapshot");
+      const filled = await cli("fill", refOf(snapshot, "textbox Query"), "chromium");
+      assert.match(filled, /\+ +"Chromium browser"/, "suggestions fetched after a debounce are reported");
+
+      const started = Date.now();
+      await cli("click", refOf(snapshot, "button Poll forever"));
+      assert.ok(Date.now() - started < 6000, "a request that never ends does not hold the action");
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
   test("screenshot writes a PNG", async () => {
     const file = await cli("screenshot", join(root, "shot.png"));
     assert.ok(existsSync(file));
     assert.equal(readFileSync(file).subarray(1, 4).toString(), "PNG");
+  });
+
+  test("screenshot --scope captures only that element, even off screen", async () => {
+    await cli("open", fixture("tall.html"));
+    const ref = (await cli("snapshot", "--find", "Bottom button")).match(/button Bottom button @(\d+)/)?.[1];
+    assert.ok(ref, "the button has a ref");
+    const file = await cli("screenshot", join(root, "button.png"), "--scope", `@${ref}`);
+    const png = readFileSync(file);
+    const size = JSON.parse(await cli("eval", "JSON.stringify((({ width, height }) => [width, height])(document.querySelector('button').getBoundingClientRect()))"));
+    const captured = [png.readUInt32BE(16), png.readUInt32BE(20)];
+    captured.forEach((px, i) => assert.ok(Math.abs(px - size[i]) <= 1, `captured ${captured} for an element of ${size}`)); // Fractional sizes round either way.
+    assert.match(await cliError("screenshot", "--scope", "@99999"), /@99999/);
+  });
+
+  test("actions find elements by name, without a snapshot", async () => {
+    await cli("open", fixture("form.html"));
+    assert.match(await cli("fill", "--name", "Name", "Eva"), /filled textbox "Name"/);
+    await cli("click", "--name", "accept terms", "--role", "checkbox");
+    await cli("click", "--name", "Send");
+    assert.equal(await cli("eval", "document.getElementById('out').textContent"), "Hello, Eva (accepted)");
+    const ambiguous = await cliError("click", "--name", "e");
+    assert.match(ambiguous, /elements match "e"; use a ref or add a role/);
+    assert.match(ambiguous, /button "Send" @\d+/);
+    assert.match(await cliError("click", "--name", "Nowhere"), /nothing named "Nowhere"/);
+    assert.match(await cliError("click", "--name", "Send", "--role", "link"), /nothing named link "Send"/);
+    const script = join(root, "by-name.js");
+    writeFileSync(script, `await page.click({ name: "Next page", role: "link" }); return page.url();`);
+    assert.match(await cli("run", script), /second\.html$/);
+  });
+  test("iframes, same-origin and cross-origin, are read and driven like the page", async () => {
+    // localhost and 127.0.0.1 are different sites, so the second iframe runs in its own process.
+    const server = createServer((request, response) => {
+      const port = (server.address() as { port: number }).port;
+      const pages: Record<string, string> = {
+        "/": `<title>Shop</title><h1>Checkout</h1>
+          <iframe src="/same" title="Coupon" style="border: 4px solid; margin: 20px"></iframe>
+          <div style="height: 1500px"></div>
+          <iframe src="http://127.0.0.1:${port}/cross" style="margin-left: 120px" width="400" height="200"></iframe>`,
+        "/same": `<button onclick="this.textContent = 'Applied'">Apply coupon</button>`,
+        "/cross": `<title>Payment</title><div style="height: 100px"></div>
+          <label>Card number <input></label>
+          <button onclick="document.querySelector('p').textContent = 'Paid with ' + document.querySelector('input').value">Pay</button><p></p>`,
+      };
+      response.setHeader("content-type", "text/html");
+      response.end(pages[request.url ?? ""] ?? "");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    try {
+      await cli("open", `http://localhost:${port}/`);
+      const full = await cli("snapshot", "--full");
+      assert.match(full, /^iframe Coupon\n  button Apply coupon @\d+$/m);
+      assert.match(full, /^iframe Payment\n  "Card number"\n  textbox Card number @\d+\n  button Pay @\d+$/m);
+      assert.match(await cli("snapshot", "--find", "Card"), /iframe Payment\n  "Card number"\n  textbox Card number @\d+/);
+      const onScreen = await cli("snapshot");
+      assert.doesNotMatch(onScreen, /Card number/);
+      assert.match(onScreen, /off screen: 4 more lines\. Outline:\niframe Payment \(below\)/);
+
+      // Clicks land at the element's real position in the window, also below the fold.
+      assert.match(await cli("click", refOf(full, "button Apply coupon")), /\+ +button Applied( \[focused\])? @\d+/);
+      await cli("fill", refOf(full, "textbox Card number"), "42424");
+      await cli("press", "Backspace"); // Keys go to the focused field, inside the iframe.
+      assert.match(await cli("click", "--name", "Pay"), /\+ +"Paid with 4242"/);
+      assert.match(await cli("snapshot", "--scope", refOf(full, "button Pay")), /^button Pay( \[focused\])? @\d+$/m);
+
+      await cli("policy", "block", "127.0.0.1");
+      assert.match(await cliError("click", refOf(full, "button Pay")), /in an iframe from http:\/\/127\.0\.0\.1:\d+\/cross, but 127\.0\.0\.1 is blocked/);
+    } finally {
+      await cli("policy", "reset");
+      server.close();
+    }
   });
 });

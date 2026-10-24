@@ -90,12 +90,16 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `disconnect` | Stop using your everyday browser |
 | `status` | Show the browser and the agent window |
 | `open <url>` | Open a URL in the agent window |
-| `snapshot` | Print what is on screen as text, plus an outline of the rest; actionable elements get `@N` refs |
+| `snapshot` | Print what is on screen as text, plus an outline of the rest; actionable elements get `@N` refs. Iframes, also cross-origin ones (payment forms, embedded logins), are nested under an `iframe` line and work like the rest of the page |
 | `snapshot --find <text>` / `--scope @N` / `--diff` / `--full` / `--interactive` | Matching lines, one element, what changed, the whole page, or only what can be acted on |
-| `click <@N>` | Click an element |
+| `click <@N>` | Click an element. Instead of `@N`, `click`, `fill`, `select`, `hover` and `upload` take `--name <text> [--role <role>]`: the element with that accessible name, no snapshot needed |
 | `fill <@N> <text>` | Replace a field's content |
 | `press <key>` | Press a key |
-| `screenshot [path]` | Save a PNG and print its path |
+| `select <@N> <option>` | Choose an option by its text in a dropdown (native or custom) |
+| `hover <@N>` | Move the mouse over an element and report the menu or tooltip that appeared |
+| `upload <@N> <file...>` | Attach local files to a file input, after you allow it; downloads are saved to `~/Downloads/open-eyes` |
+| `scroll [@N] [down\|up] [pixels]` | Scroll the page, or the list holding `@N`, and show what is on screen |
+| `screenshot [path] [--scope @N]` | Save a PNG of the page, or of one element, and print its path |
 | `eval <js>` | Evaluate JavaScript in the page |
 | `run <file\|->` | Run a multi-step script with `page` in scope |
 | `handoff <message>` | Ask the user to take over, wait until they hand control back |
@@ -115,7 +119,8 @@ agent ──shell──▶ open-eyes CLI ──CDP (WebSocket)──▶ your Chr
 ```
 
 Each command is a short-lived process. It attaches to the agent's window (creating it
-if needed), reads the accessibility tree or acts on the page, and exits. Refs from the
+if needed), reads the accessibility tree (attaching to cross-origin iframes, which run in
+their own processes) or acts on the page, and exits. Refs from the
 last snapshot are kept in `~/.local/state/open-eyes/state.json`.
 
 ## Contributing
@@ -126,5 +131,4 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 
 ## Status
 
-Early MVP. Next up: snapshots inside iframes, more commands (scroll, hover, select,
-upload), and several parallel agent windows ("spaces").
+Early MVP. Next up: several parallel agent windows ("spaces").

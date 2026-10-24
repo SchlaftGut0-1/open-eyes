@@ -12,7 +12,7 @@ import {
 } from "./browser.ts";
 import { readAudit } from "./audit.ts";
 import { runDaemon } from "./daemon.ts";
-import type { Page } from "./page.ts";
+import type { Page, Target } from "./page.ts";
 import { CONFIRM_MODES, loadPolicy, normalizeSite, policyFile, savePolicy, type ConfirmMode } from "./policy.ts";
 import { runScript } from "./run.ts";
 import { formatUsage, readUsage, recordUsage, resetUsage, usageSummary } from "./usage.ts";
@@ -48,14 +48,29 @@ Page (works in the agent's own window)
   click <@N>             Click an element from the last snapshot
   fill <@N> <text>       Replace the content of a field
   press <key>            Press a key (Enter, Tab, Escape, ArrowDown, a, ...)
+  select <@N> <option>   Choose an option by its text in a dropdown (native or custom)
+  hover <@N>             Move the mouse over an element and report what appeared
+  upload <@N> <file...>  Attach local files to a file input (asks the user first)
+                         Instead of <@N>, these take --name <text> [--role <role>]:
+                         the element with that accessible name, no snapshot needed
+                         Downloads started by click or press are saved in
+                         ~/Downloads/open-eyes (OPEN_EYES_DOWNLOADS) and reported
+  scroll [@N] [down|up] [pixels]
+                         Scroll the page (default: down one screen); with @N, scroll
+                         the list or panel holding it, or with no direction bring
+                         @N into view. Prints what is on screen afterwards
   screenshot [path]      Save a PNG of the page and print its path
+    --scope <@N>         Only that element (cheaper for vision models)
   eval <js>              Evaluate a JavaScript expression in the page
   run <file|->           Run a script with \`page\` in scope (- reads stdin)
 
 Scripts (open-eyes run): \`page\` methods, all async
   goto(url)  snapshot({ full, find, scope, diff, interactive, limit, page })
-  click("@N")  fill("@N", text)  press(key)  waitForText(text, ms?)  wait(ms)
-  eval(js)  screenshot(path?)  handoff(message?, ms?)  url()
+  click("@N")  fill("@N", text)  press(key)  select("@N", option)  hover("@N")
+  upload("@N", [paths])   Each also takes { name, role? } instead of "@N"
+  scroll(ref?, "down"|"up", px?)
+  waitForText(text, ms?)  wait(ms)
+  eval(js)  screenshot(path?, ref?)  handoff(message?, ms?)  url()
   Refs come from snapshot(): take one before clicking and after the page changes.
 
 Working with the user
@@ -105,6 +120,21 @@ function takeOption(args: string[], name: string): string | undefined {
   if (value === undefined) throw new Error(`${name} needs a value`);
   args.splice(i, 2);
   return value;
+}
+
+/**
+ * Removes the element to act on from args: `--name <text> [--role <role>]`, or else the
+ * first argument as a ref. Returns it with a label for the usage log.
+ */
+function takeTarget(args: string[], usage: string): [Target, string] {
+  const name = takeOption(args, "--name");
+  const role = takeOption(args, "--role");
+  if (name === undefined) {
+    if (role !== undefined) throw new Error("--role needs --name");
+    const ref = need(args.shift(), usage);
+    return [ref, ref];
+  }
+  return [{ name, role }, `${role ? `${role} ` : ""}"${name}"`];
 }
 
 /** Removes `--name <number>` from args and returns the number, at least `min`. */
@@ -301,16 +331,46 @@ async function main([command, ...args]: string[]): Promise<void> {
       if (args.length) throw new Error(`unknown snapshot option "${args[0]}"; see "open-eyes help"`);
       return withPage(`snapshot ${original.join(" ")}`.trim(), (page) => page.snapshot(options));
     }
-    case "click":
-      return withPage(`click ${args[0] ?? ""}`, (page) => page.click(need(args[0], "click <@N>")));
+    case "click": {
+      const [target, label] = takeTarget(args, "click <@N>");
+      return withPage(`click ${label}`, (page) => page.click(target));
+    }
     case "fill": {
-      const ref = need(args[0], "fill <@N> <text>");
-      return withPage(`fill ${ref}`, (page) => page.fill(ref, args.slice(1).join(" ")));
+      const [target, label] = takeTarget(args, "fill <@N> <text>");
+      return withPage(`fill ${label}`, (page) => page.fill(target, args.join(" ")));
     }
     case "press":
       return withPage(`press ${args[0] ?? ""}`, (page) => page.press(need(args[0], "press <key>")));
-    case "screenshot":
-      return withPage("screenshot", (page) => page.screenshot(args[0]));
+    case "upload": {
+      const [target, label] = takeTarget(args, "upload <@N> <file...>");
+      if (!args.length) throw new Error("usage: open-eyes upload <@N> <file...>");
+      return withPage(`upload ${label} ${args.map((f) => f.split("/").pop()).join(" ")}`, (page) => page.upload(target, args));
+    }
+    case "hover": {
+      const [target, label] = takeTarget(args, "hover <@N>");
+      return withPage(`hover ${label}`, (page) => page.hover(target));
+    }
+    case "select": {
+      const [target, label] = takeTarget(args, "select <@N> <option>");
+      const option = need(args.join(" ") || undefined, "select <@N> <option>");
+      return withPage(`select ${label} ${option}`, (page) => page.select(target, option));
+    }
+    case "scroll": {
+      let ref: string | undefined;
+      let direction: "down" | "up" | undefined;
+      let pixels: number | undefined;
+      for (const arg of args) {
+        if (/^@\d+$/.test(arg) && ref === undefined) ref = arg;
+        else if (arg === "down" || arg === "up") direction = arg;
+        else if (/^\d+$/.test(arg)) pixels = Number(arg);
+        else throw new Error("usage: open-eyes scroll [@N] [down|up] [pixels]");
+      }
+      return withPage(`scroll ${args.join(" ")}`.trim(), (page) => page.scroll(ref, direction, pixels));
+    }
+    case "screenshot": {
+      const scope = takeOption(args, "--scope");
+      return withPage(scope ? `screenshot --scope ${scope}` : "screenshot", (page) => page.screenshot(args[0], scope));
+    }
     case "eval":
       return withPage("eval", (page) => page.eval(need(args[0], "eval <js>")));
     case "run": {
