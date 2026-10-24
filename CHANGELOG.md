@@ -6,6 +6,17 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-24
+
+### Added
+
+- A project site at https://schlaftgut0-1.github.io/open-eyes/ with what open-eyes
+  does, how to install it, and the 0.4.0 vs 0.3.0 benchmarks (including where 0.4.0 is
+  not better). It is published from `main` by a GitHub Pages workflow.
+- The README explains how to install open-eyes straight from a release with npm, how to
+  verify the package's checksum and provenance first, and where to find the agent skill
+  after installing.
+
 ## [0.4.0] - 2026-10-24
 
 Agents read far fewer tokens (see 0.4.0-beta.1) and can now do much more on a page:
@@ -143,7 +154,8 @@ cost 11,423 tokens now costs 5,121.
   `eval`, multi-step `run` scripts, a live overlay showing each action, and an agent
   skill.
 
-[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0-beta.1...v0.4.0
 [0.4.0-beta.1]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.3.0...v0.4.0-beta.1
 [0.3.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.2.0...v0.3.0
