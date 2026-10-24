@@ -6,6 +6,41 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-24
+
+Agents read far fewer tokens (see 0.4.0-beta.1) and can now do much more on a page:
+scroll, pick from dropdowns, hover menus, upload and download files, act by name, and
+work inside iframes.
+
+### Added
+
+- `open-eyes scroll [@N] [down|up] [pixels]` scrolls the page, or the list or panel
+  holding `@N`, with real mouse-wheel events (lazy loading works), and shows what is on
+  screen afterwards.
+- `open-eyes select @N "Option"` chooses an option in native and custom dropdowns.
+- `open-eyes hover @N` moves the mouse over an element and reports the menu or tooltip
+  that appeared.
+- `open-eyes upload @N <file...>` attaches local files to a file input after you allow
+  it; the audit log keeps only file names. Downloads started by an action are saved to
+  `~/Downloads/open-eyes` and reported.
+- `screenshot --scope @N` captures a single element, even off screen, for far fewer
+  image tokens than a full screenshot.
+- **Act by name**: `click`, `fill`, `select`, `hover` and `upload` take
+  `--name <text> [--role <role>]` instead of `@N`, no snapshot needed. Scripts take
+  `{ name, role }`. Ambiguous names list the candidates and their refs.
+- **Iframes**, including cross-origin ones (payment forms, embedded logins): their
+  content is nested under an `iframe` line in snapshots, their elements get refs, and
+  every action works on them at their real position. The policy is checked against the
+  iframe's own site.
+- Each release carries its signed build provenance (`.sigstore.json` and
+  `.intoto.jsonl`) next to the package and checksum.
+
+### Changed
+
+- Actions wait for the content they fetched (fetch and XHR, at most 2 s) before
+  reporting what changed, so debounced results such as search suggestions are in the
+  report.
+
 ## [0.4.0-beta.1] - 2026-10-23
 
 First pre-release of 0.4.0: agents read far fewer tokens. Measured on six sites, the
@@ -108,7 +143,8 @@ cost 11,423 tokens now costs 5,121.
   `eval`, multi-step `run` scripts, a live overlay showing each action, and an agent
   skill.
 
-[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0-beta.1...HEAD
+[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0-beta.1...v0.4.0
 [0.4.0-beta.1]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.3.0...v0.4.0-beta.1
 [0.3.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/2bbe51e...v0.2.0
