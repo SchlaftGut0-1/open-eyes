@@ -38,16 +38,16 @@ You need Node.js 22 or newer and Chromium, Chrome, Brave or Edge. Install the pa
 from the latest [release](https://github.com/SchlaftGut0-1/open-eyes/releases):
 
 ```bash
-npm install -g https://github.com/SchlaftGut0-1/open-eyes/releases/download/v0.4.0/open-eyes-0.4.0.tgz
+npm install -g https://github.com/SchlaftGut0-1/open-eyes/releases/download/v0.4.1/open-eyes-0.4.1.tgz
 ```
 
 To check the package first, download it with its checksum and provenance from the
 release page, then:
 
 ```bash
-sha256sum -c open-eyes-0.4.0.tgz.sha256
-gh attestation verify open-eyes-0.4.0.tgz -R SchlaftGut0-1/open-eyes
-npm install -g ./open-eyes-0.4.0.tgz
+sha256sum -c open-eyes-0.4.1.tgz.sha256
+gh attestation verify open-eyes-0.4.1.tgz -R SchlaftGut0-1/open-eyes
+npm install -g ./open-eyes-0.4.1.tgz
 ```
 
 To use it from an agent, copy the skill into your agent's skills directory (for Claude
