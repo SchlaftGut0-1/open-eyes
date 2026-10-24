@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>open-eyes Benchmarks</title>
+<meta name="description" content="Tokens an AI agent reads with open-eyes 0.4.0 versus 0.3.0, measured on six live sites and three tasks.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./">open<span>-</span>eyes</a>
+    <nav aria-label="Site">
+      <a href="./">Home</a>
+      <a href="benchmarks.html" aria-current="page">Benchmarks</a>
+      <a href="https://github.com/SchlaftGut0-1/open-eyes">GitHub</a>
+      <a href="https://github.com/SchlaftGut0-1/open-eyes/releases">Releases</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section>
+    <span class="eyebrow">0.4.0 vs 0.3.0</span>
+    <h1>Tokens an agent reads</h1>
+    <p class="lead" id="takeaway">Loading the results…</p>
+    <p class="note" id="method"></p>
+  </section>
+
+  <section aria-label="Headline figures">
+    <div class="figures four">
+      <div class="figure"><span class="num" data-change="default">…</span><span class="what">Default snapshot, six sites</span><span class="from" data-from="default"></span></div>
+      <div class="figure"><span class="num" data-change="clicks">…</span><span class="what">GitHub task with three tab clicks</span><span class="from" data-from="clicks"></span></div>
+      <div class="figure"><span class="num" data-change="find">…</span><span class="what"><code>snapshot --find</code>, six sites</span><span class="from" data-from="find"></span></div>
+      <div class="figure"><span class="num" data-change="skill">…</span><span class="what">Agent skill, loaded every session</span><span class="from" data-from="skill"></span></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="per-site">
+    <h2 id="per-site">What is on screen, per site</h2>
+    <div class="card">
+      <p class="note">The default snapshot: elements in the viewport plus an outline of the rest of the page. The dashed line is what one screenshot costs.</p>
+      <div class="legend" aria-hidden="true"><span><i class="sw old"></i>0.3.0</span><span><i class="sw new"></i>0.4.0</span><span><i class="sw ref"></i>Screenshot</span></div>
+      <div class="bars" id="site-bars"></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="views">
+    <h2 id="views">Every way of looking at a page</h2>
+    <div class="card">
+      <p class="note">Tokens per call. Refs are the elements an agent can act on: the same count in both versions means nothing actionable was dropped.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th class="text">Site</th><th>Page text</th><th>Default 0.3</th><th>Default 0.4</th><th>Find 0.3</th><th>Find 0.4</th><th>Whole page 0.3</th><th>Whole page 0.4</th><th>Refs 0.3</th><th>Refs 0.4</th>
+          </tr></thead>
+          <tbody id="pages-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="tasks">
+    <h2 id="tasks">Whole tasks</h2>
+    <div class="card">
+      <p class="note">Tokens the agent read to finish each task. No step failed in either version.</p>
+      <div class="legend" aria-hidden="true"><span><i class="sw old"></i>0.3.0</span><span><i class="sw new"></i>0.4.0</span></div>
+      <div class="bars" id="task-bars"></div>
+    </div>
+    <div class="card">
+      <h3>Step by step</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th class="text">Task</th><th class="text">Step</th><th>Tokens 0.3</th><th>Tokens 0.4</th><th>ms 0.3</th><th>ms 0.4</th></tr></thead>
+          <tbody id="steps-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="worse">
+    <h2 id="worse">Where 0.4.0 is not better</h2>
+    <ul class="plain" id="worse-list"></ul>
+  </section>
+
+  <section aria-labelledby="run">
+    <h2 id="run">How it was measured</h2>
+    <p>Both versions ran the same script back to back on the same machine: open each site, then record the tokens of the page as raw HTML, as visible text, as a screenshot, and as open-eyes' whole-page, default and <code>--find</code> snapshots. Three tasks then ran step by step. Tokens were counted with Anthropic's tokenizer; screenshots are estimated at width × height / 750. Live sites change between runs, so small differences on one page are noise.</p>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>open-eyes is MIT licensed.</span>
+    <span><a href="benchmarks.json">Raw data (JSON)</a> · <a href="https://github.com/SchlaftGut0-1/open-eyes">Source</a></span>
+  </div>
+</footer>
+
+<script>
+const n = (x) => Number(x).toLocaleString("en-US");
+const pct = (before, after) => {
+  const change = Math.round(((after - before) / before) * 100);
+  return (change > 0 ? "+" : "−") + Math.abs(change) + "%";
+};
+const sum = (rows, key) => rows.reduce((total, row) => total + Number(row[key]), 0);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+};
+
+function bars(container, rows, reference) {
+  const max = Math.max(...rows.flatMap((r) => [r.before, r.after]), reference || 0);
+  const width = (value) => `${(value / max) * 82}%`; // Room for the value labels.
+  for (const row of rows) {
+    const track = el("div", { className: "bar-track" });
+    for (const [key, cls] of [["before", "old"], ["after", "new"]]) {
+      const bar = el("div", { className: `bar ${cls}` }, el("span", { className: "bar-value", textContent: n(row[key]) }));
+      bar.style.width = width(row[key]);
+      track.append(bar);
+    }
+    if (reference) {
+      const line = el("div", { className: "ref-line", title: `Screenshot: ${n(reference)} tokens` });
+      line.style.left = width(reference);
+      track.append(line);
+    }
+    container.append(el("div", { className: "bar-row", title: `${row.label}: ${n(row.before)} → ${n(row.after)} tokens (${pct(row.before, row.after)})` },
+      el("span", { className: "label", textContent: row.label }), track));
+  }
+}
+
+function cells(row, values) {
+  for (const [value, cls] of values) row.append(el("td", { className: cls || "", textContent: typeof value === "number" ? n(value) : value }));
+  return row;
+}
+
+fetch("benchmarks.json").then((r) => r.json()).then((data) => {
+  const { pages, steps, fixed, run } = data;
+  const tasks = [...new Set(steps.map((s) => s.task))].map((task) => {
+    const rows = steps.filter((s) => s.task === task);
+    return { task, before: sum(rows, "v3_tokens"), after: sum(rows, "v4_tokens") };
+  });
+  const totals = {
+    default: [sum(pages, "default_v3"), sum(pages, "default_v4")],
+    find: [sum(pages, "find_v3"), sum(pages, "find_v4")],
+  };
+  const github = tasks.find((t) => t.task.startsWith("GitHub"));
+  const skill = fixed.find((f) => f.item === "Agent skill");
+  const help = fixed.find((f) => f.item === "open-eyes help");
+  const figures = { default: totals.default, find: totals.find, clicks: [github.before, github.after], skill: [skill.v3, skill.v4] };
+  for (const [key, [before, after]] of Object.entries(figures)) {
+    document.querySelector(`[data-change="${key}"]`).textContent = pct(before, after);
+    document.querySelector(`[data-from="${key}"]`).textContent = `${n(before)} → ${n(after)} tokens`;
+  }
+  const share = (before, after) => Math.round(Math.abs((after - before) / before) * 100) + "%";
+  document.getElementById("takeaway").textContent =
+    `0.4.0 shows what is on screen for ${share(...totals.default)} fewer tokens than 0.3.0 across six sites, and clicks that move to another page cost ${share(github.before, github.after)} less, with no actionable element lost.`;
+  document.getElementById("method").textContent = `${run.browser}, ${run.tokenizer}, run on ${run.date}. A screenshot at this size costs about ${n(run.screenshot)} tokens.`;
+
+  bars(document.getElementById("site-bars"), pages.map((p) => ({ label: p.page, before: p.default_v3, after: p.default_v4 })), run.screenshot);
+  bars(document.getElementById("task-bars"), tasks.map((t) => ({ label: t.task.replace(/:.*/, ""), before: t.before, after: t.after })));
+
+  const pagesTable = document.getElementById("pages-table");
+  for (const p of pages) {
+    pagesTable.append(cells(el("tr"), [[p.page, "text"], [p.text], [p.default_v3], [p.default_v4, "good"], [p.find_v3], [p.find_v4, p.find_v4 <= p.find_v3 ? "good" : "bad"],
+      [p.full_v3], [p.full_v4, "good"], [p.refs_v3], [p.refs_v4]]));
+  }
+  const stepsTable = document.getElementById("steps-table");
+  for (const s of steps) {
+    stepsTable.append(cells(el("tr"), [[s.task.replace(/:.*/, ""), "text"], [s.step, "text"], [s.v3_tokens], [s.v4_tokens, s.v4_tokens < s.v3_tokens ? "good" : ""],
+      [s.v3_ms], [s.v4_ms, s.v4_ms > s.v3_ms * 1.2 ? "bad" : ""]]));
+  }
+
+  const step = (task, name) => steps.find((s) => s.task.startsWith(task) && s.step === name);
+  const pull = step("GitHub", "click Pull requests");
+  const typing = step("Wikipedia", "type Chromium");
+  const page = (name) => pages.find((p) => p.page === name);
+  const worse = [
+    `Some actions take longer. They now wait for the content they fetched before reporting what changed, so the report already holds results such as search suggestions. Switching to Pull requests on GitHub took ${n(pull.v3_ms)} ms in 0.3.0 and ${n(pull.v4_ms)} ms in 0.4.0; typing into Wikipedia's search, ${n(typing.v3_ms)} ms and ${n(typing.v4_ms)} ms.`,
+    `On two sites the default snapshot still costs more than a screenshot: GitHub at ${n(page("GitHub repo").default_v4)} and Hacker News at ${n(page("Hacker News").default_v4)} tokens, against ${n(run.screenshot)}. It gives the agent exact text and refs to act on, which an image does not.`,
+    `The whole page stays expensive on big sites: MDN costs ${n(page("MDN docs").full_v4)} tokens with --full. The agent skill tells agents to search with --find instead.`,
+    `The help grew from ${n(help.v3)} to ${n(help.v4)} tokens with the new commands. Agents read it only when they need it.`,
+    `Not measured: rich-text editors and hovering images, which neither version can act on yet.`,
+  ];
+  const list = document.getElementById("worse-list");
+  for (const text of worse) list.append(el("li", { textContent: text }));
+}).catch(() => {
+  document.getElementById("takeaway").textContent = "The results could not be loaded. The raw data is in benchmarks.json.";
+});
+</script>
+</body>
+</html>

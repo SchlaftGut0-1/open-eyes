@@ -1,0 +1,266 @@
+{
+ "run": {
+  "date": "2026-10-24",
+  "browser": "Headless Chromium 155, 1280×800",
+  "tokenizer": "Anthropic tokenizer",
+  "screenshot": 1365,
+  "versions": [
+   "0.3.0",
+   "0.4.0"
+  ]
+ },
+ "pages": [
+  {
+   "page": "Wikipedia article",
+   "url": "https://en.wikipedia.org/wiki/Web_browser",
+   "html": 233861,
+   "text": 4780,
+   "screenshot": 1365,
+   "full_v3": 12824,
+   "full_v4": 8288,
+   "default_v3": 3324,
+   "default_v4": 963,
+   "find_v3": 102,
+   "find_v4": 83,
+   "keyword": "Netscape",
+   "refs_v3": 508,
+   "refs_v4": 508
+  },
+  {
+   "page": "GitHub repo",
+   "url": "https://github.com/microsoft/playwright",
+   "html": 202734,
+   "text": 3025,
+   "screenshot": 1365,
+   "full_v3": 10153,
+   "full_v4": 5845,
+   "default_v3": 4124,
+   "default_v4": 1518,
+   "find_v3": 69,
+   "find_v4": 63,
+   "keyword": "stars",
+   "refs_v3": 279,
+   "refs_v4": 279
+  },
+  {
+   "page": "Hacker News",
+   "url": "https://news.ycombinator.com/",
+   "html": 14263,
+   "text": 1275,
+   "screenshot": 1365,
+   "full_v3": 4419,
+   "full_v4": 2141,
+   "default_v3": 3598,
+   "default_v4": 1424,
+   "find_v3": 948,
+   "find_v4": 189,
+   "keyword": "comments",
+   "refs_v3": 231,
+   "refs_v4": 231
+  },
+  {
+   "page": "MDN docs",
+   "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input",
+   "html": 66721,
+   "text": 12732,
+   "screenshot": 1365,
+   "full_v3": 72529,
+   "full_v4": 45085,
+   "default_v3": 3812,
+   "default_v4": 1117,
+   "find_v3": 933,
+   "find_v4": 570,
+   "keyword": "checkbox",
+   "refs_v3": 1667,
+   "refs_v4": 1709
+  },
+  {
+   "page": "BBC News",
+   "url": "https://www.bbc.com/news",
+   "html": 127808,
+   "text": 1988,
+   "screenshot": 1365,
+   "full_v3": 3945,
+   "full_v4": 3060,
+   "default_v3": 3945,
+   "default_v4": 1122,
+   "find_v3": 85,
+   "find_v4": 62,
+   "keyword": "Live",
+   "refs_v3": 120,
+   "refs_v4": 120
+  },
+  {
+   "page": "Store",
+   "url": "https://books.toscrape.com/",
+   "html": 12560,
+   "text": 661,
+   "screenshot": 1365,
+   "full_v3": 3924,
+   "full_v4": 2413,
+   "default_v3": 3075,
+   "default_v4": 615,
+   "find_v3": 412,
+   "find_v4": 249,
+   "keyword": "Add to basket",
+   "refs_v3": 114,
+   "refs_v4": 114
+  }
+ ],
+ "steps": [
+  {
+   "task": "Wikipedia: search and read",
+   "n": 1,
+   "step": "open main page",
+   "v3_tokens": 13,
+   "v4_tokens": 13,
+   "v3_ms": 516,
+   "v4_ms": 513,
+   "errors": 0
+  },
+  {
+   "task": "Wikipedia: search and read",
+   "n": 2,
+   "step": "find the search box",
+   "v3_tokens": 47,
+   "v4_tokens": 41,
+   "v3_ms": 184,
+   "v4_ms": 185,
+   "errors": 0
+  },
+  {
+   "task": "Wikipedia: search and read",
+   "n": 3,
+   "step": "type Chromium",
+   "v3_tokens": 475,
+   "v4_tokens": 373,
+   "v3_ms": 1136,
+   "v4_ms": 1422,
+   "errors": 0
+  },
+  {
+   "task": "Wikipedia: search and read",
+   "n": 4,
+   "step": "press Enter",
+   "v3_tokens": 30,
+   "v4_tokens": 30,
+   "v3_ms": 1077,
+   "v4_ms": 1082,
+   "errors": 0
+  },
+  {
+   "task": "Wikipedia: search and read",
+   "n": 5,
+   "step": "read the first sentence",
+   "v3_tokens": 660,
+   "v4_tokens": 543,
+   "v3_ms": 605,
+   "v4_ms": 604,
+   "errors": 0
+  },
+  {
+   "task": "Hacker News: top story points",
+   "n": 1,
+   "step": "open",
+   "v3_tokens": 10,
+   "v4_tokens": 10,
+   "v3_ms": 422,
+   "v4_ms": 463,
+   "errors": 0
+  },
+  {
+   "task": "Hacker News: top story points",
+   "n": 2,
+   "step": "find points",
+   "v3_tokens": 697,
+   "v4_tokens": 172,
+   "v3_ms": 162,
+   "v4_ms": 168,
+   "errors": 0
+  },
+  {
+   "task": "GitHub: switch tabs",
+   "n": 1,
+   "step": "open",
+   "v3_tokens": 10,
+   "v4_tokens": 10,
+   "v3_ms": 828,
+   "v4_ms": 992,
+   "errors": 0
+  },
+  {
+   "task": "GitHub: switch tabs",
+   "n": 2,
+   "step": "find Issues",
+   "v3_tokens": 259,
+   "v4_tokens": 159,
+   "v3_ms": 266,
+   "v4_ms": 268,
+   "errors": 0
+  },
+  {
+   "task": "GitHub: switch tabs",
+   "n": 3,
+   "step": "click Issues",
+   "v3_tokens": 865,
+   "v4_tokens": 37,
+   "v3_ms": 2270,
+   "v4_ms": 2320,
+   "errors": 0
+  },
+  {
+   "task": "GitHub: switch tabs",
+   "n": 4,
+   "step": "find Pull requests",
+   "v3_tokens": 66,
+   "v4_tokens": 51,
+   "v3_ms": 178,
+   "v4_ms": 188,
+   "errors": 0
+  },
+  {
+   "task": "GitHub: switch tabs",
+   "n": 5,
+   "step": "click Pull requests",
+   "v3_tokens": 864,
+   "v4_tokens": 38,
+   "v3_ms": 1579,
+   "v4_ms": 2363,
+   "errors": 0
+  },
+  {
+   "task": "GitHub: switch tabs",
+   "n": 6,
+   "step": "find Code",
+   "v3_tokens": 63,
+   "v4_tokens": 47,
+   "v3_ms": 176,
+   "v4_ms": 171,
+   "errors": 0
+  },
+  {
+   "task": "GitHub: switch tabs",
+   "n": 7,
+   "step": "click Code",
+   "v3_tokens": 910,
+   "v4_tokens": 31,
+   "v3_ms": 1585,
+   "v4_ms": 1915,
+   "errors": 0
+  }
+ ],
+ "fixed": [
+  {
+   "item": "Agent skill",
+   "when": "Every session",
+   "v3": 1490,
+   "v4": 698
+  },
+  {
+   "item": "open-eyes help",
+   "when": "Only when asked",
+   "v3": 682,
+   "v4": 1120
+  }
+ ]
+}
