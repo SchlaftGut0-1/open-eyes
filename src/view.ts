@@ -113,7 +113,7 @@ export function diffLines(before: string[], after: string[], maxCells = 4_000_00
 /** Where a line's element is relative to the viewport; undefined when it has no box. */
 export type Position = "above" | "below" | "beside" | "visible" | undefined;
 
-const LANDMARKS = new Set(["banner", "navigation", "main", "contentinfo", "complementary", "search", "form", "dialog", "region"]);
+const LANDMARKS = new Set(["banner", "navigation", "main", "contentinfo", "complementary", "search", "form", "dialog", "region", "Iframe"]);
 const MAX_OUTLINE = 40;
 
 /**

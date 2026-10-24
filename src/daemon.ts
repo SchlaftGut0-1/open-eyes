@@ -36,7 +36,14 @@ export async function runDaemon(upstreamUrl: string, socketPath: string): Promis
       // downloads) go to every client.
       if (!message.sessionId) for (const client of clients) reply(client, message);
       const owner = message.sessionId && owners.get(message.sessionId);
-      if (owner) reply(owner, message);
+      if (owner) {
+        // A page session's iframes attach on their own; they belong to the same client.
+        if (message.method === "Target.attachedToTarget") {
+          owner.sessions.add(message.params.sessionId);
+          owners.set(message.params.sessionId, owner);
+        }
+        reply(owner, message);
+      }
       return;
     }
     const route = routes.get(message.id);

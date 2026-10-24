@@ -90,7 +90,7 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `disconnect` | Stop using your everyday browser |
 | `status` | Show the browser and the agent window |
 | `open <url>` | Open a URL in the agent window |
-| `snapshot` | Print what is on screen as text, plus an outline of the rest; actionable elements get `@N` refs |
+| `snapshot` | Print what is on screen as text, plus an outline of the rest; actionable elements get `@N` refs. Iframes, also cross-origin ones (payment forms, embedded logins), are nested under an `iframe` line and work like the rest of the page |
 | `snapshot --find <text>` / `--scope @N` / `--diff` / `--full` / `--interactive` | Matching lines, one element, what changed, the whole page, or only what can be acted on |
 | `click <@N>` | Click an element. Instead of `@N`, `click`, `fill`, `select`, `hover` and `upload` take `--name <text> [--role <role>]`: the element with that accessible name, no snapshot needed |
 | `fill <@N> <text>` | Replace a field's content |
@@ -119,7 +119,8 @@ agent ──shell──▶ open-eyes CLI ──CDP (WebSocket)──▶ your Chr
 ```
 
 Each command is a short-lived process. It attaches to the agent's window (creating it
-if needed), reads the accessibility tree or acts on the page, and exits. Refs from the
+if needed), reads the accessibility tree (attaching to cross-origin iframes, which run in
+their own processes) or acts on the page, and exits. Refs from the
 last snapshot are kept in `~/.local/state/open-eyes/state.json`.
 
 ## Contributing
@@ -130,5 +131,4 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 
 ## Status
 
-Early MVP. Next up: snapshots inside iframes, more commands (scroll, hover, select,
-upload), and several parallel agent windows ("spaces").
+Early MVP. Next up: several parallel agent windows ("spaces").

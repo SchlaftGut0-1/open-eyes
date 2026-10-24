@@ -17,7 +17,11 @@ export const socketPath = (() => {
   return join(process.env.XDG_RUNTIME_DIR ?? stateDir, `open-eyes-${id}.sock`);
 })();
 
-export type Ref = { backendNodeId: number; label: string };
+/**
+ * An element an agent can act on. Inside an iframe, `url` is the iframe's document, and
+ * `frame` the cross-origin frame whose session holds the node.
+ */
+export type Ref = { backendNodeId: number; label: string; frame?: string; url?: string };
 
 /** Persisted between CLI invocations: each command is a short-lived process. */
 export type State = {
@@ -54,6 +58,8 @@ export function parseState(raw: unknown): Omit<State, "port"> & { port?: number 
     for (const [key, ref] of Object.entries(saved.refs as Record<string, Partial<Ref>>)) {
       if (/^\d+$/.test(key) && Number.isInteger(ref?.backendNodeId) && typeof ref?.label === "string") {
         refs[key] = { backendNodeId: ref.backendNodeId!, label: ref.label };
+        if (typeof ref.frame === "string") refs[key].frame = ref.frame;
+        if (typeof ref.url === "string") refs[key].url = ref.url;
       }
     }
   }
