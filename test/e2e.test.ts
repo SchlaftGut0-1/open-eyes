@@ -579,4 +579,16 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.ok(existsSync(file));
     assert.equal(readFileSync(file).subarray(1, 4).toString(), "PNG");
   });
+
+  test("screenshot --scope captures only that element, even off screen", async () => {
+    await cli("open", fixture("tall.html"));
+    const ref = (await cli("snapshot", "--find", "Bottom button")).match(/button Bottom button @(\d+)/)?.[1];
+    assert.ok(ref, "the button has a ref");
+    const file = await cli("screenshot", join(root, "button.png"), "--scope", `@${ref}`);
+    const png = readFileSync(file);
+    const size = JSON.parse(await cli("eval", "JSON.stringify((({ width, height }) => [width, height])(document.querySelector('button').getBoundingClientRect()))"));
+    const captured = [png.readUInt32BE(16), png.readUInt32BE(20)];
+    captured.forEach((px, i) => assert.ok(Math.abs(px - size[i]) <= 1, `captured ${captured} for an element of ${size}`)); // Fractional sizes round either way.
+    assert.match(await cliError("screenshot", "--scope", "@99999"), /@99999/);
+  });
 });

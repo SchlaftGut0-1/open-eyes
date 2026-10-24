@@ -30,7 +30,7 @@ Cheaper than reading everything:
 - `snapshot --interactive`: only what you can click or type into, plus headings
 - `snapshot --scope @N`: one element and its contents
 - `snapshot --full`: the whole page (expensive)
-- `screenshot`: only when visuals matter
+- `screenshot [--scope @N]`: only when visuals matter
 
 Off-screen refs are clickable. `scroll [down|up]` moves the page; `scroll @N down`
 scrolls the list holding `@N`. For many steps, write one `open-eyes run -` script with

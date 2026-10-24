@@ -444,13 +444,25 @@ export class Page {
     });
   }
 
-  /** Saves a PNG of the visible page (without the overlay) and returns its path. */
-  async screenshot(path?: string): Promise<string> {
+  /**
+   * Saves a PNG of the visible page (without the overlay) and returns its path. With a ref,
+   * only that element, scrolled into view first: far fewer image tokens than a full screen.
+   */
+  async screenshot(path?: string, ref?: string): Promise<string> {
     await this.#guard();
     const file = path ?? join(stateDir, "screenshots", `${new Date().toISOString().replace(/[:.]/g, "-")}.png`);
+    let clip: { x: number; y: number; width: number; height: number; scale: number } | undefined;
+    if (ref) {
+      const { backendNodeId } = await this.#resolve(ref);
+      const box = await this.#locate(backendNodeId, ref); // Scrolls it into view.
+      if (box.width < 1 || box.height < 1) throw new Error(`${ref} has no visible size to capture`);
+      // The box is relative to the viewport; the clip is in page coordinates.
+      const [scrollX, scrollY] = (await this.#evaluate("[scrollX, scrollY]")) as number[];
+      clip = { x: box.x + scrollX, y: box.y + scrollY, width: box.width, height: box.height, scale: 1 };
+    }
     await this.#overlay({ type: "hide" });
     try {
-      const { data } = await this.#send<{ data: string }>("Page.captureScreenshot", { format: "png" });
+      const { data } = await this.#send<{ data: string }>("Page.captureScreenshot", { format: "png", ...(clip && { clip }) });
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, Buffer.from(data, "base64"));
     } finally {
