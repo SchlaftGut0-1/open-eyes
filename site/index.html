@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>open-eyes</title>
+<meta name="description" content="Give your AI agent eyes on a real, visible browser while you watch. Open source, Linux first, cheap in tokens.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./">open<span>-</span>eyes</a>
+    <nav aria-label="Site">
+      <a href="./" aria-current="page">Home</a>
+      <a href="benchmarks.html">Benchmarks</a>
+      <a href="https://github.com/SchlaftGut0-1/open-eyes">GitHub</a>
+      <a href="https://github.com/SchlaftGut0-1/open-eyes/releases">Releases</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <div class="text">
+      <span class="eyebrow">Open source · MIT · Linux first</span>
+      <h1>Give your AI agent eyes on a real browser, while you watch.</h1>
+      <p class="lead">open-eyes is a command line tool that lets an agent like Claude read and drive a visible Chromium window. You see every click as it happens, take over at any moment, and approve anything risky.</p>
+      <div class="actions">
+        <a class="button primary" href="#install">Install</a>
+        <a class="button" href="benchmarks.html">See the benchmarks</a>
+      </div>
+    </div>
+    <div class="terminal" aria-label="Example: what an agent reads after typing into Wikipedia's search">
+      <div class="bar"><span>agent shell</span><span id="hero-cost">~370 tokens</span></div>
+<pre><span class="cmd">$ open-eyes fill --name "Search Wikipedia" Chromium</span>
+filled combobox "Search Wikipedia"
+changes:
+      form
+<span class="add">+       combobox Search Wikipedia value=Chromium [focused, expanded] <span class="ref">@256</span></span>
+<span class="add">+       listbox Search results <span class="ref">@258</span></span>
+<span class="add">+         option Chromium Chemical element with atomic number 24 (Cr) <span class="ref">@259</span></span>
+<span class="add">+         option Chromium (web browser) Open-source web browser project <span class="ref">@261</span></span>
+<span class="dim">          …</span>
+<span class="cmd">$ open-eyes click --name "Chromium (web browser)" --role link</span>
+clicked link "Chromium (web browser) Open-source web browser project"
+the page changed to https://en.wikipedia.org/wiki/Chromium_(web_browser)</pre>
+    </div>
+  </section>
+
+  <section aria-labelledby="numbers">
+    <h2 id="numbers">Fewer tokens than a screenshot</h2>
+    <p class="lead">An agent reads the page as compact text with references it can act on, and each action reports only what changed. Measured on six live sites against the previous release:</p>
+    <div class="figures" id="figures">
+      <div class="figure"><span class="num" data-figure="default">…</span><span class="what">tokens for what is on screen</span><span class="from" data-from="default"></span></div>
+      <div class="figure"><span class="num" data-figure="clicks">…</span><span class="what">tokens per click that changes page</span><span class="from" data-from="clicks"></span></div>
+      <div class="figure"><span class="num" data-figure="skill">…</span><span class="what">tokens of instructions every session</span><span class="from" data-from="skill"></span></div>
+    </div>
+    <p><a href="benchmarks.html">Full results, including where 0.4.0 is not better →</a></p>
+  </section>
+
+  <section aria-labelledby="how">
+    <h2 id="how">How it works</h2>
+    <div class="cols">
+      <div>
+        <h3>Reads the page as text</h3>
+        <p><code>snapshot</code> shows what is on screen, one element per line like <code>button Save @3</code>. <code>--find</code> searches the whole page, iframes included.</p>
+      </div>
+      <div>
+        <h3>Acts like a person</h3>
+        <p>Real mouse and keyboard events: <code>click</code>, <code>fill</code>, <code>select</code>, <code>hover</code>, <code>scroll</code>, <code>upload</code>, by ref or by name.</p>
+      </div>
+      <div>
+        <h3>Shows you everything</h3>
+        <p>The agent works in its own window. An overlay draws each action, and one click on <em>Take control</em> hands the browser back to you.</p>
+      </div>
+      <div>
+        <h3>Your browser or its own</h3>
+        <p><code>launch</code> opens a separate profile. <code>connect</code> uses your everyday Chromium, Chrome, Brave or Edge with your logins, after you approve once.</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="safety">
+    <h2 id="safety">Guardrails against prompt injection</h2>
+    <div class="cols">
+      <div>
+        <h3>You approve risky actions</h3>
+        <p>Buying, sending, deleting, publishing, uploading a file or typing a password waits for your Allow in the agent window. Only real clicks answer.</p>
+      </div>
+      <div>
+        <h3>You choose the sites</h3>
+        <p><code>open-eyes policy</code> sets allow and block lists, also for content embedded in iframes.</p>
+      </div>
+      <div>
+        <h3>Everything is logged</h3>
+        <p><code>open-eyes log</code> lists every action and its outcome, never the text typed or the content of uploaded files.</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="install" id="install">
+    <h2>Install</h2>
+    <p>You need Node.js 22 or newer and Chromium, Chrome, Brave or Edge.</p>
+<pre class="install"><code>npm install -g https://github.com/SchlaftGut0-1/open-eyes/releases/download/v0.4.0/open-eyes-0.4.0.tgz
+
+open-eyes launch
+open-eyes open news.ycombinator.com
+open-eyes snapshot</code></pre>
+    <p>Each release has a checksum and a signed build provenance you can verify first. To use it from an agent, copy the bundled skill into your agent's skills directory. The <a href="https://github.com/SchlaftGut0-1/open-eyes#install">README</a> has both steps.</p>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>open-eyes is MIT licensed.</span>
+    <span><a href="https://github.com/SchlaftGut0-1/open-eyes/blob/main/SECURITY.md">Security</a> · <a href="https://github.com/SchlaftGut0-1/open-eyes/blob/main/CONTRIBUTING.md">Contributing</a></span>
+  </div>
+</footer>
+
+<script>
+fetch("benchmarks.json").then((r) => r.json()).then((data) => {
+  const n = (x) => x.toLocaleString("en-US");
+  const sum = (rows, key) => rows.reduce((total, row) => total + Number(row[key]), 0);
+  const clicks = data.steps.filter((s) => s.step.startsWith("click"));
+  const skill = data.fixed.find((f) => f.item === "Agent skill");
+  const figures = {
+    default: [sum(data.pages, "default_v3"), sum(data.pages, "default_v4"), "on six sites"],
+    clicks: [Math.round(sum(clicks, "v3_tokens") / clicks.length), Math.round(sum(clicks, "v4_tokens") / clicks.length), "average, GitHub tabs"],
+    skill: [skill.v3, skill.v4, "agent skill"],
+  };
+  for (const [key, [before, after, note]] of Object.entries(figures)) {
+    document.querySelector(`[data-figure="${key}"]`).textContent = n(after);
+    document.querySelector(`[data-from="${key}"]`).textContent = `was ${n(before)} in 0.3.0, ${note}`;
+  }
+}).catch(() => {
+  document.getElementById("figures").hidden = true;
+});
+</script>
+</body>
+</html>

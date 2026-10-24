@@ -8,6 +8,8 @@ Give your AI agents eyes. `open-eyes` lets Claude Code, Codex, Cursor, opencode,
 agent with a terminal see and drive a **real, visible browser**, and lets **you watch
 what it is doing** as it happens.
 
+**Site:** https://schlaftgut0-1.github.io/open-eyes/ · [Benchmarks](https://schlaftgut0-1.github.io/open-eyes/benchmarks.html)
+
 - **Your browser, no fork.** Works with stock Chromium, Chrome, Brave, or Edge over the
   Chrome DevTools Protocol. Use a dedicated profile (`launch`) or your everyday browser
   with all your logins (`connect`).
