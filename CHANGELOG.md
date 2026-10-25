@@ -15,6 +15,12 @@ All notable changes to open-eyes are documented here. The format follows
   lines instead of every snapshot. The model may only read, click, fill, select, press,
   scroll and hover; policy, approvals and the audit log apply to each action, and a
   denial or the user taking control ends the run. `--steps` and `--timeout` limit it.
+- `open-eyes model install` downloads the recommended local model for `do` (Gemma 4 E2B,
+  2.8 GB) and llama.cpp's server, after showing what it downloads and asking. Downloads
+  resume and are verified against pinned checksums. `do` then starts the server on the
+  dedicated GPU for each run. `open-eyes model` shows what is installed and whether a newer
+  model is available; `open-eyes model remove` deletes it. `OPEN_EYES_MODEL_URL` still
+  takes precedence.
 
 ### Changed
 

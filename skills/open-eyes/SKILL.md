@@ -34,8 +34,8 @@ Cheaper than reading everything:
 Off-screen refs are clickable. `scroll [down|up]` moves the page; `scroll @N down`
 scrolls the list holding `@N`. For many steps, write one `open-eyes run -` script with
 `page` in scope; `open-eyes help` lists everything.
-With `OPEN_EYES_MODEL_URL` set, `open-eyes do "goal"` hands routine steps to a local
-model; verify the result.
+If `open-eyes model` shows a model, `open-eyes do "goal"` hands it routine steps; verify
+the result.
 
 ## The user
 

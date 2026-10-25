@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import {
   browserVersion,
   closeAgentWindow,
@@ -13,6 +14,7 @@ import {
 import { need, takeFlag, takeNumber, takeOption, takeTarget, takeTimeout } from "./args.ts";
 import { readAudit } from "./audit.ts";
 import { runDaemon } from "./daemon.ts";
+import { formatSize, installedNavigator, installNavigator, MANIFEST, modelsDir, navigatorStatus, serverFor, startNavigator } from "./models.ts";
 import { modelEndpoint, navigate, NO_MODEL } from "./navigator.ts";
 import type { Page } from "./page.ts";
 import { CONFIRM_MODES, loadPolicy, normalizeSite, policyFile, savePolicy, type ConfirmMode } from "./policy.ts";
@@ -82,6 +84,10 @@ Local model (optional)
                          or open other pages; the safety rules below still apply
     --steps <n>          Most commands it may run (default 15)
     --timeout <seconds>  Give up after this long (default 180)
+  model                  Show the downloaded model and whether a newer one exists
+  model install [--yes]  Download the recommended model and llama.cpp's server
+                         (asks first; --yes skips the question)
+  model remove           Delete them
 
 Working with the user
   handoff <message>      Ask the user to take over (log in, solve a captcha...)
@@ -114,7 +120,9 @@ Environment
   OPEN_EYES_MODEL_URL    OpenAI-compatible endpoint for "do", e.g. llama-server
                          at http://127.0.0.1:8080/v1 or Ollama at :11434/v1
   OPEN_EYES_MODEL        Model name to ask for (needed by Ollama)
-  OPEN_EYES_MODEL_KEY    API key, if the endpoint needs one`;
+  OPEN_EYES_MODEL_KEY    API key, if the endpoint needs one
+  OPEN_EYES_MODEL_DEVICE GPU for the downloaded model, as llama-server
+                         --list-devices names it (default: the dedicated one)`;
 
 function format(value: unknown): string {
   if (value === undefined) return "";
@@ -344,9 +352,57 @@ async function main([command, ...args]: string[]): Promise<void> {
       const steps = takeNumber(args, "--steps", 1);
       const timeout = takeTimeout(args);
       const goal = need(args.join(" ").trim() || undefined, 'do "<goal>" [--steps <n>] [--timeout <seconds>]');
-      const endpoint = modelEndpoint();
-      if (!endpoint) throw new Error(NO_MODEL);
-      return withPage("do", (page) => navigate(page, goal, endpoint, { steps, timeout }));
+      // Your own endpoint first; otherwise the downloaded model, started for this run.
+      let endpoint = modelEndpoint();
+      let stop = () => {};
+      if (!endpoint) {
+        const installed = installedNavigator();
+        if (!installed) throw new Error(NO_MODEL);
+        console.error("starting the local model...");
+        ({ endpoint, stop } = await startNavigator(installed));
+      }
+      try {
+        return await withPage("do", (page) => navigate(page, goal, endpoint, { steps, timeout }));
+      } finally {
+        stop();
+      }
+    }
+    case "model": {
+      const action = args[0];
+      if (action === undefined || action === "status") {
+        const own = modelEndpoint();
+        return print(`${own ? `endpoint: ${own.url} (OPEN_EYES_MODEL_URL), used by "do" first\n` : ""}${navigatorStatus(MANIFEST)}`);
+      }
+      if (action === "remove") {
+        rmSync(modelsDir, { recursive: true, force: true });
+        return print(`deleted ${modelsDir}`);
+      }
+      if (action !== "install") throw new Error(`unknown model action "${action}"; see "open-eyes help"`);
+      const server = serverFor(MANIFEST);
+      const { model } = MANIFEST;
+      console.error(
+        [
+          "open-eyes will download:",
+          `  ${model.name}, ${formatSize(model.size)}, license: ${model.license}`,
+          ...(server ? [`  llama.cpp server (${server.id}), ${formatSize(server.size)}`] : []),
+          `into ${modelsDir}`,
+        ].join("\n"),
+      );
+      if (!takeFlag(args, "--yes")) {
+        // An agent cannot answer this; only the user should agree to a download this big.
+        if (!process.stdin.isTTY) throw new Error('run "open-eyes model install --yes" yourself to confirm the download');
+        const prompt = createInterface({ input: process.stdin, output: process.stderr });
+        const answer = await prompt.question("Download? [y/N] ");
+        prompt.close();
+        if (!/^y(es)?$/i.test(answer.trim())) return print("nothing downloaded");
+      }
+      let shown = "";
+      const installed = await installNavigator(MANIFEST, modelsDir, (what, done, total) => {
+        const line = `${what}: ${Math.floor((done / total) * 100)}%`;
+        if (line !== shown && process.stderr.isTTY) process.stderr.write(`\r${(shown = line)}`);
+      });
+      if (shown) process.stderr.write("\n");
+      return print(`installed ${installed.model}; "open-eyes do" now uses it`);
     }
     case "handoff": {
       const timeout = takeTimeout(args);

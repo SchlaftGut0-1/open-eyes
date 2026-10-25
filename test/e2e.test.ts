@@ -554,7 +554,12 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     });
 
     test("explains how to set up a model when none is configured", async () => {
-      assert.match(await cliErrorWith({ OPEN_EYES_MODEL_URL: "" }, "do", "anything"), /needs a local model[^]*OPEN_EYES_MODEL_URL/);
+      assert.match(await cliErrorWith({ OPEN_EYES_MODEL_URL: "" }, "do", "anything"), /needs a local model[^]*open-eyes model install[^]*OPEN_EYES_MODEL_URL/);
+      assert.match(await cli("model"), /^navigator model: not installed/);
+      // Only the user may agree to a download this big: without a terminal it needs --yes.
+      const refused = await cliError("model", "install");
+      assert.match(refused, /will download:\n  Gemma 4 E2B \(Q4_0\), 2\.8 GB, license: Apache 2\.0/);
+      assert.match(refused, /run "open-eyes model install --yes" yourself/);
     });
   });
 

@@ -90,8 +90,7 @@ and a short report, about 30 tokens instead of the ~1,600 it would read doing th
 itself.
 
 ```bash
-llama-server -m gemma-4-E2B-it-Q4_0.gguf --jinja -c 16384 --port 8080
-export OPEN_EYES_MODEL_URL=http://127.0.0.1:8080/v1
+open-eyes model install        # shows what it downloads and asks first
 open-eyes open example.com/signup
 open-eyes do "Sign up as Ana and accept the terms"
 ```
@@ -105,9 +104,18 @@ actions:
 page: https://example.com/signup
 ```
 
-Any OpenAI-compatible server works: llama.cpp's `llama-server`, or Ollama at
-`http://127.0.0.1:11434/v1` with `OPEN_EYES_MODEL` set to the model's name. Gemma 4 E2B
-(2.8 GB, fits on a 4 GB GPU) is the model we tested and recommend.
+`open-eyes model install` downloads the model we tested and recommend, Gemma 4 E2B
+(2.8 GB, Apache 2.0, fits on a 4 GB GPU), and llama.cpp's server (about 35 MB) into
+`~/.local/share/open-eyes/models`, verifying both against pinned checksums. An interrupted
+download resumes. `do` starts the server for each run, on your dedicated GPU, and stops it
+afterwards. `open-eyes model` shows what is installed and tells you when a better model is
+available, and `open-eyes model remove` deletes it all. Nothing is downloaded until you
+agree.
+
+To use your own server instead, set `OPEN_EYES_MODEL_URL` to any OpenAI-compatible
+endpoint, such as llama.cpp's `llama-server` at `http://127.0.0.1:8080/v1` or Ollama at
+`http://127.0.0.1:11434/v1` with `OPEN_EYES_MODEL` set to the model's name. It takes
+precedence over the downloaded model.
 
 The model can read, click, type, choose, scroll and hover, never run JavaScript, upload
 files or open other sites, and every action goes through the policy, approvals and audit
@@ -159,6 +167,7 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `eval <js>` | Evaluate JavaScript in the page |
 | `run <file\|->` | Run a multi-step script with `page` in scope |
 | `do "<goal>" [--steps <n>] [--timeout <seconds>]` | Let a local model carry out a goal and report what it did ([Local model](#local-model-optional)) |
+| `model [install [--yes]\|remove]` | Show, download (after asking) or delete the local model for `do` |
 | `handoff <message>` | Ask the user to take over, wait until they hand control back |
 | `wait` | Wait until the user hands back control they took |
 | `policy [allow\|block\|remove\|confirm\|reset]` | Show or change which sites are allowed and what needs approval |
