@@ -30,6 +30,11 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Changed
 
+- `fill` on a native dropdown chooses the option with that text, as `select` does, and
+  `fill` on anything that cannot take text (a link, button, checkbox, radio, file input or
+  read-only field) fails with what to use instead (`click`, `upload`). Before, it reported
+  "filled" although nothing was typed, and agents went on as if it had worked.
+
 - `open-eyes do` asks the model for a tool call on every reply (`tool_choice: "required"`),
   gives it room to think before acting (2048 reply tokens instead of 400), reminds it once
   when it answers in plain text or sends a call that cannot be read, and still reports the
