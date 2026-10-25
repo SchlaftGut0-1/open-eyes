@@ -32,6 +32,7 @@ Browser
   disconnect             Stop using your everyday browser
   status                 Show the browser and the agent window
   close                  Close the agent window
+  version, --version     Print the open-eyes version
 
 Page (works in the agent's own window)
   open <url>             Open a URL
@@ -157,6 +158,12 @@ function takeFlag(args: string[], name: string): boolean {
 function takeTimeout(args: string[]): number | undefined {
   const seconds = takeNumber(args, "--timeout", 1);
   return seconds === undefined ? undefined : seconds * 1000;
+}
+
+/** The version in package.json, which is one folder up from both src/cli.ts and the built dist/cli.js. */
+function packageVersion(): string {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  return pkg.version;
 }
 
 function need(arg: string | undefined, usage: string): string {
@@ -387,6 +394,9 @@ async function main([command, ...args]: string[]): Promise<void> {
       const timeout = takeTimeout(args);
       return withPage("wait", (page) => page.handoff(undefined, timeout));
     }
+    case "version":
+    case "--version":
+      return print(packageVersion());
     case undefined:
     case "help":
     case "--help":
