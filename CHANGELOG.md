@@ -30,6 +30,12 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Changed
 
+- `open-eyes do` asks the model for a tool call on every reply (`tool_choice: "required"`),
+  gives it room to think before acting (2048 reply tokens instead of 400), reminds it once
+  when it answers in plain text or sends a call that cannot be read, and still reports the
+  actions taken when the model server fails. On 15 held-out tasks, Gemma 4 E2B went from 6
+  of 9 (old set) to 13 of 15, with one false success claim.
+
 - Clicking an option of a native dropdown chooses it, as `select` does, and reports
   `chose "<option>" in <dropdown>`. Before, the click did nothing, since Chromium shows
   those options in a popup outside the page. Options of a list that shows them all

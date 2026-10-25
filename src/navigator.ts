@@ -111,20 +111,43 @@ async function runCommand(page: Page, line: string): Promise<string> {
   }
 }
 
+class InvalidToolCall extends Error {}
+
+/** Said to the model when it strays from the tools, once each per run, before giving up. */
+const NO_TOOL_REMINDER = "Use a tool: call open_eyes to continue, or finish with your answer (success false if you cannot do it).";
+const INVALID_CALL_REMINDER = "Your last tool call could not be read. Call exactly one tool, with valid arguments.";
+
 async function chat(endpoint: Endpoint, messages: Message[], deadline: number): Promise<Message> {
   let response: Response;
   try {
     response = await fetch(`${endpoint.url}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(endpoint.key ? { authorization: `Bearer ${endpoint.key}` } : {}) },
-      body: JSON.stringify({ model: endpoint.model, messages, tools: TOOLS, tool_choice: "auto", temperature: 0, max_tokens: 400 }),
+      body: JSON.stringify({
+        model: endpoint.model,
+        messages,
+        tools: TOOLS,
+        // Every reply is a call; finish is one too. Plain-text answers and unreadable calls
+        // were most of the small model's failures.
+        tool_choice: "required",
+        temperature: 0,
+        // Room to think before the call: Gemma 4 reasons first, and with 400 tokens it ran out
+        // before calling anything. Thinking stays on, since without it success fell from 13 to
+        // 7 of 15 held-out tasks.
+        max_tokens: 2048,
+      }),
       signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
     });
   } catch (error) {
     const reason = (error as Error).name === "TimeoutError" ? "it took too long" : (error as Error).message;
     throw new Error(`could not get an answer from the model at ${endpoint.url}: ${reason}`);
   }
-  if (!response.ok) throw new Error(`the model at ${endpoint.url} answered ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  if (!response.ok) {
+    const text = (await response.text()).slice(0, 200);
+    // llama-server refuses a reply whose tool call it cannot parse; the model can try again.
+    if (/parse tool call/i.test(text)) throw new InvalidToolCall();
+    throw new Error(`the model at ${endpoint.url} answered ${response.status}: ${text}`);
+  }
   const body = (await response.json()) as { choices?: { message?: Message }[] };
   const message = body.choices?.[0]?.message;
   if (!message) throw new Error(`the model at ${endpoint.url} sent an answer without a message`);
@@ -149,15 +172,35 @@ export async function navigate(page: Page, goal: string, endpoint: Endpoint, opt
   const actions: string[] = [];
   let steps = 0;
   let lastFailed = false;
+  let remindedNoTool = false;
+  let remindedInvalid = false;
   let outcome: string | undefined;
   while (!outcome) {
     if (steps >= maxSteps) outcome = `stopped: reached the limit of ${maxSteps} steps`;
     else if (Date.now() >= deadline) outcome = "stopped: ran out of time";
     if (outcome) break;
-    const reply = await chat(endpoint, messages, deadline);
+    let reply: Message;
+    try {
+      reply = await chat(endpoint, messages, deadline);
+    } catch (error) {
+      if (error instanceof InvalidToolCall && !remindedInvalid) {
+        remindedInvalid = true;
+        messages.push({ role: "user", content: INVALID_CALL_REMINDER });
+        continue;
+      }
+      // Report what was done so far: the main agent still needs to know the page changed.
+      outcome = `stopped: ${error instanceof InvalidToolCall ? "the model sent tool calls that could not be read" : (error as Error).message}`;
+      break;
+    }
     const calls = reply.tool_calls ?? [];
     messages.push({ role: "assistant", content: reply.content ?? "", ...(calls.length ? { tool_calls: calls } : {}) });
     if (!calls.length) {
+      // Small models sometimes answer in plain text; ask once for a proper finish.
+      if (!remindedNoTool) {
+        remindedNoTool = true;
+        messages.push({ role: "user", content: NO_TOOL_REMINDER });
+        continue;
+      }
       outcome = `stopped: the model answered without finishing: ${oneLine(reply.content ?? "").slice(0, 200)}`;
       break;
     }
