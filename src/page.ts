@@ -122,6 +122,24 @@ const CHOOSE_THIS_OPTION = `function () {
 const MAX_NETWORK_WAIT_MS = 2000;
 const CONTENT_REQUESTS = new Set(["Fetch", "XHR"]);
 
+// What fill can do with an element: type into it, choose in it (a native <select>), or
+// nothing, with what to use instead. Agents and small models trust a "filled" report, so
+// fill must fail on a link or a checkbox instead of pretending it typed.
+const FIELD_KIND = `function () {
+  if (this instanceof HTMLSelectElement) return { kind: "select" };
+  if (this.isContentEditable) return { kind: "text" };
+  if (this instanceof HTMLTextAreaElement || this instanceof HTMLInputElement) {
+    const type = this instanceof HTMLInputElement ? this.type : "textarea";
+    if (type === "file") return { kind: "none", instead: "upload" };
+    if (["checkbox", "radio", "button", "submit", "reset", "image", "range", "color", "hidden"].includes(type)) {
+      return { kind: "none", instead: "click" };
+    }
+    if (this.readOnly || this.disabled) return { kind: "none", readOnly: true };
+    return { kind: type === "password" ? "password" : "text" };
+  }
+  return { kind: "none", instead: "click" };
+}`;
+
 const SELECT_CONTENTS = `function () {
   if (typeof this.select === "function") return this.select();
   if (this.isContentEditable) {
@@ -289,16 +307,37 @@ export class Page {
       await this.#guard();
       const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = `${label} (${text.length} characters)`; // Never the text: it may be a secret.
-      const box = await this.#locate(backendNodeId, ref, frame);
-      await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2, box });
       const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
-      const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
-        objectId: object.objectId,
-        functionDeclaration: `function () { return this.type === "password"; }`,
-        returnByValue: true,
-      });
-      await this.#confirm(`type into ${label}, a password field`, result.value === true);
-      if (result.value === true) this.typedSecret = true;
+      const { result: field } = await this.#sendIn<{ result: { value: { kind: string; instead?: string; readOnly?: boolean } } }>(
+        frame,
+        "Runtime.callFunctionOn",
+        { objectId: object.objectId, functionDeclaration: FIELD_KIND, returnByValue: true },
+      );
+      const { kind, instead, readOnly } = field.value;
+      if (kind === "none") {
+        if (readOnly) throw new Error(`${label} is read-only, so nothing can be typed into it`);
+        const hint = instead === "upload" ? `use upload ${ref} <file>` : `use click ${ref}; if that opens a field, fill the field`;
+        throw new Error(`${label} cannot be typed into; ${hint}`);
+      }
+      const box = await this.#locate(backendNodeId, ref, frame);
+      if (kind === "select") {
+        // Typing into a native dropdown means choosing the option with that text.
+        entry.action = "select";
+        entry.target = `${label} → ${text}`;
+        await this.#announce({ label: `choose "${text}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+        const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
+          objectId: object.objectId,
+          functionDeclaration: CHOOSE_OPTION,
+          arguments: [{ value: text }],
+          returnByValue: true,
+        });
+        const chosen = result.value as { chosen?: string; available: string[] };
+        if (!chosen.chosen) throw new Error(`no option "${text}" in ${label}; options: ${chosen.available.join(", ")}`);
+        return `chose "${chosen.chosen}" in ${label}${await this.#observe(entry.url)}`;
+      }
+      await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2, box });
+      await this.#confirm(`type into ${label}, a password field`, kind === "password");
+      if (kind === "password") this.typedSecret = true;
       await this.#sendIn(frame, "DOM.focus", { backendNodeId });
       const network = await this.#trackNetwork();
       await this.#sendIn(frame, "Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: SELECT_CONTENTS });

@@ -478,6 +478,26 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("select", size, "Huge"), /no option "Huge".*options: Small, Large/);
   });
 
+  test("fill chooses in a native dropdown and refuses what cannot be typed into", async () => {
+    await cli("open", fixture("dropdowns.html"));
+    const dropdowns = await cli("snapshot");
+    assert.match(await cli("fill", refOf(dropdowns, "combobox Country"), "Argentina"), /^chose "Argentina" in combobox "Country"/);
+    assert.equal(await cli("eval", "document.getElementById('picked').textContent"), "Picked ar");
+    assert.match(await cliError("fill", refOf(dropdowns, "combobox Country"), "Peru"), /no option "Peru" in combobox "Country"; options: Choose one, Ecuador, Argentina/);
+
+    await cli("open", fixture("form.html"));
+    const form = await cli("snapshot");
+    for (const [entry, what] of [["link Next page", 'link "Next page"'], ["checkbox Accept terms", 'checkbox "Accept terms"'], ["button Send", 'button "Send"']]) {
+      const ref = refOf(form, entry);
+      assert.match(await cliError("fill", ref, "x"), new RegExp(`${what} cannot be typed into; use click ${ref}`));
+    }
+    assert.equal(await cli("eval", "document.querySelector('a').textContent"), "Next page", "nothing was typed into the link");
+
+    await cli("open", fixture("files.html"));
+    const resume = refOf(await cli("snapshot"), "button Resume");
+    assert.match(await cliError("fill", resume, "cv.pdf"), new RegExp(`cannot be typed into; use upload ${resume} <file>`));
+  });
+
   test("clicking an option of a native dropdown chooses it", async () => {
     await cli("open", fixture("dropdowns.html"));
     const snapshot = await cli("snapshot", "--full"); // A closed dropdown's options are not on screen.
