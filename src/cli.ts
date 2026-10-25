@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 import {
   browserVersion,
@@ -21,6 +22,7 @@ import { CONFIRM_MODES, loadPolicy, normalizeSite, policyFile, savePolicy, type 
 import { runScript } from "./run.ts";
 import { formatUsage, readUsage, recordUsage, resetUsage, usageSummary } from "./usage.ts";
 import { loadState, profileDir, saveState, socketPath } from "./state.ts";
+import { activeTrace, deleteTraces, formatCommand, listTraces, readTrace, recordStep, startTrace, stopTrace, toExample, tracesDir } from "./trace.ts";
 
 const HELP = `open-eyes: give your AI agent eyes on a real browser, while you watch.
 
@@ -89,6 +91,14 @@ Local model (optional)
                          (asks first; --yes skips the question)
   model remove           Delete them
 
+Training traces (opt-in, stay on this computer)
+  trace start "<goal>"   Record each following command and what it printed, as an
+                         example for training the local model; never text typed
+                         into password fields or uploaded files' contents
+  trace stop [done|failed] [answer]  Stop recording, with the outcome
+  trace [list]           List traces          trace show <id>   Review one
+  trace delete <id...>|--all          trace export [file]   JSONL for fine-tuning
+
 Working with the user
   handoff <message>      Ask the user to take over (log in, solve a captcha...)
                          and wait until they hand control back
@@ -156,13 +166,25 @@ async function withPage(label: string, action: (page: Page) => Promise<unknown>)
     throw error;
   } finally {
     const entry = recordUsage(label, output, Date.now() - started);
+    const trace = activeTrace();
+    if (trace) {
+      // Uploaded files are recorded by name, and text typed into a password field not at all.
+      const secret = connection?.page.typedSecret ?? false;
+      const words = commandWords[0] === "upload" ? commandWords.map((word) => (/[\\/]/.test(word) ? basename(word) : word)) : commandWords;
+      const command = secret ? `${words[0]} (typed into a password field, not stored)` : formatCommand(words);
+      recordStep(trace, { command, output: secret ? "" : output, ms: Date.now() - started, ...(secret ? { secret } : {}) });
+    }
     if (state.showTokens && connection) await connection.page.showUsage(usageSummary(entry)).catch(() => {});
     connection?.cdp.close();
     saveState(state); // Also when connecting failed: it may have learned the daemon is gone.
   }
 }
 
+/** The command as typed, for traces; args are consumed while parsing. */
+let commandWords: string[] = [];
+
 async function main([command, ...args]: string[]): Promise<void> {
+  commandWords = [command, ...args];
   switch (command) {
     case "launch": {
       const state = loadState();
@@ -403,6 +425,54 @@ async function main([command, ...args]: string[]): Promise<void> {
       });
       if (shown) process.stderr.write("\n");
       return print(`installed ${installed.model}; "open-eyes do" now uses it`);
+    }
+    case "trace": {
+      const [action, ...rest] = args;
+      if (action === "start") {
+        const id = startTrace(need(rest.join(" ").trim() || undefined, 'trace start "<goal>"'));
+        return print(
+          `recording trace ${id}: each open-eyes command and what it printed, never text typed into\npassword fields or the contents of uploaded files. It stays in ${tracesDir}.\nEnd it with "open-eyes trace stop [done|failed] [answer]".`,
+        );
+      }
+      if (action === "stop") {
+        const outcome = rest[0] === "failed" ? "failed" : "done";
+        if (rest[0] === "done" || rest[0] === "failed") rest.shift();
+        const trace = stopTrace(outcome, rest.join(" ").trim());
+        return print(`stopped trace ${trace.id}: ${trace.outcome}, ${trace.steps.length} commands`);
+      }
+      if (action === "show") {
+        const trace = readTrace(need(rest[0], "trace show <id>"));
+        const lines = [`goal: ${trace.goal}`, `outcome: ${trace.outcome ?? "recording"}${trace.answer ? ` (${trace.answer})` : ""}`];
+        for (const step of trace.steps) lines.push("", `$ open-eyes ${step.command}`, ...(step.output ? [step.output] : []));
+        return print(lines.join("\n"));
+      }
+      if (action === "delete") {
+        const count = deleteTraces(rest[0] === "--all" ? "all" : rest.length ? rest : [need(undefined, "trace delete <id...>|--all")]);
+        return print(`deleted ${count} trace${count === 1 ? "" : "s"}`);
+      }
+      if (action === "export") {
+        const examples: string[] = [];
+        const skipped: string[] = [];
+        for (const trace of listTraces()) {
+          const example = toExample(trace);
+          if ("skipped" in example) skipped.push(`  ${trace.id}: ${example.skipped}`);
+          else examples.push(JSON.stringify(example));
+        }
+        const jsonl = examples.map((line) => `${line}\n`).join("");
+        if (rest[0]) writeFileSync(rest[0], jsonl, { mode: 0o600 });
+        else process.stdout.write(jsonl);
+        console.error([`exported ${examples.length} traces${rest[0] ? ` to ${rest[0]}` : ""}`, ...(skipped.length ? [`skipped ${skipped.length}:`, ...skipped] : [])].join("\n"));
+        return;
+      }
+      if (action !== undefined && action !== "list") throw new Error(`unknown trace action "${action}"; see "open-eyes help"`);
+      const traces = listTraces();
+      const recording = activeTrace();
+      if (!traces.length) return print('no traces; start one with open-eyes trace start "<goal>"');
+      return print(
+        traces
+          .map((t) => `${t.id}  ${(t.id === recording ? "recording" : (t.outcome ?? "unfinished")).padEnd(10)} ${String(t.steps.length).padStart(3)} commands  ${t.goal}`)
+          .join("\n"),
+      );
     }
     case "handoff": {
       const timeout = takeTimeout(args);

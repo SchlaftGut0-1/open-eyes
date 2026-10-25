@@ -21,6 +21,12 @@ All notable changes to open-eyes are documented here. The format follows
   dedicated GPU for each run. `open-eyes model` shows what is installed and whether a newer
   model is available; `open-eyes model remove` deletes it. `OPEN_EYES_MODEL_URL` still
   takes precedence.
+- `open-eyes trace start "<goal>"` records each following command and what it printed,
+  until `open-eyes trace stop [done|failed] [answer]`, as examples for training the local
+  model. Recording is opt-in, stays on this computer, and never stores text typed into
+  password fields or uploaded files' contents. `trace`, `trace show` and `trace delete`
+  review and remove traces; `trace export` writes chat/tool-call JSONL in the exact format
+  of `open-eyes do`, leaving out traces it could not learn from and saying why.
 
 ### Changed
 

@@ -123,6 +123,27 @@ log below. If you deny an action or take control, it stops. Small models can be 
 about their own success, so the report lists every action: check the result before
 relying on it.
 
+### Training traces
+
+To help train a better local model, you can record sessions as examples. Nothing is
+recorded unless you start it, and traces never leave your computer:
+
+```bash
+open-eyes trace start "Find the year Chromium was first released"
+# ...you or your agent work with open-eyes as usual...
+open-eyes trace stop done "2008"        # or: trace stop failed "why"
+open-eyes trace                         # list; trace show <id> to review one
+open-eyes trace export traces.jsonl     # chat/tool-call JSONL for fine-tuning
+open-eyes trace delete --all
+```
+
+A trace holds the goal, each command and what it printed, which includes page content,
+so review it before sharing it with anyone. Text typed into password fields and the
+contents of uploaded files are never stored, and a trace that typed a password is left
+out of the export. The export uses the exact prompt and tools of `open-eyes do`, so a
+model trained on it sees the same format it works with. Commands the local model cannot
+run (`eval`, `run`, `upload`, `open` after the first snapshot) also leave a trace out.
+
 ## Safety
 
 Web pages can hide instructions meant to hijack an agent, and there is no complete fix
@@ -168,6 +189,7 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `run <file\|->` | Run a multi-step script with `page` in scope |
 | `do "<goal>" [--steps <n>] [--timeout <seconds>]` | Let a local model carry out a goal and report what it did ([Local model](#local-model-optional)) |
 | `model [install [--yes]\|remove]` | Show, download (after asking) or delete the local model for `do` |
+| `trace start <goal>` / `stop` / `show` / `delete` / `export` | Record sessions on this computer as training examples for the local model (opt-in) |
 | `handoff <message>` | Ask the user to take over, wait until they hand control back |
 | `wait` | Wait until the user hands back control they took |
 | `policy [allow\|block\|remove\|confirm\|reset]` | Show or change which sites are allowed and what needs approval |

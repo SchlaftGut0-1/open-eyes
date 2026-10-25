@@ -157,6 +157,8 @@ const CONFIRM_TIMEOUT_MS = 120_000;
 
 /** The agent's window. Every action is drawn on the page before it happens. */
 export class Page {
+  /** Set once text is typed into a password field, so traces can leave it out. */
+  typedSecret = false;
   #cdp: CDP;
   #sessionId: string;
   #state: State;
@@ -296,6 +298,7 @@ export class Page {
         returnByValue: true,
       });
       await this.#confirm(`type into ${label}, a password field`, result.value === true);
+      if (result.value === true) this.typedSecret = true;
       await this.#sendIn(frame, "DOM.focus", { backendNodeId });
       const network = await this.#trackNetwork();
       await this.#sendIn(frame, "Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: SELECT_CONTENTS });
