@@ -6,6 +6,13 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- A web page could approve open-eyes' risky-action confirmations without the user, by
+  writing the answer into the overlay's state, which lived in the page's own JavaScript
+  (GHSA-hc9g-g6x3-gpc6). The overlay now runs in an isolated world the page cannot reach,
+  its shadow root is closed, and who is in control is also kept in open-eyes' own state.
+
 ### Added
 
 - `open-eyes do "<goal>"` lets a local model carry out a routine task in the agent

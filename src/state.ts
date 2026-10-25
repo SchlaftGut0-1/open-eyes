@@ -38,6 +38,8 @@ export type State = {
   daemonPid?: number;
   /** Show the token counter in the agent window (`open-eyes usage show`). */
   showTokens?: boolean;
+  /** Who was last seen in control of the agent window, kept where page scripts cannot reach. */
+  owner?: "agent" | "user";
 };
 
 const TARGET_ID = /^[0-9A-F]{32}$/i;
@@ -71,6 +73,7 @@ export function parseState(raw: unknown): Omit<State, "port"> & { port?: number 
     nextRef: Number.isInteger(saved.nextRef) && (saved.nextRef as number) > 0 ? (saved.nextRef as number) : undefined,
     daemonPid: Number.isInteger(saved.daemonPid) && (saved.daemonPid as number) > 0 ? (saved.daemonPid as number) : undefined,
     showTokens: saved.showTokens === true ? true : undefined,
+    owner: saved.owner === "agent" || saved.owner === "user" ? saved.owner : undefined,
   };
 }
 

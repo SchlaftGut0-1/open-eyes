@@ -5,7 +5,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { audit, type AuditEntry } from "./audit.ts";
 import type { CDP } from "./cdp.ts";
-import { decisionExpression, OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
+import { decisionExpression, OVERLAY_WORLD, OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
 import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
 import { formatSnapshot, nodeKey, type AXNode, type Frame, type LineNode } from "./snapshot.ts";
 import { stateDir, type Ref, type State } from "./state.ts";
@@ -587,7 +587,8 @@ export class Page {
   }
 
   async owner(): Promise<Owner> {
-    return ((await this.#evaluate(OWNER_EXPRESSION).catch(() => null)) as Owner) ?? null;
+    const owner = ((await this.#evaluateInOverlayWorld(OWNER_EXPRESSION).catch(() => null)) as Owner) ?? null;
+    return owner ?? (this.#state.owner === "user" ? "user" : null);
   }
 
   async url(): Promise<string> {
@@ -662,6 +663,28 @@ export class Page {
     if (exceptionDetails) {
       throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
     }
+    return result.value;
+  }
+
+  /**
+   * Evaluates in open-eyes' own isolated world of the page (OVERLAY_WORLD): it shares the DOM
+   * but not JavaScript with the page, so page scripts cannot read or forge the overlay's
+   * state, such as the user's answer to a confirmation. Chromium hands back the same world on
+   * every call for the same document, also to later CLI runs, so its state persists.
+   */
+  async #evaluateInOverlayWorld(expression: string): Promise<unknown> {
+    const { frameTree } = await this.#send<{ frameTree: { frame: { id: string } } }>("Page.getFrameTree");
+    const { executionContextId } = await this.#send<{ executionContextId: number }>("Page.createIsolatedWorld", {
+      frameId: frameTree.frame.id,
+      worldName: OVERLAY_WORLD,
+    });
+    const { result, exceptionDetails } = await this.#send("Runtime.evaluate", {
+      expression,
+      contextId: executionContextId,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
     return result.value;
   }
 
@@ -882,7 +905,7 @@ export class Page {
     while (Date.now() < deadline) {
       // Asked again every round, so the question comes back if the page reloads.
       await this.#overlay({ type: "confirm", id, message: action });
-      const decision = await this.#evaluate(decisionExpression(id)).catch(() => null);
+      const decision = await this.#evaluateInOverlayWorld(decisionExpression(id)).catch(() => null);
       if (decision === "allow") return;
       if (decision === "deny") throw new PolicyError("denied", `the user denied: ${action}`);
       await sleep(300);
@@ -892,7 +915,9 @@ export class Page {
 
   /** Updates the overlay and returns who is in control; never fails over drawing. */
   async #overlay(cmd: OverlayCommand): Promise<Owner> {
-    return ((await this.#evaluate(overlayExpression(cmd)).catch(() => null)) as Owner) ?? null;
+    const owner = ((await this.#evaluateInOverlayWorld(overlayExpression(cmd, this.#state.owner)).catch(() => null)) as Owner) ?? null;
+    if (owner) this.#state.owner = owner;
+    return owner;
   }
 
   /** Shows the next action to the human, or refuses it if the human is in control. */

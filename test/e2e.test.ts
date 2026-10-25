@@ -73,6 +73,8 @@ async function until<T>(check: () => Promise<T>, what: string, timeoutMs = 10_00
 /** Acts as the human: a separate DevTools connection to the agent window with real clicks. */
 async function humanAt(): Promise<{
   evaluate: (expression: string) => Promise<any>;
+  /** Evaluates in open-eyes' isolated world, where the overlay lives. */
+  overlay: (expression: string) => Promise<any>;
   click: (part: string) => Promise<void>;
   navigate: (url: string) => Promise<void>;
   close: () => void;
@@ -80,15 +82,21 @@ async function humanAt(): Promise<{
   const { targetId } = JSON.parse(readFileSync(join(env.XDG_STATE_HOME, "open-eyes", "state.json"), "utf8"));
   const cdp = await CDP.connect((await browserVersion(port))!.webSocketDebuggerUrl);
   const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-  const evaluate = async (expression: string) =>
-    (await cdp.send("Runtime.evaluate", { expression, returnByValue: true }, sessionId)).result.value;
-  const part = (name: string) =>
-    `document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="${name}"]')`;
+  const evaluate = async (expression: string, contextId?: number) =>
+    (await cdp.send("Runtime.evaluate", { expression, returnByValue: true, contextId }, sessionId)).result.value;
+  // Asking for the world by name returns open-eyes' own, with its state.
+  const overlay = async (expression: string) => {
+    const { frameTree } = await cdp.send("Page.getFrameTree", {}, sessionId);
+    const world = await cdp.send("Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: "open-eyes" }, sessionId);
+    return evaluate(expression, world.executionContextId);
+  };
+  const part = (name: string) => `window.__openEyes?.root?.querySelector('[data-part="${name}"]')`;
   return {
     evaluate,
+    overlay,
     async click(name) {
       const point = await until(
-        () => evaluate(`(() => { const el = ${part(name)}; if (!el?.checkVisibility()) return null;
+        () => overlay(`(() => { const el = ${part(name)}; if (!el?.checkVisibility()) return null;
           const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`),
         `the overlay "${name}" button`,
       );
@@ -207,10 +215,13 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     }
   });
 
-  test("page scripts cannot take control", async () => {
+  test("page scripts cannot take control or reach the overlay", async () => {
     const human = await humanAt();
     try {
-      await human.evaluate(`document.getElementById("__open_eyes__").shadowRoot.querySelector('[data-part="take"]').click()`);
+      // The page sees the overlay's element but neither its buttons nor its state.
+      assert.equal(await human.evaluate(`document.getElementById("__open_eyes__")?.shadowRoot ?? "closed"`), "closed");
+      assert.equal(await human.evaluate(`typeof window.__openEyes`), "undefined");
+      await human.evaluate(`window.__openEyes = { owner: "user" }; sessionStorage.setItem("open-eyes:owner", "agent")`);
       assert.match(await cli("status"), /in control: the agent/);
     } finally {
       human.close();
@@ -221,8 +232,8 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     const human = await humanAt();
     try {
       const asking = cli("handoff", "Please log in", "--timeout", "30");
-      const message = `document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="message"]')?.textContent`;
-      const asked = async () => (await human.evaluate(message)) === "Please log in";
+      const message = `window.__openEyes?.root?.querySelector('[data-part="message"]')?.textContent`;
+      const asked = async () => (await human.overlay(message)) === "Please log in";
       await until(asked, "the handoff panel");
 
       await human.navigate(fixture("second.html"));
@@ -298,10 +309,15 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       await human.click("allow");
       assert.match(await password, /filled textbox "Password"/);
 
-      // A page script cannot answer for the user.
+      // A page script cannot answer for the user: not by writing the answer where open-eyes
+      // used to keep it, nor by clicking Allow.
+      await human.evaluate(`setInterval(() => {
+        const state = window.__openEyes;
+        if (state?.confirm) state.decisions[state.confirm.id] = "allow";
+        document.getElementById("__open_eyes__")?.shadowRoot?.querySelector('[data-part="allow"]')?.click();
+      }, 50)`);
       const sneaky = cliErrorWith(ask, "click", refOf(snapshot, 'button Send'));
-      await until(() => human.evaluate(`!!document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="allow"]')?.checkVisibility()`), "the question");
-      await human.evaluate(`document.getElementById("__open_eyes__").shadowRoot.querySelector('[data-part="allow"]').click()`);
+      await until(() => human.overlay(`!!window.__openEyes?.root?.querySelector('[data-part="allow"]')?.checkVisibility()`), "the question");
       await sleep(1000);
       await human.click("deny");
       assert.match(await sneaky, /denied/);
@@ -330,7 +346,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     await cli("fill", refOf(await cli("snapshot"), "textbox Query"), "x");
     const human = await humanAt();
     const visible = (part: string) =>
-      human.evaluate(`!!document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="${part}"]')?.checkVisibility()`);
+      human.overlay(`!!window.__openEyes?.root?.querySelector('[data-part="${part}"]')?.checkVisibility()`);
     try {
       assert.equal(await visible("usage"), true);
       const pressing = cliWith({ OPEN_EYES_CONFIRM: "risky" }, "press", "Enter");
@@ -379,10 +395,10 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
 
     const human = await humanAt();
     try {
-      const counter = `document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="usage"]')`;
-      assert.match(await human.evaluate(`${counter}?.textContent`), /last \d+ tok \u00B7 total [\d,]+ tok \u00B7 3 actions/);
+      const counter = `window.__openEyes?.root?.querySelector('[data-part="usage"]')`;
+      assert.match(await human.overlay(`${counter}?.textContent`), /last \d+ tok \u00B7 total [\d,]+ tok \u00B7 3 actions/);
       await cli("usage", "hide");
-      assert.equal(await human.evaluate(`${counter}?.checkVisibility()`), false);
+      assert.equal(await human.overlay(`${counter}?.checkVisibility()`), false);
     } finally {
       human.close();
     }
