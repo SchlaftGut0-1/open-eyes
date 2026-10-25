@@ -18,12 +18,20 @@ export type OverlayCommand =
 const OWNER_KEY = "open-eyes:owner";
 const MESSAGE_KEY = "open-eyes:message";
 
-// Runs inside the page and returns the current owner. Built with DOM/CSSOM calls only (no
-// innerHTML or <style>) so it survives strict CSP and Trusted Types. It is aria-hidden, so
-// snapshots never see it, and pointer-events:none except on its buttons, which are disabled
-// while the agent clicks so synthetic clicks pass straight through. Ownership lives in
-// sessionStorage so it survives reloads, and only trusted (real user) clicks change it.
-const OVERLAY = String.raw`(cmd) => {
+/** The isolated world the overlay runs in: page scripts cannot see or change its state. */
+export const OVERLAY_WORLD = "open-eyes";
+
+// Runs in the page's open-eyes world (see OVERLAY_WORLD) and returns the current owner. The
+// world shares the DOM with the page but not its JavaScript, so the page cannot read or set
+// who is in control or answer a confirmation, and the panel's shadow root is closed, so the
+// page cannot reach its buttons either. Built with DOM/CSSOM calls only (no innerHTML or
+// <style>) so it survives strict CSP and Trusted Types. It is aria-hidden, so snapshots never
+// see it, and pointer-events:none except on its buttons, which are disabled while the agent
+// clicks so synthetic clicks pass straight through. Only trusted (real user) clicks change
+// ownership. A navigation starts a new world, so "the user is in control" is also kept in
+// sessionStorage and in open-eyes' own state (`remembered`): either one keeps the user in
+// control, so a page clearing sessionStorage cannot hand control back to the agent.
+const OVERLAY = String.raw`(cmd, remembered) => {
   const ID = "__open_eyes__";
   const AGENT = "#7c5cff";
   const USER = "#16a34a";
@@ -33,8 +41,9 @@ const OVERLAY = String.raw`(cmd) => {
       try { value == null ? sessionStorage.removeItem(key) : sessionStorage.setItem(key, value); } catch {}
     },
   };
+  const saved = store.get(${JSON.stringify(OWNER_KEY)});
   const state = (window.__openEyes ??= {
-    owner: store.get(${JSON.stringify(OWNER_KEY)}),
+    owner: saved === "user" || remembered === "user" ? "user" : (saved ?? remembered ?? null),
     message: store.get(${JSON.stringify(MESSAGE_KEY)}),
     label: "agent working",
     confirm: null,
@@ -49,12 +58,19 @@ const OVERLAY = String.raw`(cmd) => {
   };
 
   let host = document.getElementById(ID);
+  // One left by an older open-eyes, or a page element pretending to be ours.
+  if (host && host !== state.host) {
+    host.remove();
+    host = null;
+  }
   if (!host) {
     host = document.createElement("div");
     host.id = ID;
     host.setAttribute("aria-hidden", "true");
     host.style.cssText = "all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;";
-    const root = host.attachShadow({ mode: "open" });
+    const root = host.attachShadow({ mode: "closed" });
+    state.host = host;
+    state.root = root;
     const part = (el, name, css) => { el.dataset.part = name; el.style.cssText = css; root.appendChild(el); return el; };
     // What the overlay's buttons do. Only real user input runs them (see the shield below).
     const actions = {
@@ -77,7 +93,10 @@ const OVERLAY = String.raw`(cmd) => {
       event.stopImmediatePropagation();
       if (event.type === "mousedown" || event.type === "pointerdown") event.preventDefault(); // Keep focus.
       if (event.type !== "click" || !event.isTrusted) return; // Page scripts cannot press our buttons.
-      const button = event.composedPath().find((el) => el.dataset && el.dataset.part in actions);
+      // The shadow root is closed, so the event path stops at the host; find the button by
+      // where the click landed instead.
+      let button = state.root.elementFromPoint(event.clientX, event.clientY);
+      while (button && !(button.dataset && button.dataset.part in actions)) button = button.parentElement;
       if (!button) return;
       actions[button.dataset.part]();
       render();
@@ -153,9 +172,9 @@ const OVERLAY = String.raw`(cmd) => {
       "background:rgb(17 17 17 / .85);color:#fff;font:500 12px/1.4 ui-monospace,monospace;" +
       "box-shadow:0 4px 16px rgb(0 0 0 / .25);");
 
-    (document.body ?? document.documentElement).appendChild(host);
   }
-  const get = (name) => host.shadowRoot.querySelector('[data-part="' + name + '"]');
+  if (!host.isConnected) (document.body ?? document.documentElement).appendChild(host);
+  const get = (name) => state.root.querySelector('[data-part="' + name + '"]');
 
   function render() {
     const user = state.owner === "user";
@@ -225,8 +244,9 @@ const OVERLAY = String.raw`(cmd) => {
   return state.owner;
 }`;
 
-export function overlayExpression(cmd: OverlayCommand): string {
-  return `(${OVERLAY})(${JSON.stringify(cmd)})`;
+/** `remembered`: who open-eyes last saw in control, used when a navigation reset the page. */
+export function overlayExpression(cmd: OverlayCommand, remembered?: Owner): string {
+  return `(${OVERLAY})(${JSON.stringify(cmd)}, ${JSON.stringify(remembered ?? null)})`;
 }
 
 /** The user's answer to confirmation `id`: "allow", "deny", or null while undecided. */
