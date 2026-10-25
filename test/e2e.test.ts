@@ -563,6 +563,43 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     });
   });
 
+  test("traces record a session on request, never a password, and export what the local model can learn", async () => {
+    assert.match(await cli("trace"), /^no traces/);
+    assert.match(await cli("trace", "start", "Sign up as Ana"), /^recording trace [\w-]+: each open-eyes command/);
+    assert.match(await cliError("trace", "start", "Another"), /already recording trace/);
+    await cli("open", fixture("form.html"));
+    const snapshot = await cli("snapshot");
+    await cli("fill", refOf(snapshot, "textbox Name"), "Ana");
+    await cli("click", "--name", "Accept terms");
+    await cli("click", "--name", "Send");
+    assert.match(await cli("trace", "stop", "done", "Hello, Ana (accepted)"), /^stopped trace [\w-]+: done, 5 commands$/);
+
+    await cli("trace", "start", "Log in");
+    await cli("fill", "--name", "Password", "hunter2-secret");
+    await cli("trace", "stop", "failed");
+
+    const list = await cli("trace");
+    assert.match(list, /done +5 commands  Sign up as Ana/);
+    assert.match(list, /failed +1 commands  Log in/);
+    const [first, second] = list.split("\n").map((line) => line.split(" ")[0]);
+    const shown = await cli("trace", "show", first);
+    assert.match(shown, /^goal: Sign up as Ana\noutcome: done \(Hello, Ana \(accepted\)\)/);
+    assert.match(shown, /\$ open-eyes fill @\d+ Ana\nfilled textbox "Name"/);
+    assert.match(await cli("trace", "show", second), /\$ open-eyes fill \(typed into a password field, not stored\)/);
+    const stored = readFileSync(join(root, "state", "open-eyes", "traces", `${second}.jsonl`), "utf8");
+    assert.doesNotMatch(stored, /hunter2/);
+
+    const out = join(root, "traces.jsonl");
+    const exported = await execFileAsync(process.execPath, [CLI, "trace", "export", out], { env });
+    assert.match(exported.stderr, /exported 1 traces to .*\nskipped 1:\n  [\w-]+: typed into a password field/);
+    const [example] = readFileSync(out, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.match(example.messages[1].content, /^Goal: Sign up as Ana\n\nCurrent snapshot:\n[^]*textbox Name/);
+    assert.equal(example.messages.at(-1).tool_calls[0].function.arguments, '{"answer":"Hello, Ana (accepted)","success":true}');
+
+    assert.equal(await cli("trace", "delete", "--all"), "deleted 2 traces");
+    assert.match(await cli("trace"), /^no traces/);
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");
