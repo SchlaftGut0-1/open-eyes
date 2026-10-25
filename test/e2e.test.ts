@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -491,6 +492,70 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("click", refOf(snapshot, "combobox Country")), /^clicked combobox "Country"/);
     assert.match(await cli("click", refOf(snapshot, "option Olives")), /^clicked option "Olives"/);
     assert.equal(await cli("eval", "document.getElementById('toppings').value"), "Olives");
+  });
+
+  describe("do, with a stub model", () => {
+    // Answers each request with the next scripted tool call, and keeps the requests.
+    let script: ({ command: string } | { answer: string; success: boolean })[] = [];
+    const requests: { messages: { role: string; content: string }[]; tools: unknown[] }[] = [];
+    const model = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        requests.push(JSON.parse(body));
+        const next = script.shift() ?? { command: "snapshot" };
+        const name = "command" in next ? "open_eyes" : "finish";
+        const call = { id: `call${requests.length}`, type: "function", function: { name, arguments: JSON.stringify(next) } };
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "", tool_calls: [call] } }] }));
+      });
+    });
+    let modelEnv: Record<string, string>;
+    before(async () => {
+      await new Promise<void>((resolve) => model.listen(0, "127.0.0.1", resolve));
+      modelEnv = { OPEN_EYES_MODEL_URL: `http://127.0.0.1:${(model.address() as AddressInfo).port}/v1` };
+    });
+    after(() => model.close());
+
+    test("carries out a goal and reports the actions", async () => {
+      await cli("open", fixture("form.html"));
+      requests.length = 0;
+      script = [
+        { command: 'fill --name Name "Ana"' },
+        { command: "click --name 'Accept terms'" },
+        { command: "open-eyes click --name Send" },
+        { answer: "Hello, Ana (accepted)", success: true },
+      ];
+      const report = await cliWith(modelEnv, "do", "Sign up as Ana, accept the terms and send");
+      assert.match(report, /^done: Hello, Ana \(accepted\)\nactions:\n/);
+      assert.match(report, /  fill --name Name "Ana" → filled textbox "Name"/);
+      assert.match(report, /  open-eyes click --name Send → clicked button "Send"/);
+      assert.match(report, /page: file:.*form\.html$/);
+      assert.equal(await cli("eval", "document.getElementById('out').textContent"), "Hello, Ana (accepted)");
+
+      const [first] = requests;
+      assert.match(first.messages[1].content, /^Goal: Sign up as Ana[^]*textbox Name @\d+/);
+      assert.equal(first.tools.length, 2);
+    });
+
+    test("refuses commands outside its list and does not trust a success after a failure", async () => {
+      await cli("open", fixture("form.html"));
+      script = [{ command: "eval document.cookie" }, { answer: "Done", success: true }];
+      const report = await cliWith(modelEnv, "do", "Read the cookies");
+      assert.match(report, /^not sure: the model says "Done", but its last step failed/);
+      assert.match(report, /eval document.cookie → error: "eval" is not available; use one of: snapshot, click/);
+    });
+
+    test("stops at the step limit, and says when it is not done", async () => {
+      script = [];
+      assert.match(await cliWith(modelEnv, "do", "Loop forever", "--steps", "2"), /^stopped: reached the limit of 2 steps\nactions: none/);
+      script = [{ answer: "There is no such button", success: false }];
+      assert.match(await cliWith(modelEnv, "do", "Press Buy"), /^not done: There is no such button/);
+    });
+
+    test("explains how to set up a model when none is configured", async () => {
+      assert.match(await cliErrorWith({ OPEN_EYES_MODEL_URL: "" }, "do", "anything"), /needs a local model[^]*OPEN_EYES_MODEL_URL/);
+    });
   });
 
   test("hover opens menus and tooltips and reports them", async () => {

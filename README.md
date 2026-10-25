@@ -82,6 +82,39 @@ connection in a small background daemon and routes commands through a private lo
 socket (readable only by your user). The agent works in its own window; your tabs are
 left alone. `open-eyes disconnect` closes that window and stops the daemon.
 
+## Local model (optional)
+
+`open-eyes do "<goal>"` hands a routine task to a small model running on your computer.
+It reads the page and acts in the agent window, and your agent pays only for the goal
+and a short report, about 30 tokens instead of the ~1,600 it would read doing the steps
+itself.
+
+```bash
+llama-server -m gemma-4-E2B-it-Q4_0.gguf --jinja -c 16384 --port 8080
+export OPEN_EYES_MODEL_URL=http://127.0.0.1:8080/v1
+open-eyes open example.com/signup
+open-eyes do "Sign up as Ana and accept the terms"
+```
+
+```
+done: Hello, Ana (accepted)
+actions:
+  fill @1 "Ana" → filled textbox "Name"
+  click @2 → clicked checkbox "Accept terms"
+  click @4 → clicked button "Send"
+page: https://example.com/signup
+```
+
+Any OpenAI-compatible server works: llama.cpp's `llama-server`, or Ollama at
+`http://127.0.0.1:11434/v1` with `OPEN_EYES_MODEL` set to the model's name. Gemma 4 E2B
+(2.8 GB, fits on a 4 GB GPU) is the model we tested and recommend.
+
+The model can read, click, type, choose, scroll and hover, never run JavaScript, upload
+files or open other sites, and every action goes through the policy, approvals and audit
+log below. If you deny an action or take control, it stops. Small models can be wrong
+about their own success, so the report lists every action: check the result before
+relying on it.
+
 ## Safety
 
 Web pages can hide instructions meant to hijack an agent, and there is no complete fix
@@ -125,6 +158,7 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `screenshot [path] [--scope @N]` | Save a PNG of the page, or of one element, and print its path |
 | `eval <js>` | Evaluate JavaScript in the page |
 | `run <file\|->` | Run a multi-step script with `page` in scope |
+| `do "<goal>" [--steps <n>] [--timeout <seconds>]` | Let a local model carry out a goal and report what it did ([Local model](#local-model-optional)) |
 | `handoff <message>` | Ask the user to take over, wait until they hand control back |
 | `wait` | Wait until the user hands back control they took |
 | `policy [allow\|block\|remove\|confirm\|reset]` | Show or change which sites are allowed and what needs approval |

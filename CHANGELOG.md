@@ -6,6 +6,16 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `open-eyes do "<goal>"` lets a local model carry out a routine task in the agent
+  window, through any OpenAI-compatible endpoint set in `OPEN_EYES_MODEL_URL` (llama.cpp's
+  `llama-server`, Ollama). It prints the outcome (`done`, `not done`, `not sure` or
+  `stopped`), the actions it took and the page it ended on, so the main agent reads a few
+  lines instead of every snapshot. The model may only read, click, fill, select, press,
+  scroll and hover; policy, approvals and the audit log apply to each action, and a
+  denial or the user taking control ends the run. `--steps` and `--timeout` limit it.
+
 ### Changed
 
 - Clicking an option of a native dropdown chooses it, as `select` does, and reports

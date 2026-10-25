@@ -10,9 +10,11 @@ import {
   findEverydayBrowser,
   launch,
 } from "./browser.ts";
+import { need, takeFlag, takeNumber, takeOption, takeTarget, takeTimeout } from "./args.ts";
 import { readAudit } from "./audit.ts";
 import { runDaemon } from "./daemon.ts";
-import type { Page, Target } from "./page.ts";
+import { modelEndpoint, navigate, NO_MODEL } from "./navigator.ts";
+import type { Page } from "./page.ts";
 import { CONFIRM_MODES, loadPolicy, normalizeSite, policyFile, savePolicy, type ConfirmMode } from "./policy.ts";
 import { runScript } from "./run.ts";
 import { formatUsage, readUsage, recordUsage, resetUsage, usageSummary } from "./usage.ts";
@@ -73,6 +75,14 @@ Scripts (open-eyes run): \`page\` methods, all async
   eval(js)  screenshot(path?, ref?)  handoff(message?, ms?)  url()
   Refs come from snapshot(): take one before clicking and after the page changes.
 
+Local model (optional)
+  do "<goal>"            Let a local model carry out the goal in the agent window
+                         and print what it did and whether it succeeded. It may
+                         read and act (click, fill, select...), never eval, upload
+                         or open other pages; the safety rules below still apply
+    --steps <n>          Most commands it may run (default 15)
+    --timeout <seconds>  Give up after this long (default 180)
+
 Working with the user
   handoff <message>      Ask the user to take over (log in, solve a captcha...)
                          and wait until they hand control back
@@ -100,7 +110,11 @@ Environment
   OPEN_EYES_SLOWMO       Pause in ms after showing each action (default 400)
   OPEN_EYES_SNAPSHOT_LIMIT  Default snapshot page size in lines (default 400)
   OPEN_EYES_OBSERVE      Set to 0 to stop actions from reporting page changes
-  OPEN_EYES_CONFIRM      Override the confirm mode (risky, always, never)`;
+  OPEN_EYES_CONFIRM      Override the confirm mode (risky, always, never)
+  OPEN_EYES_MODEL_URL    OpenAI-compatible endpoint for "do", e.g. llama-server
+                         at http://127.0.0.1:8080/v1 or Ollama at :11434/v1
+  OPEN_EYES_MODEL        Model name to ask for (needed by Ollama)
+  OPEN_EYES_MODEL_KEY    API key, if the endpoint needs one`;
 
 function format(value: unknown): string {
   if (value === undefined) return "";
@@ -110,58 +124,6 @@ function format(value: unknown): string {
 function print(value: unknown): void {
   const text = format(value);
   if (text) console.log(text);
-}
-
-/** Removes `--name <value>` from args and returns the value. */
-function takeOption(args: string[], name: string): string | undefined {
-  const i = args.indexOf(name);
-  if (i === -1) return undefined;
-  const value = args[i + 1];
-  if (value === undefined) throw new Error(`${name} needs a value`);
-  args.splice(i, 2);
-  return value;
-}
-
-/**
- * Removes the element to act on from args: `--name <text> [--role <role>]`, or else the
- * first argument as a ref. Returns it with a label for the usage log.
- */
-function takeTarget(args: string[], usage: string): [Target, string] {
-  const name = takeOption(args, "--name");
-  const role = takeOption(args, "--role");
-  if (name === undefined) {
-    if (role !== undefined) throw new Error("--role needs --name");
-    const ref = need(args.shift(), usage);
-    return [ref, ref];
-  }
-  return [{ name, role }, `${role ? `${role} ` : ""}"${name}"`];
-}
-
-/** Removes `--name <number>` from args and returns the number, at least `min`. */
-function takeNumber(args: string[], name: string, min: number): number | undefined {
-  const value = takeOption(args, name);
-  if (value === undefined) return undefined;
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < min) throw new Error(`${name} needs a whole number of at least ${min}`);
-  return number;
-}
-
-/** Removes `--name` from args and returns whether it was there. */
-function takeFlag(args: string[], name: string): boolean {
-  const i = args.indexOf(name);
-  if (i !== -1) args.splice(i, 1);
-  return i !== -1;
-}
-
-/** Removes `--timeout <seconds>` from args and returns it in milliseconds. */
-function takeTimeout(args: string[]): number | undefined {
-  const seconds = takeNumber(args, "--timeout", 1);
-  return seconds === undefined ? undefined : seconds * 1000;
-}
-
-function need(arg: string | undefined, usage: string): string {
-  if (arg === undefined) throw new Error(`usage: open-eyes ${usage}`);
-  return arg;
 }
 
 const CONNECT_HELP = `no browser with remote debugging enabled was found.
@@ -377,6 +339,14 @@ async function main([command, ...args]: string[]): Promise<void> {
       const file = need(args[0], "run <file|->");
       const source = readFileSync(file === "-" ? 0 : file, "utf8");
       return withPage(`run ${file}`, (page) => runScript(page, source));
+    }
+    case "do": {
+      const steps = takeNumber(args, "--steps", 1);
+      const timeout = takeTimeout(args);
+      const goal = need(args.join(" ").trim() || undefined, 'do "<goal>" [--steps <n>] [--timeout <seconds>]');
+      const endpoint = modelEndpoint();
+      if (!endpoint) throw new Error(NO_MODEL);
+      return withPage("do", (page) => navigate(page, goal, endpoint, { steps, timeout }));
     }
     case "handoff": {
       const timeout = takeTimeout(args);

@@ -51,7 +51,7 @@ export type SnapshotOptions = {
   find?: string;
 };
 
-const USER_IN_CONTROL =
+export const USER_IN_CONTROL =
   'the user has taken control of the agent window; run "open-eyes wait" to wait until they hand it back';
 
 const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {

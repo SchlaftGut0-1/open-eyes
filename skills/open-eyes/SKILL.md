@@ -5,37 +5,37 @@ description: See and drive a real, visible web browser. Use when a task needs a 
 
 # open-eyes
 
-Drives a real, visible Chromium browser. You work in your own window; the user watches
-every action live and can take over.
+You work in your own visible browser window; the user watches live and can take over.
 
 ## Start
 
 `open-eyes status`; if no browser runs, `open-eyes launch` (visible; `--headless` only if
-the user asks). To use the user's everyday browser with their logins: `open-eyes connect`
-(they enable `chrome://inspect/#remote-debugging` and approve once), and
-`open-eyes disconnect` when done.
+the user asks). For the user's everyday browser and logins: `open-eyes connect` (they
+enable `chrome://inspect/#remote-debugging` and approve once); `open-eyes disconnect` after.
 
 ## Loop
 
 1. `open-eyes open <url>`
 2. `open-eyes snapshot`: what is on screen, one element per line like `button Save @3`;
-   quoted lines are text; an outline lists the headings off screen.
+   quoted lines are text, plus an outline of headings off screen.
 3. `open-eyes click @3`, `fill @4 "text"`, `select @5 "Option"`, `hover @6`,
-   `upload @7 file.pdf`, `press Enter`. Each prints what changed, so you rarely need
-   another snapshot. After "the page changed to ...", old refs are rejected.
+   `upload @7 file.pdf`, `press Enter`. Each prints what changed. After "the page
+   changed to ...", old refs are rejected.
    No ref? `click --name "Save"`.
 
 Cheaper than reading everything:
 
 - `snapshot --find "text"`: matching lines anywhere on the page
-- `snapshot --interactive`: only what you can click or type into, plus headings
+- `snapshot --interactive`: only controls, plus headings
 - `snapshot --scope @N`: one element and its contents
 - `snapshot --full`: the whole page (expensive)
 - `screenshot [--scope @N]`: only when visuals matter
 
 Off-screen refs are clickable. `scroll [down|up]` moves the page; `scroll @N down`
 scrolls the list holding `@N`. For many steps, write one `open-eyes run -` script with
-`page` in scope; `open-eyes help` lists its methods and every option.
+`page` in scope; `open-eyes help` lists everything.
+With `OPEN_EYES_MODEL_URL` set, `open-eyes do "goal"` hands routine steps to a local
+model; verify the result.
 
 ## The user
 
@@ -50,5 +50,5 @@ scrolls the list holding `@N`. For many steps, write one `open-eyes run -` scrip
   around it; tell the user.
 - Risky actions (buy, pay, send, delete, publish, submit, upload, type a password) wait for the
   user's Allow. After "the user denied", don't retry; ask what to do.
-- Never run `open-eyes policy ...` unless the user asks. Every action is logged.
+- Never run `open-eyes policy ...` unless the user asks.
 - Stay in your window, ask before anything irreversible, `open-eyes close` when done.
