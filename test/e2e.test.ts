@@ -477,6 +477,22 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("select", size, "Huge"), /no option "Huge".*options: Small, Large/);
   });
 
+  test("clicking an option of a native dropdown chooses it", async () => {
+    await cli("open", fixture("dropdowns.html"));
+    const snapshot = await cli("snapshot", "--full"); // A closed dropdown's options are not on screen.
+
+    assert.match(await cli("click", refOf(snapshot, "option Ecuador")), /^chose "Ecuador" in combobox "Country"/);
+    assert.equal(await cli("eval", "document.getElementById('picked').textContent"), "Picked ec");
+    assert.match(await cli("click", "--name", "Argentina", "--role", "option"), /^chose "Argentina" in combobox "Country"/);
+    assert.equal(await cli("eval", "document.getElementById('picked').textContent"), "Picked ar");
+    assert.match(await cli("log", "--limit", "2"), /OK +select +combobox "Country" → Argentina/);
+
+    // Clicking the dropdown itself, and options of a list that shows them, stay real clicks.
+    assert.match(await cli("click", refOf(snapshot, "combobox Country")), /^clicked combobox "Country"/);
+    assert.match(await cli("click", refOf(snapshot, "option Olives")), /^clicked option "Olives"/);
+    assert.equal(await cli("eval", "document.getElementById('toppings').value"), "Olives");
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");
