@@ -101,6 +101,20 @@ const CHOOSE_OPTION = `function (wanted) {
   return { native: true, chosen: option.text.trim() };
 }`;
 
+// A native <select> shows its options in a browser popup, where a click on an option does
+// nothing; clicking one should choose it instead. Lists (multiple or size > 1) take real clicks.
+const DROPDOWN_OF_OPTION = `function () {
+  const select = this instanceof HTMLOptionElement && this.closest("select");
+  return select && !select.multiple && select.size <= 1 ? select : null;
+}`;
+const CHOOSE_THIS_OPTION = `function () {
+  const select = this.closest("select");
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "selectedIndex").set.call(select, this.index);
+  select.dispatchEvent(new Event("input", { bubbles: true }));
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return this.text.trim();
+}`;
+
 // After an action, wait until the page has had no content request (fetch or XHR) in flight
 // for QUIET_MS, at most MAX_NETWORK_WAIT_MS: searches often fire after a debounce, and their
 // results should be in the page before its changes are reported. Images, sockets and the
@@ -242,6 +256,10 @@ export class Page {
       await this.#guard();
       const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = label;
+      if (label.startsWith("option ")) {
+        const chosen = await this.#chooseNativeOption(backendNodeId, label, frame, entry);
+        if (chosen) return chosen;
+      }
       const box = await this.#locate(backendNodeId, ref, frame);
       const x = box.x + box.width / 2;
       const y = box.y + box.height / 2;
@@ -359,6 +377,35 @@ export class Page {
       await this.#overlay({ type: "idle" });
       return `hovered over ${label}${await this.#observe(entry.url, network)}`;
     });
+  }
+
+  /**
+   * A click on an option of a native dropdown chooses it, like `select` does, since the click
+   * itself would do nothing. Returns undefined for any other option, which takes a real click.
+   */
+  async #chooseNativeOption(backendNodeId: number, label: string, frame: string | undefined, entry: AuditEntry): Promise<string | undefined> {
+    const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
+    const { result: select } = await this.#sendIn<{ result: { objectId?: string } }>(frame, "Runtime.callFunctionOn", {
+      objectId: object.objectId,
+      functionDeclaration: DROPDOWN_OF_OPTION,
+    });
+    if (!select.objectId) return undefined;
+    const { node } = await this.#sendIn<{ node: { backendNodeId: number } }>(frame, "DOM.describeNode", { objectId: select.objectId });
+    const [selectRef, selectInfo] = Object.entries(this.#state.refs).find(
+      ([, ref]) => ref.backendNodeId === node.backendNodeId && ref.frame === frame,
+    ) ?? [undefined, undefined];
+    const selectLabel = selectInfo?.label ?? "a dropdown";
+    const name = label.replace(/^option /, "");
+    entry.action = "select";
+    entry.target = `${selectLabel} → ${name.replace(/^"|"$/g, "")}`;
+    const box = await this.#locate(node.backendNodeId, selectRef ? `@${selectRef}` : "the dropdown", frame);
+    await this.#announce({ label: `choose ${name} in ${selectLabel}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+    const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
+      objectId: object.objectId,
+      functionDeclaration: CHOOSE_THIS_OPTION,
+      returnByValue: true,
+    });
+    return `chose "${result.value}" in ${selectLabel}${await this.#observe(entry.url)}`;
   }
 
   /**

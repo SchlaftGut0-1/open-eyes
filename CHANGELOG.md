@@ -6,6 +6,13 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Clicking an option of a native dropdown chooses it, as `select` does, and reports
+  `chose "<option>" in <dropdown>`. Before, the click did nothing, since Chromium shows
+  those options in a popup outside the page. Options of a list that shows them all
+  (`multiple` or `size` above 1) still get a real click.
+
 ## [0.4.1] - 2026-10-24
 
 ### Added
