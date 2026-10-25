@@ -496,7 +496,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
 
   describe("do, with a stub model", () => {
     // Answers each request with the next scripted tool call, and keeps the requests.
-    let script: ({ command: string } | { answer: string; success: boolean })[] = [];
+    let script: ({ command: string } | { answer: string; success: boolean } | { text: string } | { invalid: true })[] = [];
     const requests: { messages: { role: string; content: string }[]; tools: unknown[] }[] = [];
     const model = createServer((req, res) => {
       let body = "";
@@ -504,9 +504,12 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       req.on("end", () => {
         requests.push(JSON.parse(body));
         const next = script.shift() ?? { command: "snapshot" };
+        res.setHeader("content-type", "application/json");
+        // What llama-server answers when it cannot parse the model's tool call.
+        if ("invalid" in next) return res.writeHead(500).end('{"error":{"code":500,"message":"Failed to parse tool call arguments as JSON"}}');
+        if ("text" in next) return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: next.text } }] }));
         const name = "command" in next ? "open_eyes" : "finish";
         const call = { id: `call${requests.length}`, type: "function", function: { name, arguments: JSON.stringify(next) } };
-        res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "", tool_calls: [call] } }] }));
       });
     });
@@ -551,6 +554,21 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       assert.match(await cliWith(modelEnv, "do", "Loop forever", "--steps", "2"), /^stopped: reached the limit of 2 steps\nactions: none/);
       script = [{ answer: "There is no such button", success: false }];
       assert.match(await cliWith(modelEnv, "do", "Press Buy"), /^not done: There is no such button/);
+    });
+
+    test("reminds the model once to use its tools, and reports what it did when it cannot go on", async () => {
+      await cli("open", fixture("form.html"));
+      requests.length = 0;
+      script = [{ text: "The page asks for a name." }, { invalid: true }, { answer: "A sign-up form", success: true }];
+      assert.match(await cliWith(modelEnv, "do", "What is this page?"), /^done: A sign-up form/);
+      assert.match(requests[1].messages.at(-1)!.content, /^Use a tool: call open_eyes to continue, or finish/);
+      assert.match(requests[2].messages.at(-1)!.content, /^Your last tool call could not be read/);
+
+      script = [{ command: "click --name Send" }, { invalid: true }, { invalid: true }];
+      const report = await cliWith(modelEnv, "do", "Send the form");
+      assert.match(report, /^stopped: the model sent tool calls that could not be read\nactions:\n  click --name Send → clicked button "Send"/);
+      script = [{ text: "Done." }, { text: "Really done." }];
+      assert.match(await cliWith(modelEnv, "do", "Anything"), /^stopped: the model answered without finishing: Really done\./);
     });
 
     test("explains how to set up a model when none is configured", async () => {
