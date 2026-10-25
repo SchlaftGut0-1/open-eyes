@@ -6,6 +6,10 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `open-eyes --version` and `open-eyes version` print the installed version.
+
 ## [0.4.1] - 2026-10-24
 
 ### Added
