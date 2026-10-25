@@ -21,19 +21,21 @@ export type Manifest = {
 
 const LLAMA = "https://github.com/ggml-org/llama.cpp/releases/download/b11836";
 
-// What `open-eyes model install` downloads. Gemma 4 E2B won the evaluation in #73. When our
-// own fine-tuned, compressed model is published (#76, #77), only `model` changes: status then
-// tells users a newer model is available, and install replaces it. Vulkan builds run on
-// NVIDIA, AMD and Intel GPUs and fall back to the CPU.
+// What `open-eyes model install` downloads: our navigator, Gemma 4 E2B (the winner of #73)
+// fine-tuned on open-eyes traces (#76) and compressed (#77). On 3 × 15 held-out tasks it
+// passed 91.1% with no false success claims, against 84.4% and 3 for the base model, and it
+// is 23% smaller. A newer model only changes `model`: status then tells users a newer
+// navigator is available, and install replaces it. Vulkan builds run on NVIDIA, AMD and
+// Intel GPUs and fall back to the CPU.
 export const MANIFEST: Manifest = {
   model: {
-    id: "gemma-4-e2b-it-q4_0",
-    name: "Gemma 4 E2B (Q4_0)",
-    file: "gemma-4-E2B-it-Q4_0.gguf",
-    url: "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_0.gguf",
-    size: 2_841_481_184,
-    sha256: "8e30dff3ac4c8434c49a7036fa15564bdbb6044e42bf04550bf1a096ad7e6a52",
-    license: "Apache 2.0, https://huggingface.co/google/gemma-4-E2B-it",
+    id: "open-eyes-navigator-v1",
+    name: "open-eyes navigator v1 (Gemma 4 E2B)",
+    file: "open-eyes-navigator-v1.gguf",
+    url: "https://huggingface.co/SchlaftGut/open-eyes-navigator/resolve/main/open-eyes-navigator-v1.gguf",
+    size: 2_193_460_768,
+    sha256: "7301bd61b7001b1552f0834d0c93dd70ae2c945511c3162745d81bc47304ab3d",
+    license: "Apache 2.0, https://huggingface.co/SchlaftGut/open-eyes-navigator",
   },
   server: {
     "linux-x64": {

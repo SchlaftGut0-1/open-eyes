@@ -612,7 +612,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       assert.match(await cli("model"), /^navigator model: not installed/);
       // Only the user may agree to a download this big: without a terminal it needs --yes.
       const refused = await cliError("model", "install");
-      assert.match(refused, /will download:\n  Gemma 4 E2B \(Q4_0\), 2\.8 GB, license: Apache 2\.0/);
+      assert.match(refused, /will download:\n  open-eyes navigator v1 \(Gemma 4 E2B\), 2\.2 GB, license: Apache 2\.0/);
       assert.match(refused, /run "open-eyes model install --yes" yourself/);
     });
   });
