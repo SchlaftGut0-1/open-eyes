@@ -5,10 +5,9 @@ import { PolicyError } from "./policy.ts";
 /** An OpenAI-compatible chat endpoint, such as Ollama or llama.cpp's llama-server. */
 export type Endpoint = { url: string; model: string; key?: string };
 
-export const NO_MODEL = `open-eyes do needs a local model behind an OpenAI-compatible endpoint.
-Start one, for example llama.cpp's server with Gemma 4 E2B:
-  llama-server -m gemma-4-E2B-it-Q4_0.gguf --jinja -c 16384 --port 8080
-then point open-eyes at it:
+export const NO_MODEL = `open-eyes do needs a local model. Download the recommended one (it asks first):
+  open-eyes model install
+or point open-eyes at your own OpenAI-compatible server (llama-server, Ollama):
   export OPEN_EYES_MODEL_URL=http://127.0.0.1:8080/v1
 With Ollama, use http://127.0.0.1:11434/v1 and set OPEN_EYES_MODEL to the model's name.`;
 
