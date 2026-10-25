@@ -104,8 +104,11 @@ actions:
 page: https://example.com/signup
 ```
 
-`open-eyes model install` downloads the model we tested and recommend, Gemma 4 E2B
-(2.8 GB, Apache 2.0, fits on a 4 GB GPU), and llama.cpp's server (about 35 MB) into
+`open-eyes model install` downloads our navigator model,
+[open-eyes navigator v1](https://huggingface.co/SchlaftGut/open-eyes-navigator) (2.2 GB,
+Apache 2.0, fits on a 4 GB GPU): Gemma 4 E2B fine-tuned on open-eyes sessions, which passed
+91.1% of held-out tasks against 84.4% for Gemma 4 E2B itself. It also downloads llama.cpp's
+server (about 35 MB) into
 `~/.local/share/open-eyes/models`, verifying both against pinned checksums. An interrupted
 download resumes. `do` starts the server for each run, on your dedicated GPU, and stops it
 afterwards. `open-eyes model` shows what is installed and tells you when a better model is
