@@ -38,16 +38,16 @@ You need Node.js 22 or newer and Chromium, Chrome, Brave or Edge. Install the pa
 from the latest [release](https://github.com/SchlaftGut0-1/open-eyes/releases):
 
 ```bash
-npm install -g https://github.com/SchlaftGut0-1/open-eyes/releases/download/v0.4.1/open-eyes-0.4.1.tgz
+npm install -g https://github.com/SchlaftGut0-1/open-eyes/releases/download/v0.4.2/open-eyes-0.4.2.tgz
 ```
 
 To check the package first, download it with its checksum and provenance from the
 release page, then:
 
 ```bash
-sha256sum -c open-eyes-0.4.1.tgz.sha256
-gh attestation verify open-eyes-0.4.1.tgz -R SchlaftGut0-1/open-eyes
-npm install -g ./open-eyes-0.4.1.tgz
+sha256sum -c open-eyes-0.4.2.tgz.sha256
+gh attestation verify open-eyes-0.4.2.tgz -R SchlaftGut0-1/open-eyes
+npm install -g ./open-eyes-0.4.2.tgz
 ```
 
 To use it from an agent, copy the skill into your agent's skills directory (for Claude
@@ -81,6 +81,71 @@ Chrome asks for approval on every new connection, so open-eyes keeps a single ap
 connection in a small background daemon and routes commands through a private local
 socket (readable only by your user). The agent works in its own window; your tabs are
 left alone. `open-eyes disconnect` closes that window and stops the daemon.
+
+## Local model (optional)
+
+`open-eyes do "<goal>"` hands a routine task to a small model running on your computer.
+It reads the page and acts in the agent window, and your agent pays only for the goal
+and a short report, about 30 tokens instead of the ~1,600 it would read doing the steps
+itself.
+
+```bash
+open-eyes model install        # shows what it downloads and asks first
+open-eyes open example.com/signup
+open-eyes do "Sign up as Ana and accept the terms"
+```
+
+```
+done: Hello, Ana (accepted)
+actions:
+  fill @1 "Ana" → filled textbox "Name"
+  click @2 → clicked checkbox "Accept terms"
+  click @4 → clicked button "Send"
+page: https://example.com/signup
+```
+
+`open-eyes model install` downloads our navigator model,
+[open-eyes navigator v1](https://huggingface.co/SchlaftGut/open-eyes-navigator) (2.2 GB,
+Apache 2.0, fits on a 4 GB GPU): Gemma 4 E2B fine-tuned on open-eyes sessions, which passed
+91.1% of held-out tasks against 84.4% for Gemma 4 E2B itself. It also downloads llama.cpp's
+server (about 35 MB) into
+`~/.local/share/open-eyes/models`, verifying both against pinned checksums. An interrupted
+download resumes. `do` starts the server for each run, on your dedicated GPU, and stops it
+afterwards. `open-eyes model` shows what is installed and tells you when a better model is
+available, and `open-eyes model remove` deletes it all. Nothing is downloaded until you
+agree.
+
+To use your own server instead, set `OPEN_EYES_MODEL_URL` to any OpenAI-compatible
+endpoint, such as llama.cpp's `llama-server` at `http://127.0.0.1:8080/v1` or Ollama at
+`http://127.0.0.1:11434/v1` with `OPEN_EYES_MODEL` set to the model's name. It takes
+precedence over the downloaded model.
+
+The model can read, click, type, choose, scroll and hover, never run JavaScript, upload
+files or open other sites, and every action goes through the policy, approvals and audit
+log below. If you deny an action or take control, it stops. Small models can be wrong
+about their own success, so the report lists every action: check the result before
+relying on it.
+
+### Training traces
+
+To help train a better local model, you can record sessions as examples. Nothing is
+recorded unless you start it, and traces never leave your computer:
+
+```bash
+open-eyes trace start "Find the year Chromium was first released"
+# ...you or your agent work with open-eyes as usual...
+open-eyes trace stop done "2008"        # or: trace stop failed "why"
+open-eyes trace                         # list; trace show <id> to review one
+open-eyes trace export traces.jsonl     # chat/tool-call JSONL for fine-tuning
+open-eyes trace delete --all
+```
+
+A trace holds the goal, each command and what it printed, which includes page content,
+so review it before sharing it with anyone. Text typed into password fields and the
+contents of uploaded files are never stored, and a trace that typed a password is left
+out of the export. The export uses the exact prompt and tools of `open-eyes do`, so a
+model trained on it sees the same format it works with. Commands the local model cannot
+run (`eval`, `run`, `upload`, `open` after the first snapshot) also leave a trace out.
 
 ## Safety
 
@@ -125,6 +190,9 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `screenshot [path] [--scope @N]` | Save a PNG of the page, or of one element, and print its path |
 | `eval <js>` | Evaluate JavaScript in the page |
 | `run <file\|->` | Run a multi-step script with `page` in scope |
+| `do "<goal>" [--steps <n>] [--timeout <seconds>]` | Let a local model carry out a goal and report what it did ([Local model](#local-model-optional)) |
+| `model [install [--yes]\|remove]` | Show, download (after asking) or delete the local model for `do` |
+| `trace start <goal>` / `stop` / `show` / `delete` / `export` | Record sessions on this computer as training examples for the local model (opt-in) |
 | `handoff <message>` | Ask the user to take over, wait until they hand control back |
 | `wait` | Wait until the user hands back control they took |
 | `policy [allow\|block\|remove\|confirm\|reset]` | Show or change which sites are allowed and what needs approval |

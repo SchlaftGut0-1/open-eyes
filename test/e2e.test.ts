@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -72,6 +73,8 @@ async function until<T>(check: () => Promise<T>, what: string, timeoutMs = 10_00
 /** Acts as the human: a separate DevTools connection to the agent window with real clicks. */
 async function humanAt(): Promise<{
   evaluate: (expression: string) => Promise<any>;
+  /** Evaluates in open-eyes' isolated world, where the overlay lives. */
+  overlay: (expression: string) => Promise<any>;
   click: (part: string) => Promise<void>;
   navigate: (url: string) => Promise<void>;
   close: () => void;
@@ -79,15 +82,21 @@ async function humanAt(): Promise<{
   const { targetId } = JSON.parse(readFileSync(join(env.XDG_STATE_HOME, "open-eyes", "state.json"), "utf8"));
   const cdp = await CDP.connect((await browserVersion(port))!.webSocketDebuggerUrl);
   const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-  const evaluate = async (expression: string) =>
-    (await cdp.send("Runtime.evaluate", { expression, returnByValue: true }, sessionId)).result.value;
-  const part = (name: string) =>
-    `document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="${name}"]')`;
+  const evaluate = async (expression: string, contextId?: number) =>
+    (await cdp.send("Runtime.evaluate", { expression, returnByValue: true, contextId }, sessionId)).result.value;
+  // Asking for the world by name returns open-eyes' own, with its state.
+  const overlay = async (expression: string) => {
+    const { frameTree } = await cdp.send("Page.getFrameTree", {}, sessionId);
+    const world = await cdp.send("Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: "open-eyes" }, sessionId);
+    return evaluate(expression, world.executionContextId);
+  };
+  const part = (name: string) => `window.__openEyes?.root?.querySelector('[data-part="${name}"]')`;
   return {
     evaluate,
+    overlay,
     async click(name) {
       const point = await until(
-        () => evaluate(`(() => { const el = ${part(name)}; if (!el?.checkVisibility()) return null;
+        () => overlay(`(() => { const el = ${part(name)}; if (!el?.checkVisibility()) return null;
           const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`),
         `the overlay "${name}" button`,
       );
@@ -206,10 +215,13 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     }
   });
 
-  test("page scripts cannot take control", async () => {
+  test("page scripts cannot take control or reach the overlay", async () => {
     const human = await humanAt();
     try {
-      await human.evaluate(`document.getElementById("__open_eyes__").shadowRoot.querySelector('[data-part="take"]').click()`);
+      // The page sees the overlay's element but neither its buttons nor its state.
+      assert.equal(await human.evaluate(`document.getElementById("__open_eyes__")?.shadowRoot ?? "closed"`), "closed");
+      assert.equal(await human.evaluate(`typeof window.__openEyes`), "undefined");
+      await human.evaluate(`window.__openEyes = { owner: "user" }; sessionStorage.setItem("open-eyes:owner", "agent")`);
       assert.match(await cli("status"), /in control: the agent/);
     } finally {
       human.close();
@@ -220,8 +232,8 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     const human = await humanAt();
     try {
       const asking = cli("handoff", "Please log in", "--timeout", "30");
-      const message = `document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="message"]')?.textContent`;
-      const asked = async () => (await human.evaluate(message)) === "Please log in";
+      const message = `window.__openEyes?.root?.querySelector('[data-part="message"]')?.textContent`;
+      const asked = async () => (await human.overlay(message)) === "Please log in";
       await until(asked, "the handoff panel");
 
       await human.navigate(fixture("second.html"));
@@ -297,10 +309,15 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       await human.click("allow");
       assert.match(await password, /filled textbox "Password"/);
 
-      // A page script cannot answer for the user.
+      // A page script cannot answer for the user: not by writing the answer where open-eyes
+      // used to keep it, nor by clicking Allow.
+      await human.evaluate(`setInterval(() => {
+        const state = window.__openEyes;
+        if (state?.confirm) state.decisions[state.confirm.id] = "allow";
+        document.getElementById("__open_eyes__")?.shadowRoot?.querySelector('[data-part="allow"]')?.click();
+      }, 50)`);
       const sneaky = cliErrorWith(ask, "click", refOf(snapshot, 'button Send'));
-      await until(() => human.evaluate(`!!document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="allow"]')?.checkVisibility()`), "the question");
-      await human.evaluate(`document.getElementById("__open_eyes__").shadowRoot.querySelector('[data-part="allow"]').click()`);
+      await until(() => human.overlay(`!!window.__openEyes?.root?.querySelector('[data-part="allow"]')?.checkVisibility()`), "the question");
       await sleep(1000);
       await human.click("deny");
       assert.match(await sneaky, /denied/);
@@ -329,7 +346,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     await cli("fill", refOf(await cli("snapshot"), "textbox Query"), "x");
     const human = await humanAt();
     const visible = (part: string) =>
-      human.evaluate(`!!document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="${part}"]')?.checkVisibility()`);
+      human.overlay(`!!window.__openEyes?.root?.querySelector('[data-part="${part}"]')?.checkVisibility()`);
     try {
       assert.equal(await visible("usage"), true);
       const pressing = cliWith({ OPEN_EYES_CONFIRM: "risky" }, "press", "Enter");
@@ -378,10 +395,10 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
 
     const human = await humanAt();
     try {
-      const counter = `document.getElementById("__open_eyes__")?.shadowRoot.querySelector('[data-part="usage"]')`;
-      assert.match(await human.evaluate(`${counter}?.textContent`), /last \d+ tok \u00B7 total [\d,]+ tok \u00B7 3 actions/);
+      const counter = `window.__openEyes?.root?.querySelector('[data-part="usage"]')`;
+      assert.match(await human.overlay(`${counter}?.textContent`), /last \d+ tok \u00B7 total [\d,]+ tok \u00B7 3 actions/);
       await cli("usage", "hide");
-      assert.equal(await human.evaluate(`${counter}?.checkVisibility()`), false);
+      assert.equal(await human.overlay(`${counter}?.checkVisibility()`), false);
     } finally {
       human.close();
     }
@@ -475,6 +492,166 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("select", size, "Large"), /^chose "Large" in button "Size: none"/);
     assert.equal(await cli("eval", "document.getElementById('size').textContent"), "Size: Large");
     assert.match(await cliError("select", size, "Huge"), /no option "Huge".*options: Small, Large/);
+  });
+
+  test("fill chooses in a native dropdown and refuses what cannot be typed into", async () => {
+    await cli("open", fixture("dropdowns.html"));
+    const dropdowns = await cli("snapshot");
+    assert.match(await cli("fill", refOf(dropdowns, "combobox Country"), "Argentina"), /^chose "Argentina" in combobox "Country"/);
+    assert.equal(await cli("eval", "document.getElementById('picked').textContent"), "Picked ar");
+    assert.match(await cliError("fill", refOf(dropdowns, "combobox Country"), "Peru"), /no option "Peru" in combobox "Country"; options: Choose one, Ecuador, Argentina/);
+
+    await cli("open", fixture("form.html"));
+    const form = await cli("snapshot");
+    for (const [entry, what] of [["link Next page", 'link "Next page"'], ["checkbox Accept terms", 'checkbox "Accept terms"'], ["button Send", 'button "Send"']]) {
+      const ref = refOf(form, entry);
+      assert.match(await cliError("fill", ref, "x"), new RegExp(`${what} cannot be typed into; use click ${ref}`));
+    }
+    assert.equal(await cli("eval", "document.querySelector('a').textContent"), "Next page", "nothing was typed into the link");
+
+    await cli("open", fixture("files.html"));
+    const resume = refOf(await cli("snapshot"), "button Resume");
+    assert.match(await cliError("fill", resume, "cv.pdf"), new RegExp(`cannot be typed into; use upload ${resume} <file>`));
+  });
+
+  test("clicking an option of a native dropdown chooses it", async () => {
+    await cli("open", fixture("dropdowns.html"));
+    const snapshot = await cli("snapshot", "--full"); // A closed dropdown's options are not on screen.
+
+    assert.match(await cli("click", refOf(snapshot, "option Ecuador")), /^chose "Ecuador" in combobox "Country"/);
+    assert.equal(await cli("eval", "document.getElementById('picked').textContent"), "Picked ec");
+    assert.match(await cli("click", "--name", "Argentina", "--role", "option"), /^chose "Argentina" in combobox "Country"/);
+    assert.equal(await cli("eval", "document.getElementById('picked').textContent"), "Picked ar");
+    assert.match(await cli("log", "--limit", "2"), /OK +select +combobox "Country" → Argentina/);
+
+    // Clicking the dropdown itself, and options of a list that shows them, stay real clicks.
+    assert.match(await cli("click", refOf(snapshot, "combobox Country")), /^clicked combobox "Country"/);
+    assert.match(await cli("click", refOf(snapshot, "option Olives")), /^clicked option "Olives"/);
+    assert.equal(await cli("eval", "document.getElementById('toppings').value"), "Olives");
+  });
+
+  describe("do, with a stub model", () => {
+    // Answers each request with the next scripted tool call, and keeps the requests.
+    let script: ({ command: string } | { answer: string; success: boolean } | { text: string } | { invalid: true })[] = [];
+    const requests: { messages: { role: string; content: string }[]; tools: unknown[] }[] = [];
+    const model = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        requests.push(JSON.parse(body));
+        const next = script.shift() ?? { command: "snapshot" };
+        res.setHeader("content-type", "application/json");
+        // What llama-server answers when it cannot parse the model's tool call.
+        if ("invalid" in next) return res.writeHead(500).end('{"error":{"code":500,"message":"Failed to parse tool call arguments as JSON"}}');
+        if ("text" in next) return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: next.text } }] }));
+        const name = "command" in next ? "open_eyes" : "finish";
+        const call = { id: `call${requests.length}`, type: "function", function: { name, arguments: JSON.stringify(next) } };
+        res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "", tool_calls: [call] } }] }));
+      });
+    });
+    let modelEnv: Record<string, string>;
+    before(async () => {
+      await new Promise<void>((resolve) => model.listen(0, "127.0.0.1", resolve));
+      modelEnv = { OPEN_EYES_MODEL_URL: `http://127.0.0.1:${(model.address() as AddressInfo).port}/v1` };
+    });
+    after(() => model.close());
+
+    test("carries out a goal and reports the actions", async () => {
+      await cli("open", fixture("form.html"));
+      requests.length = 0;
+      script = [
+        { command: 'fill --name Name "Ana"' },
+        { command: "click --name 'Accept terms'" },
+        { command: "open-eyes click --name Send" },
+        { answer: "Hello, Ana (accepted)", success: true },
+      ];
+      const report = await cliWith(modelEnv, "do", "Sign up as Ana, accept the terms and send");
+      assert.match(report, /^done: Hello, Ana \(accepted\)\nactions:\n/);
+      assert.match(report, /  fill --name Name "Ana" → filled textbox "Name"/);
+      assert.match(report, /  open-eyes click --name Send → clicked button "Send"/);
+      assert.match(report, /page: file:.*form\.html$/);
+      assert.equal(await cli("eval", "document.getElementById('out').textContent"), "Hello, Ana (accepted)");
+
+      const [first] = requests;
+      assert.match(first.messages[1].content, /^Goal: Sign up as Ana[^]*textbox Name @\d+/);
+      assert.equal(first.tools.length, 2);
+    });
+
+    test("refuses commands outside its list and does not trust a success after a failure", async () => {
+      await cli("open", fixture("form.html"));
+      script = [{ command: "eval document.cookie" }, { answer: "Done", success: true }];
+      const report = await cliWith(modelEnv, "do", "Read the cookies");
+      assert.match(report, /^not sure: the model says "Done", but its last step failed/);
+      assert.match(report, /eval document.cookie → error: "eval" is not available; use one of: snapshot, click/);
+    });
+
+    test("stops at the step limit, and says when it is not done", async () => {
+      script = [];
+      assert.match(await cliWith(modelEnv, "do", "Loop forever", "--steps", "2"), /^stopped: reached the limit of 2 steps\nactions: none/);
+      script = [{ answer: "There is no such button", success: false }];
+      assert.match(await cliWith(modelEnv, "do", "Press Buy"), /^not done: There is no such button/);
+    });
+
+    test("reminds the model once to use its tools, and reports what it did when it cannot go on", async () => {
+      await cli("open", fixture("form.html"));
+      requests.length = 0;
+      script = [{ text: "The page asks for a name." }, { invalid: true }, { answer: "A sign-up form", success: true }];
+      assert.match(await cliWith(modelEnv, "do", "What is this page?"), /^done: A sign-up form/);
+      assert.match(requests[1].messages.at(-1)!.content, /^Use a tool: call open_eyes to continue, or finish/);
+      assert.match(requests[2].messages.at(-1)!.content, /^Your last tool call could not be read/);
+
+      script = [{ command: "click --name Send" }, { invalid: true }, { invalid: true }];
+      const report = await cliWith(modelEnv, "do", "Send the form");
+      assert.match(report, /^stopped: the model sent tool calls that could not be read\nactions:\n  click --name Send → clicked button "Send"/);
+      script = [{ text: "Done." }, { text: "Really done." }];
+      assert.match(await cliWith(modelEnv, "do", "Anything"), /^stopped: the model answered without finishing: Really done\./);
+    });
+
+    test("explains how to set up a model when none is configured", async () => {
+      assert.match(await cliErrorWith({ OPEN_EYES_MODEL_URL: "" }, "do", "anything"), /needs a local model[^]*open-eyes model install[^]*OPEN_EYES_MODEL_URL/);
+      assert.match(await cli("model"), /^navigator model: not installed/);
+      // Only the user may agree to a download this big: without a terminal it needs --yes.
+      const refused = await cliError("model", "install");
+      assert.match(refused, /will download:\n  open-eyes navigator v1 \(Gemma 4 E2B\), 2\.2 GB, license: Apache 2\.0/);
+      assert.match(refused, /run "open-eyes model install --yes" yourself/);
+    });
+  });
+
+  test("traces record a session on request, never a password, and export what the local model can learn", async () => {
+    assert.match(await cli("trace"), /^no traces/);
+    assert.match(await cli("trace", "start", "Sign up as Ana"), /^recording trace [\w-]+: each open-eyes command/);
+    assert.match(await cliError("trace", "start", "Another"), /already recording trace/);
+    await cli("open", fixture("form.html"));
+    const snapshot = await cli("snapshot");
+    await cli("fill", refOf(snapshot, "textbox Name"), "Ana");
+    await cli("click", "--name", "Accept terms");
+    await cli("click", "--name", "Send");
+    assert.match(await cli("trace", "stop", "done", "Hello, Ana (accepted)"), /^stopped trace [\w-]+: done, 5 commands$/);
+
+    await cli("trace", "start", "Log in");
+    await cli("fill", "--name", "Password", "hunter2-secret");
+    await cli("trace", "stop", "failed");
+
+    const list = await cli("trace");
+    assert.match(list, /done +5 commands  Sign up as Ana/);
+    assert.match(list, /failed +1 commands  Log in/);
+    const [first, second] = list.split("\n").map((line) => line.split(" ")[0]);
+    const shown = await cli("trace", "show", first);
+    assert.match(shown, /^goal: Sign up as Ana\noutcome: done \(Hello, Ana \(accepted\)\)/);
+    assert.match(shown, /\$ open-eyes fill @\d+ Ana\nfilled textbox "Name"/);
+    assert.match(await cli("trace", "show", second), /\$ open-eyes fill \(typed into a password field, not stored\)/);
+    const stored = readFileSync(join(root, "state", "open-eyes", "traces", `${second}.jsonl`), "utf8");
+    assert.doesNotMatch(stored, /hunter2/);
+
+    const out = join(root, "traces.jsonl");
+    const exported = await execFileAsync(process.execPath, [CLI, "trace", "export", out], { env });
+    assert.match(exported.stderr, /exported 1 traces to .*\nskipped 1:\n  [\w-]+: typed into a password field/);
+    const [example] = readFileSync(out, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.match(example.messages[1].content, /^Goal: Sign up as Ana\n\nCurrent snapshot:\n[^]*textbox Name/);
+    assert.equal(example.messages.at(-1).tool_calls[0].function.arguments, '{"answer":"Hello, Ana (accepted)","success":true}');
+
+    assert.equal(await cli("trace", "delete", "--all"), "deleted 2 traces");
+    assert.match(await cli("trace"), /^no traces/);
   });
 
   test("hover opens menus and tooltips and reports them", async () => {

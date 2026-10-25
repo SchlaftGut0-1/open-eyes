@@ -9,6 +9,57 @@ All notable changes to open-eyes are documented here. The format follows
 ### Added
 
 - `open-eyes --version` and `open-eyes version` print the installed version.
+- `open-eyes do "<goal>"` lets a local model carry out a routine task in the agent
+  window, through any OpenAI-compatible endpoint set in `OPEN_EYES_MODEL_URL` (llama.cpp's
+  `llama-server`, Ollama). It prints the outcome (`done`, `not done`, `not sure` or
+  `stopped`), the actions it took and the page it ended on, so the main agent reads a few
+  lines instead of every snapshot. The model may only read, click, fill, select, press,
+  scroll and hover; policy, approvals and the audit log apply to each action, and a
+  denial or the user taking control ends the run. `--steps` and `--timeout` limit it.
+- `open-eyes model install` downloads the recommended local model for `do`,
+  [open-eyes navigator v1](https://huggingface.co/SchlaftGut/open-eyes-navigator) (2.2 GB):
+  Gemma 4 E2B fine-tuned on open-eyes sessions, which passed 91.1% of held-out tasks with no
+  false success claims, against 84.4% and 3 for Gemma 4 E2B itself. It also downloads
+  llama.cpp's server, after showing what it downloads and asking. Downloads
+  resume and are verified against pinned checksums. `do` then starts the server on the
+  dedicated GPU for each run. `open-eyes model` shows what is installed and whether a newer
+  model is available; `open-eyes model remove` deletes it. `OPEN_EYES_MODEL_URL` still
+  takes precedence.
+- `open-eyes trace start "<goal>"` records each following command and what it printed,
+  until `open-eyes trace stop [done|failed] [answer]`, as examples for training the local
+  model. Recording is opt-in, stays on this computer, and never stores text typed into
+  password fields or uploaded files' contents. `trace`, `trace show` and `trace delete`
+  review and remove traces; `trace export` writes chat/tool-call JSONL in the exact format
+  of `open-eyes do`, leaving out traces it could not learn from and saying why.
+
+### Changed
+
+
+- `fill` on a native dropdown chooses the option with that text, as `select` does, and
+  `fill` on anything that cannot take text (a link, button, checkbox, radio, file input or
+  read-only field) fails with what to use instead (`click`, `upload`). Before, it reported
+  "filled" although nothing was typed, and agents went on as if it had worked.
+
+- `open-eyes do` asks the model for a tool call on every reply (`tool_choice: "required"`),
+  gives it room to think before acting (2048 reply tokens instead of 400), reminds it once
+  when it answers in plain text or sends a call that cannot be read, and still reports the
+  actions taken when the model server fails. On 15 held-out tasks, Gemma 4 E2B went from 6
+  of 9 (old set) to 13 of 15, with one false success claim.
+
+- Clicking an option of a native dropdown chooses it, as `select` does, and reports
+  `chose "<option>" in <dropdown>`. Before, the click did nothing, since Chromium shows
+  those options in a popup outside the page. Options of a list that shows them all
+  (`multiple` or `size` above 1) still get a real click.
+
+## [0.4.2] - 2026-10-25
+
+### Security
+
+- A web page could approve open-eyes' risky-action confirmations without the user, by
+  writing the answer into the overlay's state, which lived in the page's own JavaScript
+  (GHSA-hc9g-g6x3-gpc6). The overlay now runs in an isolated world the page cannot reach,
+  its shadow root is closed, and who is in control is also kept in open-eyes' own state.
+  Upgrade if you let an agent use sites you do not fully trust.
 
 ## [0.4.1] - 2026-10-24
 

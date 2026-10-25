@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
+import { createInterface } from "node:readline/promises";
 import {
   browserVersion,
   closeAgentWindow,
@@ -10,13 +12,17 @@ import {
   findEverydayBrowser,
   launch,
 } from "./browser.ts";
+import { need, takeFlag, takeNumber, takeOption, takeTarget, takeTimeout } from "./args.ts";
 import { readAudit } from "./audit.ts";
 import { runDaemon } from "./daemon.ts";
-import type { Page, Target } from "./page.ts";
+import { formatSize, installedNavigator, installNavigator, MANIFEST, modelsDir, navigatorStatus, serverFor, startNavigator } from "./models.ts";
+import { modelEndpoint, navigate, NO_MODEL } from "./navigator.ts";
+import type { Page } from "./page.ts";
 import { CONFIRM_MODES, loadPolicy, normalizeSite, policyFile, savePolicy, type ConfirmMode } from "./policy.ts";
 import { runScript } from "./run.ts";
 import { formatUsage, readUsage, recordUsage, resetUsage, usageSummary } from "./usage.ts";
 import { loadState, profileDir, saveState, socketPath } from "./state.ts";
+import { activeTrace, deleteTraces, formatCommand, listTraces, readTrace, recordStep, startTrace, stopTrace, toExample, tracesDir } from "./trace.ts";
 
 const HELP = `open-eyes: give your AI agent eyes on a real browser, while you watch.
 
@@ -74,6 +80,26 @@ Scripts (open-eyes run): \`page\` methods, all async
   eval(js)  screenshot(path?, ref?)  handoff(message?, ms?)  url()
   Refs come from snapshot(): take one before clicking and after the page changes.
 
+Local model (optional)
+  do "<goal>"            Let a local model carry out the goal in the agent window
+                         and print what it did and whether it succeeded. It may
+                         read and act (click, fill, select...), never eval, upload
+                         or open other pages; the safety rules below still apply
+    --steps <n>          Most commands it may run (default 15)
+    --timeout <seconds>  Give up after this long (default 180)
+  model                  Show the downloaded model and whether a newer one exists
+  model install [--yes]  Download the recommended model and llama.cpp's server
+                         (asks first; --yes skips the question)
+  model remove           Delete them
+
+Training traces (opt-in, stay on this computer)
+  trace start "<goal>"   Record each following command and what it printed, as an
+                         example for training the local model; never text typed
+                         into password fields or uploaded files' contents
+  trace stop [done|failed] [answer]  Stop recording, with the outcome
+  trace [list]           List traces          trace show <id>   Review one
+  trace delete <id...>|--all          trace export [file]   JSONL for fine-tuning
+
 Working with the user
   handoff <message>      Ask the user to take over (log in, solve a captcha...)
                          and wait until they hand control back
@@ -101,7 +127,13 @@ Environment
   OPEN_EYES_SLOWMO       Pause in ms after showing each action (default 400)
   OPEN_EYES_SNAPSHOT_LIMIT  Default snapshot page size in lines (default 400)
   OPEN_EYES_OBSERVE      Set to 0 to stop actions from reporting page changes
-  OPEN_EYES_CONFIRM      Override the confirm mode (risky, always, never)`;
+  OPEN_EYES_CONFIRM      Override the confirm mode (risky, always, never)
+  OPEN_EYES_MODEL_URL    OpenAI-compatible endpoint for "do", e.g. llama-server
+                         at http://127.0.0.1:8080/v1 or Ollama at :11434/v1
+  OPEN_EYES_MODEL        Model name to ask for (needed by Ollama)
+  OPEN_EYES_MODEL_KEY    API key, if the endpoint needs one
+  OPEN_EYES_MODEL_DEVICE GPU for the downloaded model, as llama-server
+                         --list-devices names it (default: the dedicated one)`;
 
 function format(value: unknown): string {
   if (value === undefined) return "";
@@ -113,62 +145,10 @@ function print(value: unknown): void {
   if (text) console.log(text);
 }
 
-/** Removes `--name <value>` from args and returns the value. */
-function takeOption(args: string[], name: string): string | undefined {
-  const i = args.indexOf(name);
-  if (i === -1) return undefined;
-  const value = args[i + 1];
-  if (value === undefined) throw new Error(`${name} needs a value`);
-  args.splice(i, 2);
-  return value;
-}
-
-/**
- * Removes the element to act on from args: `--name <text> [--role <role>]`, or else the
- * first argument as a ref. Returns it with a label for the usage log.
- */
-function takeTarget(args: string[], usage: string): [Target, string] {
-  const name = takeOption(args, "--name");
-  const role = takeOption(args, "--role");
-  if (name === undefined) {
-    if (role !== undefined) throw new Error("--role needs --name");
-    const ref = need(args.shift(), usage);
-    return [ref, ref];
-  }
-  return [{ name, role }, `${role ? `${role} ` : ""}"${name}"`];
-}
-
-/** Removes `--name <number>` from args and returns the number, at least `min`. */
-function takeNumber(args: string[], name: string, min: number): number | undefined {
-  const value = takeOption(args, name);
-  if (value === undefined) return undefined;
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < min) throw new Error(`${name} needs a whole number of at least ${min}`);
-  return number;
-}
-
-/** Removes `--name` from args and returns whether it was there. */
-function takeFlag(args: string[], name: string): boolean {
-  const i = args.indexOf(name);
-  if (i !== -1) args.splice(i, 1);
-  return i !== -1;
-}
-
-/** Removes `--timeout <seconds>` from args and returns it in milliseconds. */
-function takeTimeout(args: string[]): number | undefined {
-  const seconds = takeNumber(args, "--timeout", 1);
-  return seconds === undefined ? undefined : seconds * 1000;
-}
-
 /** The version in package.json, which is one folder up from both src/cli.ts and the built dist/cli.js. */
 function packageVersion(): string {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
   return pkg.version;
-}
-
-function need(arg: string | undefined, usage: string): string {
-  if (arg === undefined) throw new Error(`usage: open-eyes ${usage}`);
-  return arg;
 }
 
 const CONNECT_HELP = `no browser with remote debugging enabled was found.
@@ -193,13 +173,25 @@ async function withPage(label: string, action: (page: Page) => Promise<unknown>)
     throw error;
   } finally {
     const entry = recordUsage(label, output, Date.now() - started);
+    const trace = activeTrace();
+    if (trace) {
+      // Uploaded files are recorded by name, and text typed into a password field not at all.
+      const secret = connection?.page.typedSecret ?? false;
+      const words = commandWords[0] === "upload" ? commandWords.map((word) => (/[\\/]/.test(word) ? basename(word) : word)) : commandWords;
+      const command = secret ? `${words[0]} (typed into a password field, not stored)` : formatCommand(words);
+      recordStep(trace, { command, output: secret ? "" : output, ms: Date.now() - started, ...(secret ? { secret } : {}) });
+    }
     if (state.showTokens && connection) await connection.page.showUsage(usageSummary(entry)).catch(() => {});
     connection?.cdp.close();
     saveState(state); // Also when connecting failed: it may have learned the daemon is gone.
   }
 }
 
+/** The command as typed, for traces; args are consumed while parsing. */
+let commandWords: string[] = [];
+
 async function main([command, ...args]: string[]): Promise<void> {
+  commandWords = [command, ...args];
   switch (command) {
     case "launch": {
       const state = loadState();
@@ -384,6 +376,110 @@ async function main([command, ...args]: string[]): Promise<void> {
       const file = need(args[0], "run <file|->");
       const source = readFileSync(file === "-" ? 0 : file, "utf8");
       return withPage(`run ${file}`, (page) => runScript(page, source));
+    }
+    case "do": {
+      const steps = takeNumber(args, "--steps", 1);
+      const timeout = takeTimeout(args);
+      const goal = need(args.join(" ").trim() || undefined, 'do "<goal>" [--steps <n>] [--timeout <seconds>]');
+      // Your own endpoint first; otherwise the downloaded model, started for this run.
+      let endpoint = modelEndpoint();
+      let stop = () => {};
+      if (!endpoint) {
+        const installed = installedNavigator();
+        if (!installed) throw new Error(NO_MODEL);
+        console.error("starting the local model...");
+        ({ endpoint, stop } = await startNavigator(installed));
+      }
+      try {
+        return await withPage("do", (page) => navigate(page, goal, endpoint, { steps, timeout }));
+      } finally {
+        stop();
+      }
+    }
+    case "model": {
+      const action = args[0];
+      if (action === undefined || action === "status") {
+        const own = modelEndpoint();
+        return print(`${own ? `endpoint: ${own.url} (OPEN_EYES_MODEL_URL), used by "do" first\n` : ""}${navigatorStatus(MANIFEST)}`);
+      }
+      if (action === "remove") {
+        rmSync(modelsDir, { recursive: true, force: true });
+        return print(`deleted ${modelsDir}`);
+      }
+      if (action !== "install") throw new Error(`unknown model action "${action}"; see "open-eyes help"`);
+      const server = serverFor(MANIFEST);
+      const { model } = MANIFEST;
+      console.error(
+        [
+          "open-eyes will download:",
+          `  ${model.name}, ${formatSize(model.size)}, license: ${model.license}`,
+          ...(server ? [`  llama.cpp server (${server.id}), ${formatSize(server.size)}`] : []),
+          `into ${modelsDir}`,
+        ].join("\n"),
+      );
+      if (!takeFlag(args, "--yes")) {
+        // An agent cannot answer this; only the user should agree to a download this big.
+        if (!process.stdin.isTTY) throw new Error('run "open-eyes model install --yes" yourself to confirm the download');
+        const prompt = createInterface({ input: process.stdin, output: process.stderr });
+        const answer = await prompt.question("Download? [y/N] ");
+        prompt.close();
+        if (!/^y(es)?$/i.test(answer.trim())) return print("nothing downloaded");
+      }
+      let shown = "";
+      const installed = await installNavigator(MANIFEST, modelsDir, (what, done, total) => {
+        const line = `${what}: ${Math.floor((done / total) * 100)}%`;
+        if (line !== shown && process.stderr.isTTY) process.stderr.write(`\r${(shown = line)}`);
+      });
+      if (shown) process.stderr.write("\n");
+      return print(`installed ${installed.model}; "open-eyes do" now uses it`);
+    }
+    case "trace": {
+      const [action, ...rest] = args;
+      if (action === "start") {
+        const id = startTrace(need(rest.join(" ").trim() || undefined, 'trace start "<goal>"'));
+        return print(
+          `recording trace ${id}: each open-eyes command and what it printed, never text typed into\npassword fields or the contents of uploaded files. It stays in ${tracesDir}.\nEnd it with "open-eyes trace stop [done|failed] [answer]".`,
+        );
+      }
+      if (action === "stop") {
+        const outcome = rest[0] === "failed" ? "failed" : "done";
+        if (rest[0] === "done" || rest[0] === "failed") rest.shift();
+        const trace = stopTrace(outcome, rest.join(" ").trim());
+        return print(`stopped trace ${trace.id}: ${trace.outcome}, ${trace.steps.length} commands`);
+      }
+      if (action === "show") {
+        const trace = readTrace(need(rest[0], "trace show <id>"));
+        const lines = [`goal: ${trace.goal}`, `outcome: ${trace.outcome ?? "recording"}${trace.answer ? ` (${trace.answer})` : ""}`];
+        for (const step of trace.steps) lines.push("", `$ open-eyes ${step.command}`, ...(step.output ? [step.output] : []));
+        return print(lines.join("\n"));
+      }
+      if (action === "delete") {
+        const count = deleteTraces(rest[0] === "--all" ? "all" : rest.length ? rest : [need(undefined, "trace delete <id...>|--all")]);
+        return print(`deleted ${count} trace${count === 1 ? "" : "s"}`);
+      }
+      if (action === "export") {
+        const examples: string[] = [];
+        const skipped: string[] = [];
+        for (const trace of listTraces()) {
+          const example = toExample(trace);
+          if ("skipped" in example) skipped.push(`  ${trace.id}: ${example.skipped}`);
+          else examples.push(JSON.stringify(example));
+        }
+        const jsonl = examples.map((line) => `${line}\n`).join("");
+        if (rest[0]) writeFileSync(rest[0], jsonl, { mode: 0o600 });
+        else process.stdout.write(jsonl);
+        console.error([`exported ${examples.length} traces${rest[0] ? ` to ${rest[0]}` : ""}`, ...(skipped.length ? [`skipped ${skipped.length}:`, ...skipped] : [])].join("\n"));
+        return;
+      }
+      if (action !== undefined && action !== "list") throw new Error(`unknown trace action "${action}"; see "open-eyes help"`);
+      const traces = listTraces();
+      const recording = activeTrace();
+      if (!traces.length) return print('no traces; start one with open-eyes trace start "<goal>"');
+      return print(
+        traces
+          .map((t) => `${t.id}  ${(t.id === recording ? "recording" : (t.outcome ?? "unfinished")).padEnd(10)} ${String(t.steps.length).padStart(3)} commands  ${t.goal}`)
+          .join("\n"),
+      );
     }
     case "handoff": {
       const timeout = takeTimeout(args);
