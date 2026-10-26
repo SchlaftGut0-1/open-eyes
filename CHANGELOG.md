@@ -32,6 +32,8 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Fixed
 
+- `open` takes a file path (`/home/me/page.html`, `./page.html`, `~/page.html`) and opens it
+  as a `file://` URL. Before, it became `https:///home/me/page.html` and failed.
 - `click` on a disabled control (`disabled`, inside a disabled fieldset, or
   `aria-disabled="true"`) fails and says it is disabled. Before, it reported "clicked"
   although nothing happened, and agents went on as if it had worked.

@@ -874,6 +874,13 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.equal(await cli("eval", "result.textContent"), "reset");
   });
 
+  test("open takes a file path as well as a URL", async () => {
+    const path = join(import.meta.dirname, "fixtures", "second.html");
+    assert.equal(await cli("open", path), fixture("second.html"));
+    assert.equal(await cli("open", "./test/fixtures/second.html"), fixture("second.html")); // From the working directory.
+    assert.match(await cliError("open", join(import.meta.dirname, "fixtures", "missing.html")), /no such file: .*missing\.html/);
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");
