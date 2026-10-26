@@ -213,6 +213,8 @@ const BLOCKED_BY_DIALOG =
 export class Page {
   /** Set once text is typed into a password field, so traces can leave it out. */
   typedSecret = false;
+  /** Tabs the agent's window opened during the current action. */
+  #opened: string[] = [];
   #cdp: CDP;
   #sessionId: string;
   #state: State;
@@ -235,6 +237,9 @@ export class Page {
     cdp.on("Target.detachedFromTarget", ({ sessionId: session }) => {
       for (const [frame, info] of this.#frames) if (info.session === session) this.#frames.delete(frame);
     });
+    cdp.on("Target.targetCreated", ({ targetInfo }) => {
+      if (targetInfo.type === "page" && targetInfo.openerId === this.#state.targetId) this.#opened.push(targetInfo.targetId);
+    });
   }
 
   async init(): Promise<void> {
@@ -255,6 +260,7 @@ export class Page {
     } finally {
       clearTimeout(timer);
     }
+    await this.#cdp.send("Target.setDiscoverTargets", { discover: true });
   }
 
   /** While a dialog is open the page cannot do anything else: the agent must answer it. */
@@ -273,6 +279,28 @@ export class Page {
       }, 100);
     });
     return { opened, stop: () => clearInterval(timer) };
+  }
+
+  /**
+   * After an action that opened a tab from the agent's window (a link with target=_blank,
+   * window.open), the agent follows it: that tab becomes the agent window.
+   */
+  async #followOpenedTab(): Promise<string> {
+    const targetId = this.#opened.at(-1);
+    this.#opened = [];
+    if (!targetId) return "";
+    await this.#overlay({ type: "hide" }); // The old tab is no longer the agent's.
+    const { sessionId } = await this.#cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
+    this.#sessionId = sessionId;
+    this.#frames.clear();
+    this.#autoAttached.clear();
+    Object.assign(this.#state, { targetId, refs: {}, refsLoaderId: undefined });
+    await this.init();
+    await this.#settle(10_000);
+    await this.#leaveIfBlocked();
+    const url = await this.url();
+    await this.#announce({ label: `on ${url}` }, false);
+    return `\nit opened a new tab, which is now the agent window: ${url}; run "open-eyes snapshot" to see it`;
   }
 
   goto(url: string): Promise<string> {
@@ -1024,13 +1052,17 @@ export class Page {
     this.#refuseIfDialog();
     const entry: AuditEntry = { action, target, outcome: "ok" };
     entry.url = await this.url().catch(() => undefined);
+    this.#opened = [];
     // An action that opens a dialog does not finish until it is answered: report it instead.
     const watch = this.#watchForDialog();
     try {
       const running = run(entry);
       running.catch(() => {}); // If a dialog wins, the rest of the action is dropped.
       const outcome = await Promise.race([running.then((result) => ({ result })), watch.opened.then((dialog) => ({ dialog }))]);
-      if ("result" in outcome) return outcome.result;
+      if ("result" in outcome) {
+        const { result } = outcome;
+        return typeof result === "string" ? (`${result}${await this.#followOpenedTab()}` as T) : result;
+      }
       entry.detail = `the page opened a ${outcome.dialog.type}`;
       return `${action} ${entry.target}: ${describeDialog(outcome.dialog)}` as T;
     } catch (error) {
