@@ -48,6 +48,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Fixed
 
+- The token counter in the agent window (`usage show`) keeps running totals instead of
+  rereading the whole usage log on every command, which added ~0.2 s per command after a
+  year of heavy use (29 MB).
 - When the agent moved to another tab, the old dialog watcher could delete the new one's
   socket as it exited, so `open-eyes dialog accept` failed with "the dialog watcher is not
   answering". A watcher now removes the socket only while it is still the current one.

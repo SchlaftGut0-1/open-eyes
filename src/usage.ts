@@ -1,8 +1,12 @@
-import { appendFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stateDir } from "./state.ts";
 
 export const usageFile = join(stateDir, "usage.log");
+/** Running totals, so the on-screen counter never rereads the whole log. */
+const totalsFile = join(stateDir, "usage-totals.json");
+
+type Totals = { tokens: number; actions: number };
 
 /** Measured on open-eyes outputs with Anthropic's tokenizer: 3.5 to 4.3 characters per token. */
 const CHARS_PER_TOKEN = 3.8;
@@ -17,7 +21,10 @@ export function recordUsage(command: string, output: string, ms: number): UsageE
   const entry: UsageEntry = { time: new Date().toISOString(), command, tokens: estimateTokens(output), ms };
   try {
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+    const totals = readTotals(); // Before appending: from an older log, it counts that log once.
     appendFileSync(usageFile, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+    // shortcut: two commands at once can each miss the other's tokens; the counter is an estimate anyway.
+    writeFileSync(totalsFile, JSON.stringify({ tokens: totals.tokens + entry.tokens, actions: totals.actions + 1 }), { mode: 0o600 });
   } catch {
     // Measuring must never break the command itself.
   }
@@ -43,14 +50,26 @@ export function readUsage(): UsageEntry[] {
 
 export function resetUsage(): void {
   rmSync(usageFile, { force: true });
+  rmSync(totalsFile, { force: true });
+}
+
+function readTotals(): Totals {
+  try {
+    const { tokens, actions } = JSON.parse(readFileSync(totalsFile, "utf8")) as Totals;
+    if (Number.isInteger(tokens) && Number.isInteger(actions)) return { tokens, actions };
+  } catch {
+    // Missing (a log from before this file existed) or damaged: count the log once.
+  }
+  const entries = readUsage();
+  return { tokens: entries.reduce((sum, e) => sum + e.tokens, 0), actions: entries.length };
 }
 
 const n = (value: number) => value.toLocaleString("en-US");
 
 /** One line for the on-screen counter. */
-export function usageSummary(last: UsageEntry, entries = readUsage()): string {
-  const total = entries.reduce((sum, e) => sum + e.tokens, 0);
-  return `last ${n(last.tokens)} tok · total ${n(total)} tok · ${entries.length} actions`;
+export function usageSummary(last: UsageEntry): string {
+  const { tokens, actions } = readTotals();
+  return `last ${n(last.tokens)} tok · total ${n(tokens)} tok · ${actions} actions`;
 }
 
 /** The last `limit` actions with their cost, and the totals since the last reset. */
