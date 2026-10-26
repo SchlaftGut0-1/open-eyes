@@ -142,9 +142,12 @@ export async function runWatcher(endpoint: string, targetId: string): Promise<vo
 
   const shutdown = () => {
     server.close();
-    if (process.platform !== "win32") rmSync(dialogSocketPath, { force: true });
     if (readJson<Dialog>(dialogFile)?.targetId === targetId) rmSync(dialogFile, { force: true });
-    if (readJson<{ pid: number }>(watcherFile)?.pid === process.pid) rmSync(watcherFile, { force: true });
+    // The socket path is shared: once a newer watcher took over, it is that one's.
+    if (readJson<{ pid: number }>(watcherFile)?.pid === process.pid) {
+      rmSync(watcherFile, { force: true });
+      if (process.platform !== "win32") rmSync(dialogSocketPath, { force: true });
+    }
     process.exit(0);
   };
   process.on("SIGTERM", shutdown);
