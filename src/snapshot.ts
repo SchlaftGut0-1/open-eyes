@@ -61,6 +61,11 @@ const SKIPPED = new Set(["InlineTextBox", "LineBreak"]);
 const DROPPED = new Set(["ListMarker", "separator"]);
 const MAX_TEXT = 120;
 
+const property = (node: AXNode, name: string) => node.properties?.find((p) => p.name === name)?.value.value;
+
+/** The root of a contenteditable region: editable and focusable, unlike the text inside it. */
+const isEditorRoot = (node: AXNode) => property(node, "editable") !== undefined && property(node, "focusable") === true;
+
 /** Whether Chromium built the name from the node's own content (as for a table cell). */
 const nameFromContents = (node: AXNode) =>
   node.name?.sources?.find((s) => !s.superseded && (s.value !== undefined || s.attributeValue !== undefined))?.type ===
@@ -167,7 +172,10 @@ export function formatSnapshot(
       return;
     }
 
-    const interactive = INTERACTIVE.has(role) && node.backendDOMNodeId !== undefined;
+    // Also actionable: a rich-text editor (fill types into it) and a named image (hover may
+    // reveal what it hides).
+    const actionable = INTERACTIVE.has(role) || isEditorRoot(node) || (role === "image" && name !== "");
+    const interactive = actionable && node.backendDOMNodeId !== undefined;
     if (!interactive && !name && TRANSPARENT.has(role)) return visitChildren(depth, parentName);
     if (role === "image" && !name && !interactive) return; // Decorative.
 

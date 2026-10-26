@@ -36,6 +36,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Added
 
+- Rich-text editors (`contenteditable`: TinyMCE, Gmail, Notion, comment boxes) and named
+  images get `@N` refs, so `fill` types into editors and `hover` reaches images that reveal
+  something (a profile card, a caption). On four benchmark pages snapshots grew 0–3%.
 - `click --right` right-clicks (context menus) and `click --double` double-clicks (editing a
   cell, opening a file); in scripts, `page.click("@N", "right")` and `"double"`.
 - `press` sends key combinations: `press Control+a`, `press Shift+Tab`,
