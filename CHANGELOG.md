@@ -6,6 +6,11 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `scroll` moves the page in small steps that speed up and slow down, as a person does,
+  instead of one jump; `scroll @N` scrolls the element into view smoothly.
+
 ### Fixed
 
 - On a scaled screen (125%, 200%), the default snapshot showed the wrong part of the page:
