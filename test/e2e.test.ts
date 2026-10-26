@@ -823,6 +823,42 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     }
   });
 
+  test("links with risky words ask like buttons", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    await cli("open", fixture("links.html"));
+    const snapshot = await cli("snapshot");
+    assert.match(await cliWith(ask, "click", refOf(snapshot, "link About")), /the page changed to .*second\.html/);
+    await cli("open", fixture("links.html"));
+    const human = await humanAt();
+    try {
+      const buying = cliErrorWith(ask, "click", refOf(await cli("snapshot"), "link Buy now"));
+      await human.click("deny");
+      assert.match(await buying, /the user denied: click link "Buy now"/);
+    } finally {
+      human.close();
+    }
+  });
+
+  test("clicking a form's submit button asks as Enter does", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    for (const button of ["button Go", "button Look up"]) {
+      await cli("open", fixture("site-search.html"));
+      assert.match(await cliWith(ask, "click", refOf(await cli("snapshot"), button)), /the page changed to .*second\.html/);
+    }
+    // "Log in" has none of the risky words; its form has a password field.
+    await cli("open", fixture("site-search.html"));
+    const snapshot = await cli("snapshot");
+    await cli("fill", refOf(snapshot, "textbox User"), "ana");
+    const human = await humanAt();
+    try {
+      const clicking = cliErrorWith(ask, "click", refOf(snapshot, "button Log in"));
+      await human.click("deny");
+      assert.match(await clicking, /the user denied: click button "Log in", which submits a form/);
+    } finally {
+      human.close();
+    }
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");
