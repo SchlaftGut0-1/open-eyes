@@ -23,6 +23,13 @@ All notable changes to open-eyes are documented here. The format follows
 - When an action opens a tab from the agent window (a link with `target=_blank`,
   `window.open`), the agent follows it: that tab becomes the agent window and the action
   says so. Before, the agent stayed on the old tab and could not reach the new one.
+- Dialogs no longer stop the agent. An action that opens an alert, confirm or prompt
+  returns at once and says what the page asked; the dialog stays open, as for a person,
+  until the agent answers it with `open-eyes dialog accept [text]` or
+  `open-eyes dialog dismiss` (`open-eyes dialog` shows it). While it is open, other
+  commands say so instead of hanging. Before, the action waited until a person closed the
+  dialog, and every command after it hung. A background process keeps the connection
+  that sees the window's dialogs, since only that connection can answer them.
 
 ## [0.5.0] - 2026-10-25
 
