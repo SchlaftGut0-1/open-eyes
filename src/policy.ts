@@ -109,5 +109,8 @@ const RISKY_WORDS =
  */
 export function isRiskyClick(label: string): boolean {
   const [role, ...name] = label.split(" ");
-  return ["button", "menuitem", "link"].includes(role) && RISKY_WORDS.test(name.join(" "));
+  return ["button", "menuitem", "link"].includes(role) && hasRiskyWords(name.join(" "));
 }
+
+/** Whether `text` speaks of spending, sending, deleting or publishing. */
+export const hasRiskyWords = (text: string): boolean => RISKY_WORDS.test(text);

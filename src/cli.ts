@@ -19,7 +19,7 @@ import { answerDialog, describeDialog, openDialog, runWatcher } from "./dialogs.
 import { formatSize, installedNavigator, installNavigator, MANIFEST, modelsDir, navigatorStatus, serverFor, startNavigator } from "./models.ts";
 import { modelEndpoint, navigate, NO_MODEL } from "./navigator.ts";
 import type { Page } from "./page.ts";
-import { CONFIRM_MODES, loadPolicy, normalizeSite, policyFile, savePolicy, type ConfirmMode } from "./policy.ts";
+import { CONFIRM_MODES, hasRiskyWords, loadPolicy, normalizeSite, PolicyError, policyFile, savePolicy, type ConfirmMode } from "./policy.ts";
 import { runScript } from "./run.ts";
 import { formatUsage, readUsage, recordUsage, resetUsage, usageSummary } from "./usage.ts";
 import { loadState, profileDir, saveState, socketPath } from "./state.ts";
@@ -343,6 +343,14 @@ async function main([command, ...args]: string[]): Promise<void> {
       const text = args.length ? args.join(" ") : undefined;
       if (action === "dismiss" && text !== undefined) throw new Error("dismiss takes no text; use accept <text> to answer a prompt");
       return withDialog(`dialog ${action}`, async () => {
+        // The overlay cannot ask while a dialog is open, but the user can answer it on screen.
+        const open = openDialog(loadState().targetId);
+        const { confirm } = loadPolicy();
+        if (action === "accept" && open && open.type !== "alert" && (confirm === "always" || (confirm === "risky" && hasRiskyWords(open.message)))) {
+          const reason = `the ${open.type} ${JSON.stringify(open.message)} needs the user's own answer: ask them to answer it in the agent window, then take a new snapshot`;
+          audit({ action: "dialog", target: `accept ${open.type} ${JSON.stringify(open.message)}`, outcome: "denied", detail: reason });
+          throw new PolicyError("denied", reason);
+        }
         const dialog = await answerDialog(action === "accept", text);
         audit({ action: "dialog", target: `${action} ${dialog.type} ${JSON.stringify(dialog.message)}`, outcome: "ok" });
         const verb = action === "dismiss" ? "dismissed" : dialog.type === "alert" ? "closed" : "accepted";
