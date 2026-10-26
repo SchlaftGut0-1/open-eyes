@@ -6,6 +6,12 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- The audit log says which actions the user allowed on screen: `open-eyes log` shows
+  `(the user allowed: click button "Send")`. Before, an approved risky action looked the
+  same as one that never asked.
+
 ### Changed
 
 - The overlay shows only the agent's pointer while it acts, no longer a purple box around

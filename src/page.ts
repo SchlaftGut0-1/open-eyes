@@ -213,6 +213,8 @@ const BLOCKED_BY_DIALOG =
 export class Page {
   /** Set once text is typed into a password field, so traces can leave it out. */
   typedSecret = false;
+  /** What the user allowed during the current action, for the audit log. */
+  #allowed: string[] = [];
   /** Tabs the agent's window opened during the current action. */
   #opened: string[] = [];
   #cdp: CDP;
@@ -1051,6 +1053,7 @@ export class Page {
   async #audited<T>(action: string, target: string, run: (entry: AuditEntry) => Promise<T>): Promise<T> {
     this.#refuseIfDialog();
     const entry: AuditEntry = { action, target, outcome: "ok" };
+    this.#allowed = [];
     entry.url = await this.url().catch(() => undefined);
     this.#opened = [];
     // An action that opens a dialog does not finish until it is answered: report it instead.
@@ -1071,6 +1074,7 @@ export class Page {
       throw error;
     } finally {
       watch.stop();
+      if (this.#allowed.length) entry.allowed = this.#allowed;
       audit(entry);
     }
   }
@@ -1101,7 +1105,10 @@ export class Page {
       // Asked again every round, so the question comes back if the page reloads.
       await this.#overlay({ type: "confirm", id, message: action });
       const decision = await this.#evaluateInOverlayWorld(decisionExpression(id)).catch(() => null);
-      if (decision === "allow") return;
+      if (decision === "allow") {
+        this.#allowed.push(action);
+        return;
+      }
       if (decision === "deny") throw new PolicyError("denied", `the user denied: ${action}`);
       await sleep(300);
     }
