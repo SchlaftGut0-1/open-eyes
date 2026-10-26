@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import { audit, type AuditEntry } from "./audit.ts";
 import { describeDialog, openDialog, type Dialog } from "./dialogs.ts";
 import type { CDP } from "./cdp.ts";
@@ -228,6 +229,19 @@ const BLOCKED_BY_DIALOG =
   "open-eyes cannot answer. Ask the user to answer it in the agent window, or run " +
   '"open-eyes close" to close the window';
 
+/**
+ * What `open` should load for what the agent typed: a URL as is, a file path (absolute,
+ * ./ ../ ~/, or a Windows drive) as a file:// URL, and anything else as https://.
+ */
+export function toUrl(input: string, cwd = process.cwd()): string {
+  const drive = /^[a-z]:[\\/]/i.test(input);
+  const path = drive || /^(\/(?!\/)|\.{1,2}[\\/]|~[\\/])/.test(input);
+  if (!path) return /^[a-z][a-z0-9+.-]*:/i.test(input) ? input : input.startsWith("//") ? `https:${input}` : `https://${input}`;
+  const file = input.startsWith("~") ? join(homedir(), input.slice(2)) : resolve(cwd, input);
+  if (!existsSync(file)) throw new Error(`no such file: ${file}`);
+  return pathToFileURL(file).href;
+}
+
 /** The agent's window. Every action is drawn on the page before it happens. */
 export class Page {
   /** Set once text is typed into a password field, so traces can leave it out. */
@@ -325,7 +339,12 @@ export class Page {
   }
 
   goto(url: string): Promise<string> {
-    const target = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`;
+    let target: string;
+    try {
+      target = toUrl(url);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     return this.#audited("open", target, async () => {
       const reason = blockedReason(this.#policy, target);
       if (reason) throw new PolicyError("blocked", reason);
