@@ -1,6 +1,5 @@
-import type { Box } from "./page.ts";
 
-export type OverlayAction = { label: string; x?: number; y?: number; box?: Box };
+export type OverlayAction = { label: string; x?: number; y?: number };
 
 /** Who drives the agent window. null: unknown, e.g. a navigation wiped the page state. */
 export type Owner = "agent" | "user" | null;
@@ -108,9 +107,6 @@ const OVERLAY = String.raw`(cmd, remembered) => {
     const pill = "border-radius:999px;color:#fff;box-shadow:0 4px 16px rgb(0 0 0 / .25);" + font;
 
     part(document.createElement("div"), "frame", "position:fixed;inset:0;");
-    part(document.createElement("div"), "box",
-      "position:fixed;opacity:0;border:2px solid " + AGENT + ";border-radius:4px;" +
-      "background:rgb(124 92 255 / .12);transition:all .25s ease;");
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("width", "24");
@@ -194,7 +190,6 @@ const OVERLAY = String.raw`(cmd, remembered) => {
     if (asking) get("question").textContent = "\u26A0\uFE0F The agent wants to " + state.confirm.message + ". Allow it?";
     get("message").textContent = state.message || "Do what you need, then hand control back to the agent.";
     if (user) {
-      get("box").style.opacity = "0";
       get("cursor").style.opacity = "0";
     }
   }
@@ -222,15 +217,6 @@ const OVERLAY = String.raw`(cmd, remembered) => {
       if (state.owner === "user") break;
       state.label = cmd.label;
       get("take").style.pointerEvents = cmd.busy ? "none" : "auto";
-      const box = get("box");
-      if (cmd.box) {
-        Object.assign(box.style, {
-          left: cmd.box.x - 3 + "px", top: cmd.box.y - 3 + "px",
-          width: cmd.box.width + 6 + "px", height: cmd.box.height + 6 + "px", opacity: "1",
-        });
-      } else {
-        box.style.opacity = "0";
-      }
       if (cmd.x !== undefined) {
         const cursor = get("cursor");
         cursor.style.opacity = "1";
