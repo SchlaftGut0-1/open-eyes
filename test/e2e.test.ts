@@ -371,6 +371,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
 
   test("the audit log records actions and outcomes, never typed text", async () => {
     await cli("open", `${fixture("form.html")}?phone=0991234567&token=hunter3#code=42`);
+    await cli("eval", "document.getElementById('pw').value = 'hunter4-secret', 1");
     const log = await cli("log", "--limit", "50");
     assert.match(log, /OK +open +file:\/\/\S*form\.html +on/, "the page is logged without its query");
     assert.doesNotMatch(log, /0991234567|hunter3|code=42/);
@@ -379,6 +380,8 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(log, /BLOCKED +open +https:\/\/www\.example\.com\//);
     assert.match(log, /fill +textbox "Password" \(14 characters\)/);
     assert.doesNotMatch(log, /hunter2-secret/);
+    assert.match(log, /OK +eval +\(57 characters\)/);
+    assert.doesNotMatch(log, /hunter4/);
   });
 
   test("status never opens an agent window", async () => {

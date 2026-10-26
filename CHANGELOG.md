@@ -8,6 +8,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Security
 
+- The audit log records `eval` by its length (`eval (57 characters)`), as it does `fill`.
+  Before, it kept the first 200 characters of the code, so an `eval` that set a password
+  field put the password in the log.
 - `open-eyes dialog accept` no longer accepts a risky confirm or prompt for the user: under
   `confirm risky`, one whose text has a risky word ("Delete this repository?"), and under
   `confirm always`, any. It stays open and the user answers it in the window. Before, a
