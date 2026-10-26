@@ -99,8 +99,11 @@ export function blockedReason(policy: Policy, url: string): string | undefined {
 const RISKY_WORDS =
   /\b(buy|pay|purchase|checkout|check out|order|send|submit|delete|remove|transfer|confirm|publish|post|sign|subscribe|unsubscribe|donate|book|reserve|comprar|pagar|enviar|eliminar|borrar|transferir|confirmar|publicar|suscribir|reservar|firmar)\b/i;
 
-/** Whether clicking the element with this snapshot label (`button "Buy now"`) is risky. */
+/**
+ * Whether clicking the element with this snapshot label (`button "Buy now"`) is risky.
+ * Links count too: shops and apps style them as buttons ("Buy now", "Delete account").
+ */
 export function isRiskyClick(label: string): boolean {
   const [role, ...name] = label.split(" ");
-  return ["button", "menuitem"].includes(role) && RISKY_WORDS.test(name.join(" "));
+  return ["button", "menuitem", "link"].includes(role) && RISKY_WORDS.test(name.join(" "));
 }

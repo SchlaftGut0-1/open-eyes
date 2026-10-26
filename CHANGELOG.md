@@ -6,6 +6,12 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Links whose name has a risky word ("Buy now", "Delete account", "Comprar ahora") ask for
+  approval under `confirm risky`, as buttons do. Shops and apps often style links as
+  buttons; before, they were clicked without asking.
+
 ### Changed
 
 - The overlay shows only the agent's pointer while it acts, no longer a purple box around

@@ -817,6 +817,22 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     }
   });
 
+  test("links with risky words ask like buttons", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    await cli("open", fixture("links.html"));
+    const snapshot = await cli("snapshot");
+    assert.match(await cliWith(ask, "click", refOf(snapshot, "link About")), /the page changed to .*second\.html/);
+    await cli("open", fixture("links.html"));
+    const human = await humanAt();
+    try {
+      const buying = cliErrorWith(ask, "click", refOf(await cli("snapshot"), "link Buy now"));
+      await human.click("deny");
+      assert.match(await buying, /the user denied: click link "Buy now"/);
+    } finally {
+      human.close();
+    }
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");
