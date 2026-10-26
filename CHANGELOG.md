@@ -8,6 +8,10 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Security
 
+- Clicking a form's submit button asks for approval under `confirm risky` by the same rule
+  as pressing Enter: forms with a password field, and any form that is not a search. Before,
+  a click only asked when the button's name had a risky word, so a login form was sent
+  without asking when its button said "Log in" or "Continue".
 - Links whose name has a risky word ("Buy now", "Delete account", "Comprar ahora") ask for
   approval under `confirm risky`, as buttons do. Shops and apps often style links as
   buttons; before, they were clicked without asking.
