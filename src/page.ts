@@ -232,9 +232,9 @@ const CONFIRM_TIMEOUT_MS = 120_000;
 const BLOCKED_MS = 2000;
 
 const BLOCKED_BY_DIALOG =
-  "the page is not responding: it is probably showing a dialog (alert, confirm or prompt) that " +
-  "open-eyes cannot answer. Ask the user to answer it in the agent window, or run " +
-  '"open-eyes close" to close the window';
+  "the page is not responding: it is running a script that never ends, or showing a dialog " +
+  "(alert, confirm or prompt) that open-eyes cannot answer. Ask the user to answer it in the " +
+  'agent window, or run "open-eyes close" to close the window';
 
 /**
  * What `open` should load for what the agent typed: a URL as is, a file path (absolute,

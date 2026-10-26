@@ -81,10 +81,23 @@ export class CDP {
     });
   }
 
+  /** How long a request may go unanswered: a page stuck in a script never answers. */
+  static replyTimeoutMs = 60_000;
+
   send<T = any>(method: string, params: object = {}, sessionId?: string): Promise<T> {
     const id = this.#nextId++;
     this.#transport.send(JSON.stringify({ id, method, params, sessionId }));
-    return new Promise((resolve, reject) => this.#pending.set(id, { method, resolve, reject }));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#pending.delete(id);
+        reject(new Error(`the page stopped responding (no answer to ${method} in ${CDP.replyTimeoutMs / 1000}s); it may be running a script that never ends. Run "open-eyes close" to close the window`));
+      }, CDP.replyTimeoutMs);
+      const settle = <A>(done: (arg: A) => void) => (arg: A) => {
+        clearTimeout(timer);
+        done(arg);
+      };
+      this.#pending.set(id, { method, resolve: settle(resolve), reject: settle(reject) });
+    });
   }
 
   /** Calls `listener` for every `method` event until the returned function is called. */
