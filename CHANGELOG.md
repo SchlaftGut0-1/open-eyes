@@ -6,6 +6,12 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- The audit log keeps only the origin and path of URLs. Query strings and fragments often
+  carry what the user typed or secrets, such as a phone number or a sign-up token that a
+  site put in its redirect, and they were stored in full.
+
 ### Added
 
 - `open-eyes --version` and `open-eyes version` print the installed version.
@@ -37,6 +43,8 @@ All notable changes to open-eyes are documented here. The format follows
 - Pressing Enter in a search box no longer asks for approval: a form in a search landmark,
   or whose only field is a search box, is not a risky submit. Forms with a password field,
   or any other form, still ask.
+- `snapshot --find` and `--name` treat any whitespace as a space, so "Designed by" finds
+  Wikipedia's "Designed&nbsp;by" (a non-breaking space) the way an agent types it.
 
 
 - `fill` on a native dropdown chooses the option with that text, as `select` does, and

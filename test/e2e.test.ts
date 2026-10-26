@@ -362,7 +362,10 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
   });
 
   test("the audit log records actions and outcomes, never typed text", async () => {
+    await cli("open", `${fixture("form.html")}?phone=0991234567&token=hunter3#code=42`);
     const log = await cli("log", "--limit", "50");
+    assert.match(log, /OK +open +file:\/\/\S*form\.html +on/, "the page is logged without its query");
+    assert.doesNotMatch(log, /0991234567|hunter3|code=42/);
     assert.match(log, /OK +click +button "Send"/);
     assert.match(log, /DENIED +click +button "Send"/);
     assert.match(log, /BLOCKED +open +https:\/\/www\.example\.com\//);
