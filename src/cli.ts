@@ -13,8 +13,9 @@ import {
   launch,
 } from "./browser.ts";
 import { need, takeFlag, takeNumber, takeOption, takeTarget, takeTimeout } from "./args.ts";
-import { readAudit } from "./audit.ts";
+import { audit, readAudit } from "./audit.ts";
 import { runDaemon } from "./daemon.ts";
+import { answerDialog, describeDialog, openDialog, runWatcher } from "./dialogs.ts";
 import { formatSize, installedNavigator, installNavigator, MANIFEST, modelsDir, navigatorStatus, serverFor, startNavigator } from "./models.ts";
 import { modelEndpoint, navigate, NO_MODEL } from "./navigator.ts";
 import type { Page } from "./page.ts";
@@ -62,6 +63,10 @@ Page (works in the agent's own window)
                          the element with that accessible name, no snapshot needed
                          Downloads started by click or press are saved in
                          ~/Downloads/open-eyes (OPEN_EYES_DOWNLOADS) and reported
+  dialog                 Show the alert, confirm or prompt the page is showing; it
+                         stays open, and the page waits, until the agent answers:
+    accept [text]        OK (with the text, for a prompt)
+    dismiss              Cancel
   scroll [@N] [down|up] [pixels]
                          Scroll the page (default: down one screen); with @N, scroll
                          the list or panel holding it, or with no direction bring
@@ -159,6 +164,23 @@ address bar, turn on remote debugging there, and run "open-eyes connect" again.`
  * Runs a page command and records what it printed, which is what the agent reads and pays
  * for in tokens. `label` names the command in `open-eyes usage`; it never holds typed text.
  */
+/** Answers the open dialog; counted and traced like the page commands. */
+async function withDialog(label: string, answer: () => Promise<string>): Promise<void> {
+  const started = Date.now();
+  let output = "";
+  try {
+    output = await answer();
+    console.log(output);
+  } catch (error) {
+    output = `error: ${(error as Error).message}`;
+    throw error;
+  } finally {
+    recordUsage(label, output, Date.now() - started);
+    const trace = activeTrace();
+    if (trace) recordStep(trace, { command: formatCommand(commandWords), output, ms: Date.now() - started });
+  }
+}
+
 async function withPage(label: string, action: (page: Page) => Promise<unknown>): Promise<void> {
   const state = loadState();
   const started = Date.now();
@@ -308,6 +330,25 @@ async function main([command, ...args]: string[]): Promise<void> {
     }
     case "__daemon": // Started by "connect"; not for direct use.
       return runDaemon(need(args[0], "__daemon <ws-url>"), socketPath);
+    case "__dialogs": // Started by page commands; not for direct use.
+      return runWatcher(need(args[0], "__dialogs <endpoint> <target>"), need(args[1], "__dialogs <endpoint> <target>"));
+    case "dialog": {
+      const action = args.shift();
+      if (action === undefined) {
+        const dialog = openDialog(loadState().targetId);
+        return print(dialog ? describeDialog(dialog) : "no dialog is open");
+      }
+      if (action !== "accept" && action !== "dismiss") throw new Error("usage: open-eyes dialog [accept [text] | dismiss]");
+      const text = args.length ? args.join(" ") : undefined;
+      if (action === "dismiss" && text !== undefined) throw new Error("dismiss takes no text; use accept <text> to answer a prompt");
+      return withDialog(`dialog ${action}`, async () => {
+        const dialog = await answerDialog(action === "accept", text);
+        audit({ action: "dialog", target: `${action} ${dialog.type} ${JSON.stringify(dialog.message)}`, outcome: "ok" });
+        const verb = action === "dismiss" ? "dismissed" : dialog.type === "alert" ? "closed" : "accepted";
+        const typed = text !== undefined && dialog.type === "prompt" ? ` with ${JSON.stringify(text)}` : "";
+        return `${verb} the ${dialog.type} ${JSON.stringify(dialog.message)}${typed}; run "open-eyes snapshot" to see the page`;
+      });
+    }
     case "close": {
       const state = loadState();
       const closed = await closeAgentWindow(state);

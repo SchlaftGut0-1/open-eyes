@@ -34,6 +34,8 @@ Cheaper than reading everything:
 Off-screen refs are clickable. `scroll [down|up]` moves the page; `scroll @N down`
 scrolls the list holding `@N`. For many steps, write one `open-eyes run -` script with
 `page` in scope; `open-eyes help` lists everything.
+When an action says the page is showing a dialog, read it and answer with
+`open-eyes dialog accept [text]` or `open-eyes dialog dismiss`; nothing else works until then.
 If `open-eyes model` shows a model, `open-eyes do "goal"` hands it routine steps; verify
 the result.
 

@@ -482,6 +482,48 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("scroll", "sideways"), /usage: open-eyes scroll/);
   });
 
+  test("a dialog stays open until the agent answers it", async () => {
+    await cli("open", fixture("dialogs.html"));
+    const snapshot = await cli("snapshot");
+    const answer = /It stays open until answered/;
+
+    // The action returns at once and says what the page asked.
+    const remove = refOf(snapshot, "button Delete");
+    assert.match(await cli("click", remove), /^click button "Delete": the page is showing a confirm: "Delete it\?"\./);
+    assert.match(await cliError("snapshot"), answer);
+    assert.match(await cli("dialog"), /a confirm: "Delete it\?"/);
+    assert.equal(await cli("dialog", "dismiss"), 'dismissed the confirm "Delete it?"; run "open-eyes snapshot" to see the page');
+    assert.equal(await cli("eval", "result.textContent"), "kept");
+    await cli("click", remove);
+    assert.match(await cli("dialog", "accept"), /^accepted the confirm/);
+    assert.equal(await cli("eval", "result.textContent"), "deleted");
+
+    const name = refOf(snapshot, "button Name");
+    await cli("click", name);
+    assert.match(await cli("dialog", "accept", "Ana", "María"), /accepted the prompt "Your name\?" with "Ana María"/);
+    assert.equal(await cli("eval", "result.textContent"), "Ana María");
+    await cli("click", name);
+    await cli("dialog", "accept"); // Keeps the page's suggestion, as OK does.
+    assert.equal(await cli("eval", "result.textContent"), "guest");
+
+    assert.match(await cli("click", refOf(snapshot, "button Alert")), /an alert: "Saved"/);
+    assert.match(await cli("dialog", "accept"), /^closed the alert "Saved"/);
+    assert.equal(await cli("dialog"), "no dialog is open");
+    assert.match(await cliError("dialog", "accept"), /no dialog is open/);
+    assert.match(await cliError("dialog", "dismiss", "text"), /dismiss takes no text/);
+  });
+
+  test("a dialog the page opens between commands is reported, not waited on", async () => {
+    await cli("open", fixture("dialogs.html"));
+    await cli("eval", "setTimeout(() => confirm('Keep going?'), 300), 1");
+    await sleep(800);
+    const started = Date.now();
+    assert.match(await cliError("snapshot"), /the page is showing a confirm: "Keep going\?"/);
+    assert.ok(Date.now() - started < 5000, "it did not hang");
+    assert.match(await cli("dialog", "accept"), /accepted the confirm "Keep going\?"/);
+    assert.match(await cli("snapshot"), /button Delete @\d+/);
+  });
+
   test("select chooses options in native and custom dropdowns", async () => {
     await cli("open", fixture("dropdowns.html"));
     const snapshot = await cli("snapshot");

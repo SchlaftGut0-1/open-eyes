@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { audit, type AuditEntry } from "./audit.ts";
+import { describeDialog, openDialog, type Dialog } from "./dialogs.ts";
 import type { CDP } from "./cdp.ts";
 import { decisionExpression, OVERLAY_WORLD, OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
 import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
@@ -187,6 +188,14 @@ const FIND_FILE_INPUT = `function () {
 /** How long a risky action waits for the user to allow it before it is denied. */
 const CONFIRM_TIMEOUT_MS = 120_000;
 
+/** How long a page may take to answer before open-eyes says it is blocked. */
+const BLOCKED_MS = 2000;
+
+const BLOCKED_BY_DIALOG =
+  "the page is not responding: it is probably showing a dialog (alert, confirm or prompt) that " +
+  "open-eyes cannot answer. Ask the user to answer it in the agent window, or run " +
+  '"open-eyes close" to close the window';
+
 /** The agent's window. Every action is drawn on the page before it happens. */
 export class Page {
   /** Set once text is typed into a password field, so traces can leave it out. */
@@ -216,8 +225,41 @@ export class Page {
   }
 
   async init(): Promise<void> {
-    // The agent's window is usually not focused; make the page behave as if it were.
-    await this.#send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    this.#refuseIfDialog();
+    // A dialog nobody watched (opened before open-eyes was) blocks the page: say so in
+    // seconds instead of hanging.
+    let timer: NodeJS.Timeout | undefined;
+    const blocked = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(BLOCKED_BY_DIALOG)), BLOCKED_MS)));
+    try {
+      await Promise.race([
+        (async () => {
+          // The agent's window is usually not focused; make the page behave as if it were.
+          await this.#send("Emulation.setFocusEmulationEnabled", { enabled: true });
+          await this.#evaluate("1");
+        })(),
+        blocked,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** While a dialog is open the page cannot do anything else: the agent must answer it. */
+  #refuseIfDialog(): void {
+    const dialog = openDialog(this.#state.targetId);
+    if (dialog) throw new Error(describeDialog(dialog));
+  }
+
+  /** Resolves with the dialog the page opens, if it opens one before `stop` is called. */
+  #watchForDialog(): { opened: Promise<Dialog>; stop: () => void } {
+    let timer: NodeJS.Timeout | undefined;
+    const opened = new Promise<Dialog>((resolve) => {
+      timer = setInterval(() => {
+        const dialog = openDialog(this.#state.targetId);
+        if (dialog) resolve(dialog);
+      }, 100);
+    });
+    return { opened, stop: () => clearInterval(timer) };
   }
 
   goto(url: string): Promise<string> {
@@ -238,6 +280,7 @@ export class Page {
   }
 
   async snapshot(options: SnapshotOptions = {}): Promise<string> {
+    this.#refuseIfDialog();
     await this.#guard();
     if (options.interactive && options.diff) throw new Error("--interactive cannot be combined with --diff");
     const captured = await this.#capture();
@@ -636,6 +679,7 @@ export class Page {
 
   /** Shows the token counter in the agent window, or hides it with null. */
   async showUsage(text: string | null): Promise<void> {
+    if (openDialog(this.#state.targetId)) return; // The overlay cannot draw until it is answered.
     await this.#overlay({ type: "usage", text });
   }
 
@@ -920,15 +964,24 @@ export class Page {
 
   /** Runs an action and records it in the audit log, whatever the outcome. */
   async #audited<T>(action: string, target: string, run: (entry: AuditEntry) => Promise<T>): Promise<T> {
+    this.#refuseIfDialog();
     const entry: AuditEntry = { action, target, outcome: "ok" };
     entry.url = await this.url().catch(() => undefined);
+    // An action that opens a dialog does not finish until it is answered: report it instead.
+    const watch = this.#watchForDialog();
     try {
-      return await run(entry);
+      const running = run(entry);
+      running.catch(() => {}); // If a dialog wins, the rest of the action is dropped.
+      const outcome = await Promise.race([running.then((result) => ({ result })), watch.opened.then((dialog) => ({ dialog }))]);
+      if ("result" in outcome) return outcome.result;
+      entry.detail = `the page opened a ${outcome.dialog.type}`;
+      return `${action} ${entry.target}: ${describeDialog(outcome.dialog)}` as T;
     } catch (error) {
       entry.outcome = error instanceof PolicyError ? error.outcome : "error";
       entry.detail = (error as Error).message;
       throw error;
     } finally {
+      watch.stop();
       audit(entry);
     }
   }
