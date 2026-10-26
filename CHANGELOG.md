@@ -6,6 +6,12 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- The audit log keeps only the origin and path of URLs. Query strings and fragments often
+  carry what the user typed or secrets, such as a phone number or a sign-up token that a
+  site put in its redirect, and they were stored in full.
+
 ### Added
 
 - `open-eyes --version` and `open-eyes version` print the installed version.
