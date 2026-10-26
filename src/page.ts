@@ -165,6 +165,19 @@ const SELECT_CONTENTS = `function () {
   }
 }`;
 
+// Scrolls the element into view so a person sees the page move, and resolves once it stopped
+// (or after a second, for pages that never say so).
+const SMOOTH_INTO_VIEW = `function () {
+  const r = this.getBoundingClientRect();
+  if (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) return;
+  return new Promise((resolve) => {
+    const done = () => resolve();
+    document.addEventListener("scrollend", done, { once: true, capture: true });
+    setTimeout(done, 1000);
+    this.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+  });
+}`;
+
 /** Where downloads started by agent actions are saved. */
 const DOWNLOADS_DIR = process.env.OPEN_EYES_DOWNLOADS ?? join(homedir(), "Downloads", "open-eyes");
 const DOWNLOAD_TIMEOUT_MS = 120_000;
@@ -529,12 +542,21 @@ export class Page {
       const [width, height, before] = (await this.#evaluate("[innerWidth, innerHeight, scrollY]")) as number[];
       let summary: string;
       let network: (() => Promise<boolean>) | undefined;
+      let check: (() => Promise<void>) | undefined;
       if (ref && !direction) {
         const { backendNodeId, label, frame } = await this.#resolve(ref);
         entry.target = label;
-        const box = await this.#locate(backendNodeId, ref, frame); // Scrolls it into view.
+        await this.#smoothIntoView(backendNodeId, frame);
+        const box = await this.#locate(backendNodeId, ref, frame); // Already in view, unless in an iframe.
         await this.#announce({ label: `scroll to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
         summary = `scrolled to ${label}`;
+        // Only claim it once it is still on screen when the page has settled.
+        check = async () => {
+          const now = await this.#locate(backendNodeId, ref, frame, { scroll: false });
+          if (await this.#inWindow(now)) return;
+          const where = now.y + now.height <= 0 ? "above" : "below";
+          summary = `could not bring ${label} into view: it is still ${where} the screen; try scroll ${where === "above" ? "up" : "down"}`;
+        };
       } else {
         let x = width / 2;
         let y = height / 2;
@@ -550,18 +572,46 @@ export class Page {
         const dir = direction ?? "down";
         await this.#announce({ label: `scroll ${dir} ${where}`, x, y, busy: true });
         network = await this.#trackNetwork(); // Lazy loading fetches as the page moves.
-        await this.#send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: dir === "down" ? distance : -distance });
+        await this.#wheel(x, y, dir === "down" ? distance : -distance);
         await this.#overlay({ type: "idle" });
         summary = `scrolled ${dir} ${distance} px in ${where}`;
       }
       await this.#settleAfterAction(network);
       await sleep(150); // Let smooth scrolling settle.
+      await check?.();
       const after = (await this.#evaluate("scrollY")) as number;
       if (!ref && after === before) {
         summary += ` but the page did not move (already at the ${direction === "up" ? "top" : "bottom"}, or the content scrolls inside a container: try scroll @N ${direction ?? "down"})`;
       }
       return `${summary}\n${await this.snapshot()}`;
     });
+  }
+
+  /**
+   * Turns the mouse wheel by `delta` pixels over (x, y) in small steps that speed up and slow
+   * down, as a person scrolling does, instead of one jump.
+   */
+  async #wheel(x: number, y: number, delta: number): Promise<void> {
+    const steps = Math.min(Math.max(Math.round(Math.abs(delta) / 30), 6), 24);
+    const pause = Math.min(Math.max(Math.abs(delta) * 0.6, 250), 600) / steps;
+    const ease = (t: number) => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2);
+    let done = 0;
+    for (let step = 1; step <= steps; step++) {
+      const next = Math.round(delta * ease(step / steps));
+      await this.#send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: next - done });
+      done = next;
+      await sleep(pause);
+    }
+  }
+
+  /** Scrolls the element to the middle of its scroller smoothly, if it is not on screen. */
+  async #smoothIntoView(backendNodeId: number, frame?: string): Promise<void> {
+    const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
+    await this.#sendIn(frame, "Runtime.callFunctionOn", {
+      objectId: object.objectId,
+      awaitPromise: true,
+      functionDeclaration: SMOOTH_INTO_VIEW,
+    }).catch(() => {}); // #locate scrolls it anyway.
   }
 
   /**
@@ -786,12 +836,19 @@ export class Page {
     )) as number[];
     // Layout bounds are in page coordinates; fixed elements appear at the current scroll.
     const { documents } = await this.#send<{
-      documents: { nodes: { backendNodeId: number[] }; layout: { nodeIndex: number[]; bounds: number[][] } }[];
+      documents: {
+        nodes: { backendNodeId: number[] };
+        layout: { nodeIndex: number[]; bounds: number[][] };
+        contentHeight?: number;
+      }[];
     }>("DOMSnapshot.captureSnapshot", { computedStyles: [] });
     const main = documents[0];
+    // On a scaled screen (125%, 200%) the bounds are in device pixels, not the page's CSS
+    // pixels (#99). The page's height in both units gives the factor.
+    const scale = main?.contentHeight && pageHeight ? main.contentHeight / pageHeight : 1;
     const boxes = new Map<number, [number, number, number, number]>(); // left, top, right, bottom
     main?.layout.nodeIndex.forEach((nodeIndex, i) => {
-      const [x, y, w, h] = main.layout.bounds[i];
+      const [x, y, w, h] = main.layout.bounds[i].map((value) => value / scale);
       if (w <= 0 && h <= 0) return;
       const id = main.nodes.backendNodeId[nodeIndex];
       const box = boxes.get(id);
@@ -1011,8 +1068,11 @@ export class Page {
     return frameTree.frame.loaderId;
   }
 
-  /** Where the element is in the window, after scrolling it (and any iframe holding it) into view. */
-  async #locate(backendNodeId: number, ref: string, frame?: string): Promise<Box> {
+  /**
+   * Where the element is in the window, after scrolling it (and any iframe holding it) into
+   * view. Without `scroll`, only measures it.
+   */
+  async #locate(backendNodeId: number, ref: string, frame?: string, { scroll = true } = {}): Promise<Box> {
     try {
       // A cross-origin iframe measures from its own corner: find where each <iframe> sits.
       const owners: { frame?: string; owner: number }[] = [];
@@ -1023,26 +1083,36 @@ export class Page {
         if (found?.owner === undefined) throw new Error("iframe gone");
         owners.unshift({ frame: found.parent, owner: found.owner });
       }
-      let offsetX = 0;
-      let offsetY = 0;
+      const measure = async (): Promise<Box> => {
+        let offsetX = 0;
+        let offsetY = 0;
+        for (const { frame: parent, owner } of owners) {
+          const { model } = await this.#sendIn<{ model: { content: number[] } }>(parent, "DOM.getBoxModel", { backendNodeId: owner });
+          offsetX += model.content[0];
+          offsetY += model.content[1];
+        }
+        const { model } = await this.#sendIn<{ model: { border: number[] } }>(frame, "DOM.getBoxModel", { backendNodeId });
+        const xs = model.border.filter((_, i) => i % 2 === 0);
+        const ys = model.border.filter((_, i) => i % 2 === 1);
+        const x = Math.min(...xs);
+        const y = Math.min(...ys);
+        return { x: x + offsetX, y: y + offsetY, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+      };
+      if (!scroll) return await measure();
       for (const { frame: parent, owner } of owners) {
         await this.#sendIn(parent, "DOM.scrollIntoViewIfNeeded", { backendNodeId: owner });
       }
       await this.#sendIn(frame, "DOM.scrollIntoViewIfNeeded", { backendNodeId });
-      for (const { frame: parent, owner } of owners) {
-        const { model } = await this.#sendIn<{ model: { content: number[] } }>(parent, "DOM.getBoxModel", { backendNodeId: owner });
-        offsetX += model.content[0];
-        offsetY += model.content[1];
-      }
-      const { model } = await this.#sendIn<{ model: { border: number[] } }>(frame, "DOM.getBoxModel", { backendNodeId });
-      const xs = model.border.filter((_, i) => i % 2 === 0);
-      const ys = model.border.filter((_, i) => i % 2 === 1);
-      const x = Math.min(...xs);
-      const y = Math.min(...ys);
-      return { x: x + offsetX, y: y + offsetY, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+      return await measure();
     } catch {
       throw new Error(`${ref} is gone or not visible; the page changed, run "open-eyes snapshot" again`);
     }
+  }
+
+  /** Whether any part of the box is inside the window. */
+  async #inWindow(box: Box): Promise<boolean> {
+    const [width, height] = (await this.#evaluate("[innerWidth, innerHeight]")) as number[];
+    return box.y < height && box.y + box.height > 0 && box.x < width && box.x + box.width > 0;
   }
 
   /** Waits for the document to finish loading, tolerating navigations in progress. */

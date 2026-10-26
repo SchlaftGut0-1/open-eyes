@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { once } from "node:events";
 import { after, before, describe, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -77,6 +78,7 @@ async function humanAt(): Promise<{
   overlay: (expression: string) => Promise<any>;
   click: (part: string) => Promise<void>;
   navigate: (url: string) => Promise<void>;
+  send: (method: string, params?: object) => Promise<any>;
   close: () => void;
 }> {
   const { targetId } = JSON.parse(readFileSync(join(env.XDG_STATE_HOME, "open-eyes", "state.json"), "utf8"));
@@ -108,6 +110,7 @@ async function humanAt(): Promise<{
       await cdp.send("Page.navigate", { url }, sessionId);
       await until(() => evaluate(`location.href === ${JSON.stringify(url)} && document.readyState === "complete"`), url);
     },
+    send: (method, params = {}) => cdp.send(method, params, sessionId),
     close: () => cdp.close(),
   };
 }
@@ -480,6 +483,78 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.ok(Number(await cli("eval", "document.getElementById('list').scrollTop")) > 0, "the list scrolled");
     assert.match(inList, /button Message 1\d @\d+/);
     assert.match(await cliError("scroll", "sideways"), /usage: open-eyes scroll/);
+  });
+
+  test("scroll moves the page in steps, as a person does", async () => {
+    await cli("open", fixture("tall.html"));
+    await cli("eval", "window.positions = new Set(); addEventListener('scroll', () => positions.add(scrollY)), 1");
+    assert.match(await cli("scroll", "down", "1200"), /^scrolled down 1200 px in the page$/m);
+    assert.ok(Number(await cli("eval", "positions.size")) >= 4, "the page passed through several positions");
+    assert.equal(await cli("eval", "scrollY"), "1200");
+
+    await cli("eval", "positions.clear(), 1");
+    const intoView = await cli("scroll", refOf(await cli("snapshot", "--find", "Bottom button"), "button Bottom button"));
+    assert.match(intoView, /button Bottom button @\d+/);
+    assert.ok(Number(await cli("eval", "positions.size")) >= 2, "scrolling to the element was smooth");
+  });
+
+  test("snapshot finds what is on screen on a scaled screen", async () => {
+    // A screen at 125%, as on many laptops: the page's layout comes back in device pixels.
+    const scaledPort = port + 500;
+    const dir = join(root, "scaled");
+    const browser = spawn(
+      findBrowser()!,
+      [`--remote-debugging-port=${scaledPort}`, `--user-data-dir=${join(dir, "profile")}`, "--no-first-run", "--no-default-browser-check", "--headless=new", "--force-device-scale-factor=1.25"],
+      { stdio: "ignore" },
+    );
+    const scaled = { OPEN_EYES_PORT: String(scaledPort), XDG_STATE_HOME: join(dir, "state") };
+    try {
+      await until(() => browserVersion(scaledPort), "the scaled browser");
+      await cliWith(scaled, "open", fixture("tall.html"));
+      const button = refOf(await cliWith(scaled, "snapshot", "--find", "Bottom button"), "button Bottom button");
+      const intoView = await cliWith(scaled, "scroll", button);
+      assert.match(intoView, /^scrolled to button "Bottom button"$/m);
+      assert.match(intoView, new RegExp(`button Bottom button ${button}$`, "m"));
+      assert.doesNotMatch(intoView, /heading Bottom \(below\)/);
+    } finally {
+      browser.kill();
+      await once(browser, "exit");
+    }
+  });
+
+  test("snapshot finds what is on screen when the page is emulated at another scale", async () => {
+    await cli("open", fixture("tall.html"));
+    const human = await humanAt();
+    try {
+      // Emulated scaling changes devicePixelRatio but not the units of the page's layout.
+      await human.send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: 1.25, mobile: false });
+      const intoView = await cli("scroll", refOf(await cli("snapshot", "--find", "Bottom button"), "button Bottom button"));
+      assert.match(intoView, /^scrolled to button "Bottom button"$/m);
+      assert.match(intoView, /button Bottom button @\d+$/m);
+      assert.doesNotMatch(intoView, /heading Bottom \(below\)/);
+    } finally {
+      await human.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+      human.close();
+    }
+  });
+
+  test("scroll @N in a tab panel ends with the element on screen, or says it is not", async () => {
+    await cli("open", fixture("tab-panel.html"));
+    await cli("click", refOf(await cli("snapshot"), "tab Details"));
+    const link = refOf(await cli("snapshot", "--find", "About licenses"), "link About licenses");
+    const intoView = await cli("scroll", link);
+    assert.match(intoView, /^scrolled to link "About licenses"$/m);
+    assert.match(intoView, new RegExp(`link About licenses ${link}$`, "m"));
+
+    // The page pulls every scroll but the mouse wheel's back to the panel's top.
+    await cli("open", fixture("second.html"));
+    await cli("open", `${fixture("tab-panel.html")}#lock`);
+    await cli("click", refOf(await cli("snapshot"), "tab Details"));
+    const locked = refOf(await cli("snapshot", "--find", "About licenses"), "link About licenses");
+    const pulledBack = await cli("scroll", locked);
+    assert.match(pulledBack, /^could not bring link "About licenses" into view: it is still below the screen; try scroll down$/m);
+    assert.doesNotMatch(pulledBack, /link About licenses @\d+$/m);
+    assert.match(await cli("scroll", "down", "2000"), /link About licenses @\d+$/m);
   });
 
   test("select chooses options in native and custom dropdowns", async () => {

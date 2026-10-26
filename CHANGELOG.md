@@ -10,6 +10,16 @@ All notable changes to open-eyes are documented here. The format follows
 
 - The overlay shows only the agent's pointer while it acts, no longer a purple box around
   the element, which stayed on screen after the action.
+- `scroll` moves the page in small steps that speed up and slow down, as a person does,
+  instead of one jump; `scroll @N` scrolls the element into view smoothly.
+
+### Fixed
+
+- On a scaled screen (125%, 200%), the default snapshot showed the wrong part of the page:
+  elements on screen were listed as below it, so after `scroll @N` the element seemed still
+  off screen. What is on screen is now measured in the page's own pixels.
+- `scroll @N` says when the element is still off screen once the page settles (some pages
+  pull the scroll back) and which way to scroll, instead of `scrolled to`.
 
 ## [0.5.0] - 2026-10-25
 
