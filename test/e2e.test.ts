@@ -654,6 +654,25 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("trace"), /^no traces/);
   });
 
+  test("Enter in a search box goes through, Enter in other forms asks", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    for (const field of ["textbox Search the site", "searchbox Find"]) {
+      await cli("open", fixture("site-search.html"));
+      await cli("fill", refOf(await cli("snapshot"), field), "open eyes");
+      assert.match(await cliWith(ask, "press", "Enter"), /pressed Enter\nthe page changed to .*second\.html/);
+    }
+    await cli("open", fixture("site-search.html"));
+    await cli("fill", refOf(await cli("snapshot"), "textbox User"), "ana");
+    const human = await humanAt();
+    try {
+      const pressing = cliErrorWith(ask, "press", "Enter");
+      await human.click("deny");
+      assert.match(await pressing, /the user denied: press Enter, which submits a form/);
+    } finally {
+      human.close();
+    }
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");

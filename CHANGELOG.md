@@ -34,6 +34,10 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Changed
 
+- Pressing Enter in a search box no longer asks for approval: a form in a search landmark,
+  or whose only field is a search box, is not a risky submit. Forms with a password field,
+  or any other form, still ask.
+
 
 - `fill` on a native dropdown chooses the option with that text, as `select` does, and
   `fill` on anything that cannot take text (a link, button, checkbox, radio, file input or
