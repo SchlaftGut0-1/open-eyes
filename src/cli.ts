@@ -55,7 +55,8 @@ Page (works in the agent's own window)
     --page <n>           Page to show when the snapshot is longer than --limit
   click <@N>             Click an element from the last snapshot
   fill <@N> <text>       Replace the content of a field
-  press <key>            Press a key (Enter, Tab, Escape, ArrowDown, a, ...)
+  press <key>            Press a key (Enter, Tab, Escape, ArrowDown, a, ...), with
+                         Alt+, Control+, Meta+ or Shift+ for a combination (Control+a)
   select <@N> <option>   Choose an option by its text in a dropdown (native or custom)
   hover <@N>             Move the mouse over an element and report what appeared
   upload <@N> <file...>  Attach local files to a file input (asks the user first)
