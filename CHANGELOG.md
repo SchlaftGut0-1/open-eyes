@@ -40,6 +40,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Changed
 
+- `snapshot --find` and `--name` treat any whitespace as a space, so "Designed by" finds
+  Wikipedia's "Designed&nbsp;by" (a non-breaking space) the way an agent types it.
+
 
 - `fill` on a native dropdown chooses the option with that text, as `select` does, and
   `fill` on anything that cannot take text (a link, button, checkbox, radio, file input or

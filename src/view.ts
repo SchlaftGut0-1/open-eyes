@@ -23,11 +23,17 @@ export function subtree(lines: string[], ref: string): string[] {
 }
 
 /** Lines containing `query` (case-insensitive), each with its ancestors for context. */
+/**
+ * Text as an agent would type it: lower case, any run of whitespace (including the
+ * non-breaking spaces sites put in labels like "Designed by") as one plain space.
+ */
+const comparable = (text: string) => text.toLowerCase().replace(/\s+/g, " ");
+
 export function findLines(lines: string[], query: string): string[] {
-  const needle = query.toLowerCase();
+  const needle = comparable(query);
   const keep = new Set<number>();
   lines.forEach((line, i) => {
-    if (!line.toLowerCase().includes(needle)) return;
+    if (!comparable(line).includes(needle)) return;
     for (let at = i; at !== -1 && !keep.has(at); at = parentIndex(lines, at)) keep.add(at);
   });
   return [...keep].sort((a, b) => a - b).map((i) => lines[i]);
@@ -168,12 +174,12 @@ export function interactiveIndexes(lines: string[], roles: string[]): number[] {
  * given. Exact names win; otherwise names that contain it.
  */
 export function refsByName(refs: Record<string, Ref>, name: string, role?: string): string[] {
-  const wanted = name.trim().toLowerCase();
+  const wanted = comparable(name.trim());
   const candidates = Object.entries(refs).flatMap(([ref, { label }]) => {
     const space = label.indexOf(" ");
     const labelRole = label.slice(0, space);
     if (role && labelRole.toLowerCase() !== role.trim().toLowerCase()) return [];
-    return [{ ref, name: (JSON.parse(label.slice(space + 1)) as string).toLowerCase() }];
+    return [{ ref, name: comparable(JSON.parse(label.slice(space + 1)) as string) }];
   });
   const exact = candidates.filter((c) => c.name === wanted);
   return (exact.length ? exact : candidates.filter((c) => c.name.includes(wanted))).map((c) => `@${c.ref}`);
