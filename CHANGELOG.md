@@ -15,6 +15,10 @@ All notable changes to open-eyes are documented here. The format follows
 - Links whose name has a risky word ("Buy now", "Delete account", "Comprar ahora") ask for
   approval under `confirm risky`, as buttons do. Shops and apps often style links as
   buttons; before, they were clicked without asking.
+- Traces no longer keep a password that comes back in a later command's output, such as
+  the URL of a form sent with GET (`?p=…`). Once a trace typed into a password field, the
+  outputs of the commands after it are not stored. Such traces were already left out of
+  the export; now the local file does not have it either.
 
 ### Changed
 
