@@ -125,6 +125,8 @@ export function formatSnapshot(
   nodes: AXNode[],
   known: KnownRefs = { byNode: new Map(), nextRef: 1 },
   frames: Map<string, Frame> = new Map(),
+  /** Elements of the page (not its iframes) with draggable="true", which the tree does not mark. */
+  draggable: Set<number> = new Set(),
 ): { text: string; refs: Record<string, Ref>; nextRef: number; lineNodes: LineNode[] } {
   const refs: Record<string, Ref> = {};
   const lines: string[] = [];
@@ -172,9 +174,13 @@ export function formatSnapshot(
       return;
     }
 
-    // Also actionable: a rich-text editor (fill types into it) and a named image (hover may
-    // reveal what it hides).
-    const actionable = INTERACTIVE.has(role) || isEditorRoot(node) || (role === "image" && name !== "");
+    // Also actionable: a rich-text editor (fill types into it), a named image (hover may
+    // reveal what it hides) and anything draggable (drag moves it).
+    const actionable =
+      INTERACTIVE.has(role) ||
+      isEditorRoot(node) ||
+      (role === "image" && name !== "") ||
+      (ctx.frame === undefined && ctx.place === undefined && draggable.has(node.backendDOMNodeId!));
     const interactive = actionable && node.backendDOMNodeId !== undefined;
     if (!interactive && !name && TRANSPARENT.has(role)) return visitChildren(depth, parentName);
     if (role === "image" && !name && !interactive) return; // Decorative.

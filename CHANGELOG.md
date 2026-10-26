@@ -36,6 +36,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Added
 
+- `open-eyes drag @N @M` drags an element onto another: press, move in steps, release.
+  It works with HTML5 drag and drop and with widgets that follow the mouse. Elements with
+  `draggable="true"` get refs for it.
 - Rich-text editors (`contenteditable`: TinyMCE, Gmail, Notion, comment boxes) and named
   images get `@N` refs, so `fill` types into editors and `hover` reaches images that reveal
   something (a profile card, a caption). On four benchmark pages snapshots grew 0–3%.

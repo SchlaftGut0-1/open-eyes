@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Drag</title>
+<div id="card" draggable="true" ondragstart="event.dataTransfer.setData('text', 'Card 1')">Card 1</div>
+<!-- Columns are draggable too, as on the-internet.herokuapp.com/drag_and_drop. -->
+<div id="done" draggable="true" style="margin-top: 40px; min-height: 40px"
+  ondragover="event.preventDefault()" ondrop="event.preventDefault(); this.append(' got ' + event.dataTransfer.getData('text'))">Done</div>
+<!-- A widget that listens to the mouse only, as many sortable lists and sliders do. -->
+<button id="knob" onmousedown="window.dragging = true">Knob</button>
+<button id="slot" style="margin-left: 200px">Slot</button>
+<script>
+  addEventListener("mouseup", (event) => {
+    if (window.dragging && document.elementFromPoint(event.clientX, event.clientY)?.id === "slot") slot.textContent = "Knob here";
+    window.dragging = false;
+  });
+</script>
