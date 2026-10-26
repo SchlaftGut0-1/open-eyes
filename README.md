@@ -142,8 +142,9 @@ open-eyes trace delete --all
 
 A trace holds the goal, each command and what it printed, which includes page content
 and full URLs (the model learns from them), so review it before sharing it with anyone. Text typed into password fields and the
-contents of uploaded files are never stored, and a trace that typed a password is left
-out of the export. The export uses the exact prompt and tools of `open-eyes do`, so a
+contents of uploaded files are never stored, nor anything printed after a password was
+typed (it could come back in a URL), and a trace that typed a password is left out of the
+export. The export uses the exact prompt and tools of `open-eyes do`, so a
 model trained on it sees the same format it works with. Commands the local model cannot
 run (`eval`, `run`, `upload`, `open` after the first snapshot) also leave a trace out.
 
