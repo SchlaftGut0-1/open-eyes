@@ -8,14 +8,27 @@ export const profileDir = join(process.env.XDG_DATA_HOME ?? join(homedir(), ".lo
 const stateFile = join(stateDir, "state.json");
 
 /**
- * Where the daemon listens. Runtime dirs are private and short (socket paths are limited
- * to ~100 characters); the hash keeps separate state dirs, like test runs, apart.
+ * Where a background process named `name` listens. Runtime dirs are private and short
+ * (socket paths are limited to ~100 characters); the hash keeps separate state dirs, like
+ * test runs, apart.
  */
-export const socketPath = (() => {
+export function socketPathFor(name: string): string {
   const id = createHash("sha256").update(stateDir).digest("hex").slice(0, 12);
-  if (process.platform === "win32") return `\\\\.\\pipe\\open-eyes-${id}`;
-  return join(process.env.XDG_RUNTIME_DIR ?? stateDir, `open-eyes-${id}.sock`);
-})();
+  if (process.platform === "win32") return `\\\\.\\pipe\\${name}-${id}`;
+  return join(process.env.XDG_RUNTIME_DIR ?? stateDir, `${name}-${id}.sock`);
+}
+
+/** Where the daemon listens. */
+export const socketPath = socketPathFor("open-eyes");
+
+export const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 /**
  * An element an agent can act on. Inside an iframe, `url` is the iframe's document, and

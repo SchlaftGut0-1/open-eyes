@@ -1,11 +1,10 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CDP } from "./cdp.ts";
-import { stateDir } from "./state.ts";
+import { isAlive, socketPathFor, stateDir } from "./state.ts";
 
 /**
  * A dialog (alert, confirm, prompt) stops the page until it is answered, and Chromium lets
@@ -19,20 +18,7 @@ const dialogFile = join(stateDir, "dialog.json");
 const watcherFile = join(stateDir, "dialog-watcher.json");
 const WATCHER_READY_MS = 2000;
 
-const dialogSocketPath = (() => {
-  const id = createHash("sha256").update(stateDir).digest("hex").slice(0, 12);
-  if (process.platform === "win32") return `\\\\.\\pipe\\open-eyes-dialogs-${id}`;
-  return join(process.env.XDG_RUNTIME_DIR ?? stateDir, `open-eyes-dialogs-${id}.sock`);
-})();
-
-const isAlive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
+const dialogSocketPath = socketPathFor("open-eyes-dialogs");
 
 function readJson<T>(file: string): T | undefined {
   try {

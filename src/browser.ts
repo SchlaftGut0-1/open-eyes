@@ -6,7 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { CDP } from "./cdp.ts";
 import { ensureWatcher } from "./dialogs.ts";
 import { Page } from "./page.ts";
-import { profileDir, socketPath, stateDir, type State } from "./state.ts";
+import { isAlive, profileDir, socketPath, stateDir, type State } from "./state.ts";
 
 const BROWSER_NAMES = [
   "chromium",
@@ -93,15 +93,6 @@ export function isLocalDevToolsUrl(url: string, port?: number): boolean {
     (port === undefined || ws.port === String(port))
   );
 }
-
-const isAlive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 export type BrowserVersion = { Browser: string; webSocketDebuggerUrl: string };
 

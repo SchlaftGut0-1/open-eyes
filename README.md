@@ -162,7 +162,7 @@ open-eyes log                                       # what the agent did
 
 - The agent cannot open, read or act on a site outside the policy, and open-eyes leaves
   the page if a click or redirect lands there.
-- Before a risky action, the window highlights the target and asks **Allow / Deny**.
+- Before a risky action, the window points at the target and asks **Allow / Deny**.
   Only real clicks from you count; page scripts cannot answer. `confirm always` asks for
   every action; `confirm never` turns questions off (for unattended runs).
 - The audit log records every action, its outcome and what you allowed on screen, never
