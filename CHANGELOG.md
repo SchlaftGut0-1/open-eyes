@@ -45,6 +45,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Fixed
 
+- A page stuck in a script that never ends no longer hangs open-eyes: a request the browser
+  does not answer within 60 s fails with "the page stopped responding". Before, a click on
+  a button that looped forever never returned.
 - `open-eyes do` stops the local model when it is killed (a timeout, Ctrl+C), also while
   the model is starting. Before, `llama-server` kept running and held the model in GPU
   memory.
