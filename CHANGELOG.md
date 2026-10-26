@@ -6,8 +6,18 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `scroll` moves the page in small steps that speed up and slow down, as a person does,
+  instead of one jump; `scroll @N` scrolls the element into view smoothly.
+
 ### Fixed
 
+- On a scaled screen (125%, 200%), the default snapshot showed the wrong part of the page:
+  elements on screen were listed as below it, so after `scroll @N` the element seemed still
+  off screen. What is on screen is now measured in the page's own pixels.
+- `scroll @N` says when the element is still off screen once the page settles (some pages
+  pull the scroll back) and which way to scroll, instead of `scrolled to`.
 - When an action opens a tab from the agent window (a link with `target=_blank`,
   `window.open`), the agent follows it: that tab becomes the agent window and the action
   says so. Before, the agent stayed on the old tab and could not reach the new one.
