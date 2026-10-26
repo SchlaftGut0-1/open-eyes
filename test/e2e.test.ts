@@ -966,6 +966,14 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("drag", card), /usage: open-eyes drag <@N> <@M>/);
   });
 
+  test("snapshot --find shows a table cell with its whole row", async () => {
+    await cli("open", fixture("table.html"));
+    assert.doesNotMatch(await cli("snapshot"), /^\s*row$/m, "other snapshots stay without row lines");
+    const found = await cli("snapshot", "--find", "jsmith");
+    assert.match(found, /row\n +"Smith"\n +"jsmith@example\.com"\n +"\$50\.00"\n +link edit @\d+/);
+    assert.doesNotMatch(found, /Bach/);
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");

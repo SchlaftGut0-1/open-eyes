@@ -49,6 +49,8 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Changed
 
+- `snapshot --find` shows a match in a table with its whole row, so a found email or price
+  comes with the name it belongs to. Other snapshots are unchanged in size.
 - The overlay shows only the agent's pointer while it acts, no longer a purple box around
   the element, which stayed on screen after the action.
 - `scroll` moves the page in small steps that speed up and slow down, as a person does,

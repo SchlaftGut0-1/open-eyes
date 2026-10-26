@@ -375,7 +375,8 @@ export class Page {
     this.#refuseIfDialog();
     await this.#guard();
     if (options.interactive && options.diff) throw new Error("--interactive cannot be combined with --diff");
-    const captured = await this.#capture();
+    // Only --find needs table rows; other snapshots stay as small as they were.
+    const captured = await this.#capture({ rows: options.find !== undefined });
     const { previous } = captured;
     let { lines, lineNodes } = captured;
     if (options.interactive) {
@@ -985,7 +986,7 @@ export class Page {
    * Reads the page and numbers its elements, keeping the refs of elements already seen
    * on this document. Returns the lines and, for the same document, the previous ones.
    */
-  async #capture(): Promise<{ lines: string[]; previous?: string[]; lineNodes: LineNode[] }> {
+  async #capture({ rows = false } = {}): Promise<{ lines: string[]; previous?: string[]; lineNodes: LineNode[] }> {
     const loaderId = await this.#loaderId();
     const sameDocument = this.#state.refsLoaderId === loaderId;
     const byNode = new Map<string, number>();
@@ -1004,6 +1005,7 @@ export class Page {
       { byNode, nextRef: sameDocument ? (this.#state.nextRef ?? 1) : 1 },
       frames,
       draggable,
+      rows,
     );
 
     let previous: string[] | undefined;
@@ -1017,7 +1019,7 @@ export class Page {
     }
     Object.assign(this.#state, { refs, refsLoaderId: loaderId, nextRef });
     mkdirSync(stateDir, { recursive: true });
-    writeFileSync(baselineFile, text);
+    if (!rows) writeFileSync(baselineFile, text); // Diffs compare snapshots of the same shape.
     return { lines: text ? text.split("\n") : [], previous, lineNodes };
   }
 
