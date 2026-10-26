@@ -48,6 +48,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Fixed
 
+- `open-eyes do` stops when the page opens a dialog and reports it, so the main agent can
+  answer it with `open-eyes dialog`. Before, the local model, which cannot answer dialogs,
+  retried until it ran out of steps or time.
 - A page stuck in a script that never ends no longer hangs open-eyes: a request the browser
   does not answer within 60 s fails with "the page stopped responding". Before, a click on
   a button that looped forever never returned.

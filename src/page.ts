@@ -830,6 +830,11 @@ export class Page {
   }
 
   async url(): Promise<string> {
+    const { targetId } = this.#state;
+    // A dialog stops the page's scripts; the browser still knows where the page is.
+    if (targetId && openDialog(targetId)) {
+      return (await this.#cdp.send<{ targetInfo: { url: string } }>("Target.getTargetInfo", { targetId })).targetInfo.url;
+    }
     return String(await this.#evaluate("location.href"));
   }
 
