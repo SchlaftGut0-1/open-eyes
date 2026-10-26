@@ -943,6 +943,17 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("click", cell, "--right", "--double"), /not both/);
   });
 
+  test("rich-text editors and named images get refs", async () => {
+    await cli("open", fixture("editor.html"));
+    const snapshot = await cli("snapshot");
+    assert.match(await cli("fill", refOf(snapshot, "Message"), "Hola"), /^filled generic "Message"/);
+    assert.equal(await cli("eval", "document.querySelector('[contenteditable]').textContent"), "Hola");
+    // The same inside an iframe, whose body is the editor.
+    assert.match(await cli("fill", refOf(snapshot, "Old comment"), "Nuevo"), /^filled /);
+    assert.equal(await cli("eval", "document.querySelector('iframe').contentDocument.body.textContent"), "Nuevo");
+    assert.match(await cli("hover", refOf(snapshot, "image User avatar")), /\+ +"Ana María, admin"/);
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");
