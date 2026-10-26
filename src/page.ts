@@ -420,12 +420,13 @@ export class Page {
     return `url: ${await this.url()}\ntitle: ${JSON.stringify(title)}${header}\n\n${shown.join("\n")}`;
   }
 
-  click(target: Target): Promise<string> {
-    return this.#audited("click", describeTarget(target), async (entry) => {
+  click(target: Target, how: "left" | "right" | "double" = "left"): Promise<string> {
+    const verb = { left: "click", right: "right-click", double: "double-click" }[how];
+    return this.#audited(verb, describeTarget(target), async (entry) => {
       await this.#guard();
       const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = label;
-      if (label.startsWith("option ")) {
+      if (how === "left" && label.startsWith("option ")) {
         const chosen = await this.#chooseNativeOption(backendNodeId, label, frame, entry);
         if (chosen) return chosen;
       }
@@ -436,14 +437,20 @@ export class Page {
       const box = await this.#locate(backendNodeId, ref, frame);
       const x = box.x + box.width / 2;
       const y = box.y + box.height / 2;
-      await this.#announce({ label: `click ${label}`, x, y, busy: true });
-      const submits = (await this.#callOn(backendNodeId, frame, CLICK_SUBMITS_RISKY_FORM)) === true;
-      await this.#confirm(submits ? `click ${label}, which submits a form` : `click ${label}`, submits || isRiskyClick(label));
+      await this.#announce({ label: `${verb} ${label}`, x, y, busy: true });
+      // A right click opens a menu; the other two act like a click.
+      if (how !== "right") {
+        const submits = (await this.#callOn(backendNodeId, frame, CLICK_SUBMITS_RISKY_FORM)) === true;
+        await this.#confirm(submits ? `${verb} ${label}, which submits a form` : `${verb} ${label}`, submits || isRiskyClick(label));
+      }
       const finishDownload = await this.#watchDownloads();
       const network = await this.#trackNetwork();
       await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
-      for (const type of ["mousePressed", "mouseReleased"]) {
-        await this.#send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+      // A double click is two clicks, the second with clickCount 2, as Chromium needs for dblclick.
+      for (const clickCount of how === "double" ? [1, 2] : [1]) {
+        for (const type of ["mousePressed", "mouseReleased"]) {
+          await this.#send("Input.dispatchMouseEvent", { type, x, y, button: how === "right" ? "right" : "left", clickCount });
+        }
       }
       await this.#overlay({ type: "idle" });
       await sleep(150);
@@ -452,7 +459,7 @@ export class Page {
       const observed = await this.#observe(entry.url, network);
       const download = await finishDownload();
       if (download.saved) entry.target += ` (downloaded ${basename(download.saved)})`;
-      return `clicked ${label}${observed}${download.report}`;
+      return `${verb}ed ${label}${observed}${download.report}`;
     });
   }
 

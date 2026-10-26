@@ -933,6 +933,16 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.doesNotMatch(await cli("status"), /password-manager/);
   });
 
+  test("click --right opens a context menu, --double double-clicks", async () => {
+    await cli("open", fixture("clicks.html"));
+    const cell = refOf(await cli("snapshot"), "button Cell");
+    const right = await cli("click", cell, "--right");
+    assert.match(right, /^right-clicked button "Cell"/);
+    assert.match(right, /\+ +menuitem Rename @\d+/);
+    assert.match(await cli("click", cell, "--double"), /^double-clicked button "Cell"[^]*\+ +button Editing/);
+    assert.match(await cliError("click", cell, "--right", "--double"), /not both/);
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");

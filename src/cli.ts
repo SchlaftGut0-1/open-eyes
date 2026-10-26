@@ -54,6 +54,7 @@ Page (works in the agent's own window)
     --limit <lines>      Lines per page (default 400, 0 for all)
     --page <n>           Page to show when the snapshot is longer than --limit
   click <@N>             Click an element from the last snapshot
+    --right, --double    Right-click (context menus) or double-click instead
   fill <@N> <text>       Replace the content of a field
   press <key>            Press a key (Enter, Tab, Escape, ArrowDown, a, ...), with
                          Alt+, Control+, Meta+ or Shift+ for a combination (Control+a)
@@ -79,7 +80,7 @@ Page (works in the agent's own window)
 
 Scripts (open-eyes run): \`page\` methods, all async
   goto(url)  snapshot({ full, find, scope, diff, interactive, limit, page })
-  click("@N")  fill("@N", text)  press(key)  select("@N", option)  hover("@N")
+  click("@N", "right"|"double"?)  fill("@N", text)  press(key)  select("@N", option)  hover("@N")
   upload("@N", [paths])   Each also takes { name, role? } instead of "@N"
   scroll(ref?, "down"|"up", px?)
   waitForText(text, ms?)  wait(ms)
@@ -381,8 +382,12 @@ async function main([command, ...args]: string[]): Promise<void> {
       return withPage(`snapshot ${original.join(" ")}`.trim(), (page) => page.snapshot(options));
     }
     case "click": {
-      const [target, label] = takeTarget(args, "click <@N>");
-      return withPage(`click ${label}`, (page) => page.click(target));
+      const right = takeFlag(args, "--right");
+      const double = takeFlag(args, "--double");
+      if (right && double) throw new Error("use --right or --double, not both");
+      const [target, label] = takeTarget(args, "click <@N> [--right|--double]");
+      const how = right ? "right" : double ? "double" : "left";
+      return withPage(`click ${label}${how === "left" ? "" : ` --${how}`}`, (page) => page.click(target, how));
     }
     case "fill": {
       const [target, label] = takeTarget(args, "fill <@N> <text>");
