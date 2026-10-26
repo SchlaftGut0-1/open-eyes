@@ -8,6 +8,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Security
 
+- A password in a URL (`https://user:password@host/`) is never stored: the audit log drops
+  `user:password@` from every URL, and a trace leaves out the command, as for typing into a
+  password field. Before, both kept it.
 - The audit log records `eval` by its length (`eval (57 characters)`), as it does `fill`.
   Before, it kept the first 200 characters of the code, so an `eval` that set a password
   field put the password in the log.
@@ -58,6 +61,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Fixed
 
+- A page behind HTTP authentication (intranets, routers, staging sites) no longer fails with
+  a bare `net::ERR_INVALID_AUTH_CREDENTIALS`: `open` says it asks for a user name and
+  password and how to pass them, `https://USER:PASSWORD@host/path`.
 - The token counter in the agent window (`usage show`) keeps running totals instead of
   rereading the whole usage log on every command, which added ~0.2 s per command after a
   year of heavy use (29 MB).
