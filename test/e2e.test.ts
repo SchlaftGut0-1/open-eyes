@@ -901,6 +901,11 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("press", "Hyper+a"), /unknown key "Hyper\+a"; .*Alt\+, Control\+, Meta\+ or Shift\+/);
   });
 
+  test("open refuses the browser's own pages", async () => {
+    assert.match(await cliError("open", "chrome://password-manager/passwords"), /chrome: pages are the browser's own/);
+    assert.doesNotMatch(await cli("status"), /password-manager/);
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");

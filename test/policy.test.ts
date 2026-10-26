@@ -14,6 +14,10 @@ test("normalizes site names", () => {
 test("with no lists, everything is allowed", () => {
   assert.equal(blockedReason(policy({}), "https://example.com/a"), undefined);
   assert.equal(blockedReason(policy({}), "file:///tmp/a.html"), undefined);
+  // The browser's own pages, with or without an allow list.
+  for (const url of ["chrome://password-manager/passwords", "chrome://settings", "chrome-extension://abc/popup.html", "devtools://devtools/x", "edge://settings", "brave://settings"]) {
+    assert.match(blockedReason(policy({}), url)!, /the browser's own/, url);
+  }
 });
 
 test("blocked sites and their subdomains are refused, even if allowed", () => {

@@ -80,6 +80,9 @@ export function savePolicy(policy: Policy): void {
   writeFileSync(policyFile, JSON.stringify(policy, null, 2), { mode: 0o600 });
 }
 
+// The browser's own pages: a page's hidden instructions must never steer the agent there.
+const INTERNAL = new Set(["chrome:", "chrome-extension:", "chrome-untrusted:", "devtools:", "edge:", "brave:"]);
+
 const covers = (site: string, host: string) => host === site || host.endsWith(`.${site}`);
 
 /** Why the policy does not let the agent use `url`, or undefined when it does. */
@@ -87,6 +90,7 @@ export function blockedReason(policy: Policy, url: string): string | undefined {
   const parsed = URL.parse(url);
   if (!parsed) return `"${url}" is not a valid URL`;
   if (parsed.href === "about:blank") return undefined;
+  if (INTERNAL.has(parsed.protocol)) return `${parsed.protocol} pages are the browser's own (settings, saved passwords, extensions); open-eyes never opens them`;
   const host = parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.hostname : undefined;
   if (host && policy.block.some((site) => covers(site, host))) return `${host} is blocked by your open-eyes policy`;
   if (policy.allow.length && !(host && policy.allow.some((site) => covers(site, host)))) {
