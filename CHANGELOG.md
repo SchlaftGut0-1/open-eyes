@@ -6,6 +6,12 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-25
+
+A local model can now carry out routine tasks for the main agent (`open-eyes do`), with a
+fine-tuned navigator that `open-eyes model install` downloads, and sessions can be
+recorded as training examples (`open-eyes trace`).
+
 ### Security
 
 - The audit log keeps only the origin and path of URLs. Query strings and fragments often
@@ -45,19 +51,15 @@ All notable changes to open-eyes are documented here. The format follows
   or any other form, still ask.
 - `snapshot --find` and `--name` treat any whitespace as a space, so "Designed by" finds
   Wikipedia's "Designed&nbsp;by" (a non-breaking space) the way an agent types it.
-
-
 - `fill` on a native dropdown chooses the option with that text, as `select` does, and
   `fill` on anything that cannot take text (a link, button, checkbox, radio, file input or
   read-only field) fails with what to use instead (`click`, `upload`). Before, it reported
   "filled" although nothing was typed, and agents went on as if it had worked.
-
 - `open-eyes do` asks the model for a tool call on every reply (`tool_choice: "required"`),
   gives it room to think before acting (2048 reply tokens instead of 400), reminds it once
   when it answers in plain text or sends a call that cannot be read, and still reports the
   actions taken when the model server fails. On 15 held-out tasks, Gemma 4 E2B went from 6
   of 9 (old set) to 13 of 15, with one false success claim.
-
 - Clicking an option of a native dropdown chooses it, as `select` does, and reports
   `chose "<option>" in <dropdown>`. Before, the click did nothing, since Chromium shows
   those options in a popup outside the page. Options of a list that shows them all
@@ -221,7 +223,9 @@ cost 11,423 tokens now costs 5,121.
   `eval`, multi-step `run` scripts, a live overlay showing each action, and an agent
   skill.
 
-[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0-beta.1...v0.4.0
 [0.4.0-beta.1]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.3.0...v0.4.0-beta.1
