@@ -127,6 +127,8 @@ export function formatSnapshot(
   frames: Map<string, Frame> = new Map(),
   /** Elements of the page (not its iframes) with draggable="true", which the tree does not mark. */
   draggable: Set<number> = new Set(),
+  /** Keep table rows as `row` lines, so --find can show a match with its row (#100). */
+  rows = false,
 ): { text: string; refs: Record<string, Ref>; nextRef: number; lineNodes: LineNode[] } {
   const refs: Record<string, Ref> = {};
   const lines: string[] = [];
@@ -182,7 +184,7 @@ export function formatSnapshot(
       (role === "image" && name !== "") ||
       (ctx.frame === undefined && ctx.place === undefined && draggable.has(node.backendDOMNodeId!));
     const interactive = actionable && node.backendDOMNodeId !== undefined;
-    if (!interactive && !name && TRANSPARENT.has(role)) return visitChildren(depth, parentName);
+    if (!interactive && !name && TRANSPARENT.has(role) && !(rows && role === "row")) return visitChildren(depth, parentName);
     if (role === "image" && !name && !interactive) return; // Decorative.
 
     let line = `${indent}${role}`;

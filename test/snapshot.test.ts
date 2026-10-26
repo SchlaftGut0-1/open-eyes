@@ -123,6 +123,12 @@ describe("formatSnapshot", () => {
     assert.equal(text, ["link One @1", "table Prices"].join("\n"));
   });
 
+  test("keeps unnamed table rows when asked, for --find", () => {
+    const table = () => page(el("table", "", {}, [el("row", "", {}, [el("cell", "", {}, [el("StaticText", "Smith")]), el("cell", "", {}, [el("StaticText", "$50.00")])])]));
+    assert.equal(formatSnapshot(table()).text, ['"Smith"', '"$50.00"'].join("\n"));
+    assert.equal(formatSnapshot(table(), undefined, undefined, undefined, true).text, ["row", '  "Smith"', '  "$50.00"'].join("\n"));
+  });
+
   test("drops list bullets, separators and decorative images", () => {
     const { text } = formatSnapshot(
       page(
