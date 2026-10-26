@@ -36,6 +36,8 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Added
 
+- `click --right` right-clicks (context menus) and `click --double` double-clicks (editing a
+  cell, opening a file); in scripts, `page.click("@N", "right")` and `"double"`.
 - `press` sends key combinations: `press Control+a`, `press Shift+Tab`,
   `press Control+Enter` (Alt+, Control+, Meta+ and Shift+, in any number).
 
