@@ -297,7 +297,7 @@ export class Page {
       const box = await this.#locate(backendNodeId, ref, frame);
       const x = box.x + box.width / 2;
       const y = box.y + box.height / 2;
-      await this.#announce({ label: `click ${label}`, x, y, box, busy: true });
+      await this.#announce({ label: `click ${label}`, x, y, busy: true });
       await this.#confirm(`click ${label}`, isRiskyClick(label));
       const finishDownload = await this.#watchDownloads();
       const network = await this.#trackNetwork();
@@ -338,7 +338,7 @@ export class Page {
         // Typing into a native dropdown means choosing the option with that text.
         entry.action = "select";
         entry.target = `${label} → ${text}`;
-        await this.#announce({ label: `choose "${text}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+        await this.#announce({ label: `choose "${text}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
         const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
           objectId: object.objectId,
           functionDeclaration: CHOOSE_OPTION,
@@ -349,7 +349,7 @@ export class Page {
         if (!chosen.chosen) throw new Error(`no option "${text}" in ${label}; options: ${chosen.available.join(", ")}`);
         return `chose "${chosen.chosen}" in ${label}${await this.#observe(entry.url)}`;
       }
-      await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2, box });
+      await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2 });
       await this.#confirm(`type into ${label}, a password field`, kind === "password");
       if (kind === "password") this.typedSecret = true;
       await this.#sendIn(frame, "DOM.focus", { backendNodeId });
@@ -406,7 +406,7 @@ export class Page {
       const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = `${label} <- ${names}`;
       const box = await this.#locate(backendNodeId, ref, frame);
-      await this.#announce({ label: `upload ${names} to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+      await this.#announce({ label: `upload ${names} to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
       const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
       const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: FIND_FILE_INPUT });
       if (!result.objectId) throw new Error(`${label} is not a file input and no file input belongs to it`);
@@ -426,7 +426,7 @@ export class Page {
       const box = await this.#locate(backendNodeId, ref, frame);
       const x = box.x + box.width / 2;
       const y = box.y + box.height / 2;
-      await this.#announce({ label: `hover over ${label}`, x, y, box, busy: true });
+      await this.#announce({ label: `hover over ${label}`, x, y, busy: true });
       // A real mouse move fires CSS :hover and mouseenter/mouseover listeners alike.
       const network = await this.#trackNetwork();
       await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
@@ -455,7 +455,7 @@ export class Page {
     entry.action = "select";
     entry.target = `${selectLabel} → ${name.replace(/^"|"$/g, "")}`;
     const box = await this.#locate(node.backendNodeId, selectRef ? `@${selectRef}` : "the dropdown", frame);
-    await this.#announce({ label: `choose ${name} in ${selectLabel}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+    await this.#announce({ label: `choose ${name} in ${selectLabel}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
     const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
       objectId: object.objectId,
       functionDeclaration: CHOOSE_THIS_OPTION,
@@ -474,7 +474,7 @@ export class Page {
       const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = `${label} → ${option}`;
       const box = await this.#locate(backendNodeId, ref, frame);
-      await this.#announce({ label: `choose "${option}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+      await this.#announce({ label: `choose "${option}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
       const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
       const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
         objectId: object.objectId,
@@ -533,7 +533,7 @@ export class Page {
         const { backendNodeId, label, frame } = await this.#resolve(ref);
         entry.target = label;
         const box = await this.#locate(backendNodeId, ref, frame); // Scrolls it into view.
-        await this.#announce({ label: `scroll to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+        await this.#announce({ label: `scroll to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
         summary = `scrolled to ${label}`;
       } else {
         let x = width / 2;

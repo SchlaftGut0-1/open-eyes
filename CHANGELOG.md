@@ -6,6 +6,11 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The overlay shows only the agent's pointer while it acts, no longer a purple box around
+  the element, which stayed on screen after the action.
+
 ## [0.5.0] - 2026-10-25
 
 A local model can now carry out routine tasks for the main agent (`open-eyes do`), with a
