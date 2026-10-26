@@ -40,6 +40,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Changed
 
+- Pressing Enter in a search box no longer asks for approval: a form in a search landmark,
+  or whose only field is a search box, is not a risky submit. Forms with a password field,
+  or any other form, still ask.
 - `snapshot --find` and `--name` treat any whitespace as a space, so "Designed by" finds
   Wikipedia's "Designed&nbsp;by" (a non-breaking space) the way an agent types it.
 

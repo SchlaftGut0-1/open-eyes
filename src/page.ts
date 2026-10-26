@@ -140,6 +140,20 @@ const FIELD_KIND = `function () {
   return { kind: "none", instead: "click" };
 }`;
 
+// Whether Enter in the focused field submits a form worth asking about. A search is not:
+// a form in a search landmark, or one whose only field is a search box. A form with a
+// password field always is, and so is any other form.
+const SUBMITS_RISKY_FORM = `(() => {
+  const field = document.activeElement;
+  const form = field?.closest?.("form");
+  if (!form) return false;
+  if (form.querySelector("input[type=password]")) return true;
+  if (form.closest("search, [role=search]")) return false;
+  const fields = [...form.querySelectorAll("input, textarea, select")]
+    .filter((f) => !["hidden", "submit", "button", "reset", "image"].includes(f.type));
+  return !(field.type === "search" && fields.length === 1);
+})()`;
+
 const SELECT_CONTENTS = `function () {
   if (typeof this.select === "function") return this.select();
   if (this.isContentEditable) {
@@ -363,7 +377,7 @@ export class Page {
     return this.#audited("press", key, async (entry) => {
       await this.#guard();
       await this.#announce({ label: `press ${key}` });
-      const submits = key === "Enter" && (await this.#evaluate(`!!document.activeElement?.closest?.("form")`));
+      const submits = key === "Enter" && (await this.#evaluate(SUBMITS_RISKY_FORM));
       await this.#confirm("press Enter, which submits a form", submits === true);
       const finishDownload = await this.#watchDownloads();
       const network = await this.#trackNetwork();
