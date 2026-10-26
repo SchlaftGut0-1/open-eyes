@@ -45,6 +45,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Fixed
 
+- `open-eyes do` stops the local model when it is killed (a timeout, Ctrl+C), also while
+  the model is starting. Before, `llama-server` kept running and held the model in GPU
+  memory.
 - `open` waits (up to 5 s) until the page shows something. Single-page apps load an empty
   shell first, and Amazon on a cold start loads itself again right after loading, so the
   snapshot after `open` came out empty (2 lines, no refs).
