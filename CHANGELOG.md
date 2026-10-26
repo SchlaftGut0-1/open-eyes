@@ -8,6 +8,8 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Changed
 
+- The overlay shows only the agent's pointer while it acts, no longer a purple box around
+  the element, which stayed on screen after the action.
 - `scroll` moves the page in small steps that speed up and slow down, as a person does,
   instead of one jump; `scroll @N` scrolls the element into view smoothly.
 
