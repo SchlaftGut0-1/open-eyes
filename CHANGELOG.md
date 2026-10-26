@@ -6,6 +6,13 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Clicking a form's submit button asks for approval under `confirm risky` by the same rule
+  as pressing Enter: forms with a password field, and any form that is not a search. Before,
+  a click only asked when the button's name had a risky word, so a login form was sent
+  without asking when its button said "Log in" or "Continue".
+
 ### Changed
 
 - The overlay shows only the agent's pointer while it acts, no longer a purple box around
