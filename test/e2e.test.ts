@@ -864,6 +864,16 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     }
   });
 
+  test("click on a disabled control fails instead of reporting a click", async () => {
+    await cli("open", fixture("disabled.html"));
+    const snapshot = await cli("snapshot");
+    for (const button of ["button Pay", "button Save", "button Next step"]) {
+      assert.match(await cliError("click", refOf(snapshot, button)), /is disabled, so clicking it does nothing/, button);
+    }
+    assert.match(await cli("click", refOf(snapshot, "button Reset")), /^clicked button "Reset"/);
+    assert.equal(await cli("eval", "result.textContent"), "reset");
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");

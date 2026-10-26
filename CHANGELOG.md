@@ -32,6 +32,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Fixed
 
+- `click` on a disabled control (`disabled`, inside a disabled fieldset, or
+  `aria-disabled="true"`) fails and says it is disabled. Before, it reported "clicked"
+  although nothing happened, and agents went on as if it had worked.
 - On a scaled screen (125%, 200%), the default snapshot showed the wrong part of the page:
   elements on screen were listed as below it, so after `scroll @N` the element seemed still
   off screen. What is on screen is now measured in the page's own pixels.
