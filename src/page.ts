@@ -165,6 +165,19 @@ const SELECT_CONTENTS = `function () {
   }
 }`;
 
+// Scrolls the element into view so a person sees the page move, and resolves once it stopped
+// (or after a second, for pages that never say so).
+const SMOOTH_INTO_VIEW = `function () {
+  const r = this.getBoundingClientRect();
+  if (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) return;
+  return new Promise((resolve) => {
+    const done = () => resolve();
+    document.addEventListener("scrollend", done, { once: true, capture: true });
+    setTimeout(done, 1000);
+    this.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+  });
+}`;
+
 /** Where downloads started by agent actions are saved. */
 const DOWNLOADS_DIR = process.env.OPEN_EYES_DOWNLOADS ?? join(homedir(), "Downloads", "open-eyes");
 const DOWNLOAD_TIMEOUT_MS = 120_000;
@@ -532,7 +545,8 @@ export class Page {
       if (ref && !direction) {
         const { backendNodeId, label, frame } = await this.#resolve(ref);
         entry.target = label;
-        const box = await this.#locate(backendNodeId, ref, frame); // Scrolls it into view.
+        await this.#smoothIntoView(backendNodeId, frame);
+        const box = await this.#locate(backendNodeId, ref, frame); // Already in view, unless in an iframe.
         await this.#announce({ label: `scroll to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
         summary = `scrolled to ${label}`;
       } else {
@@ -550,7 +564,7 @@ export class Page {
         const dir = direction ?? "down";
         await this.#announce({ label: `scroll ${dir} ${where}`, x, y, busy: true });
         network = await this.#trackNetwork(); // Lazy loading fetches as the page moves.
-        await this.#send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: dir === "down" ? distance : -distance });
+        await this.#wheel(x, y, dir === "down" ? distance : -distance);
         await this.#overlay({ type: "idle" });
         summary = `scrolled ${dir} ${distance} px in ${where}`;
       }
@@ -562,6 +576,33 @@ export class Page {
       }
       return `${summary}\n${await this.snapshot()}`;
     });
+  }
+
+  /**
+   * Turns the mouse wheel by `delta` pixels over (x, y) in small steps that speed up and slow
+   * down, as a person scrolling does, instead of one jump.
+   */
+  async #wheel(x: number, y: number, delta: number): Promise<void> {
+    const steps = Math.min(Math.max(Math.round(Math.abs(delta) / 30), 6), 24);
+    const pause = Math.min(Math.max(Math.abs(delta) * 0.6, 250), 600) / steps;
+    const ease = (t: number) => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2);
+    let done = 0;
+    for (let step = 1; step <= steps; step++) {
+      const next = Math.round(delta * ease(step / steps));
+      await this.#send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: next - done });
+      done = next;
+      await sleep(pause);
+    }
+  }
+
+  /** Scrolls the element to the middle of its scroller smoothly, if it is not on screen. */
+  async #smoothIntoView(backendNodeId: number, frame?: string): Promise<void> {
+    const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
+    await this.#sendIn(frame, "Runtime.callFunctionOn", {
+      objectId: object.objectId,
+      awaitPromise: true,
+      functionDeclaration: SMOOTH_INTO_VIEW,
+    }).catch(() => {}); // #locate scrolls it anyway.
   }
 
   /**

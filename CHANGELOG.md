@@ -6,6 +6,11 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `scroll` moves the page in small steps that speed up and slow down, as a person does,
+  instead of one jump; `scroll @N` scrolls the element into view smoothly.
+
 ## [0.5.0] - 2026-10-25
 
 A local model can now carry out routine tasks for the main agent (`open-eyes do`), with a

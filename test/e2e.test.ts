@@ -482,6 +482,19 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("scroll", "sideways"), /usage: open-eyes scroll/);
   });
 
+  test("scroll moves the page in steps, as a person does", async () => {
+    await cli("open", fixture("tall.html"));
+    await cli("eval", "window.positions = new Set(); addEventListener('scroll', () => positions.add(scrollY)), 1");
+    assert.match(await cli("scroll", "down", "1200"), /^scrolled down 1200 px in the page$/m);
+    assert.ok(Number(await cli("eval", "positions.size")) >= 4, "the page passed through several positions");
+    assert.equal(await cli("eval", "scrollY"), "1200");
+
+    await cli("eval", "positions.clear(), 1");
+    const intoView = await cli("scroll", refOf(await cli("snapshot", "--find", "Bottom button"), "button Bottom button"));
+    assert.match(intoView, /button Bottom button @\d+/);
+    assert.ok(Number(await cli("eval", "positions.size")) >= 2, "scrolling to the element was smooth");
+  });
+
   test("select chooses options in native and custom dropdowns", async () => {
     await cli("open", fixture("dropdowns.html"));
     const snapshot = await cli("snapshot");
