@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { homedir } from "node:os";
+import { constants, homedir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -208,6 +208,17 @@ export async function startNavigator(installed: Installed): Promise<{ endpoint: 
   const args = ["-m", installed.modelFile, "--jinja", "-c", "16384", "--no-webui", "--host", "127.0.0.1", "--port", String(port)];
   if (device) args.push("--device", device);
   const child = spawn(installed.serverBinary, args, { stdio: ["ignore", "ignore", "pipe"] });
+  // Killed by a signal (a timeout, Ctrl+C), Node runs no finally and the server would keep
+  // the model on the GPU: stop it first.
+  const onSignal = (signal: NodeJS.Signals) => {
+    child.kill();
+    process.exit(128 + constants.signals[signal]);
+  };
+  process.once("SIGINT", onSignal).once("SIGTERM", onSignal);
+  const stop = () => {
+    process.off("SIGINT", onSignal).off("SIGTERM", onSignal);
+    child.kill();
+  };
   let log = "";
   child.stderr.on("data", (chunk: Buffer) => (log = (log + chunk).slice(-4000)));
   let exited = false;
@@ -215,10 +226,10 @@ export async function startNavigator(installed: Installed): Promise<{ endpoint: 
   const url = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + SERVER_START_MS;
   while (!exited && Date.now() < deadline) {
-    if ((await fetch(`${url}/health`).catch(() => undefined))?.ok) return { endpoint: { url: `${url}/v1`, model: "" }, stop: () => child.kill() };
+    if ((await fetch(`${url}/health`).catch(() => undefined))?.ok) return { endpoint: { url: `${url}/v1`, model: "" }, stop };
     await sleep(500);
   }
-  child.kill();
+  stop();
   const errors = log.split("\n").filter((line) => /error|fail/i.test(line)).slice(-4).join("\n");
   throw new Error(`the local model did not start${errors ? `:\n${errors}` : ""}`);
 }
