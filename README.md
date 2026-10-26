@@ -165,9 +165,9 @@ open-eyes log                                       # what the agent did
 - Before a risky action, the window highlights the target and asks **Allow / Deny**.
   Only real clicks from you count; page scripts cannot answer. `confirm always` asks for
   every action; `confirm never` turns questions off (for unattended runs).
-- The audit log records every action and its outcome, never the text typed into fields,
-  and keeps only the origin and path of URLs: query strings and fragments often hold what
-  you typed or secrets such as tokens and codes.
+- The audit log records every action, its outcome and what you allowed on screen, never
+  the text typed into fields, and keeps only the origin and path of URLs: query strings
+  and fragments often hold what you typed or secrets such as tokens and codes.
 
 These guardrails stop pages from steering a well-behaved agent. They cannot stop an
 agent that is itself compromised: it has a shell and could edit the policy file.

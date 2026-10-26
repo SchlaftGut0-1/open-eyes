@@ -19,6 +19,9 @@ All notable changes to open-eyes are documented here. The format follows
   the URL of a form sent with GET (`?p=…`). Once a trace typed into a password field, the
   outputs of the commands after it are not stored. Such traces were already left out of
   the export; now the local file does not have it either.
+- The audit log says which actions the user allowed on screen: `open-eyes log` shows
+  `(the user allowed: click button "Send")`. Before, an approved risky action looked the
+  same as one that never asked.
 
 ### Changed
 

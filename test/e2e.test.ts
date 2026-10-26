@@ -303,6 +303,11 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       const sending = cliWith(ask, "click", refOf(snapshot, 'button Send'));
       await human.click("allow");
       assert.match(await sending, /clicked button "Send"/);
+      // The log says which actions the user allowed, and only those.
+      const [terms, send] = (await cli("log", "--limit", "2")).split("\n");
+      assert.match(terms, /OK +click {2}checkbox "Accept terms"/);
+      assert.doesNotMatch(terms, /the user allowed/);
+      assert.match(send, /OK +click {2}button "Send" .*\(the user allowed: click button "Send"\)/);
 
       const again = cliErrorWith(ask, "click", refOf(snapshot, 'button Send'));
       await human.click("deny");
