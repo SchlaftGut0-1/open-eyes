@@ -974,6 +974,29 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.doesNotMatch(found, /Bach/);
   });
 
+  test("a page behind HTTP authentication says how to log in, and its password is kept nowhere", async () => {
+    const login = `Basic ${Buffer.from("admin:s3cret-pw").toString("base64")}`;
+    const server = createServer((request, response) => {
+      if (request.headers.authorization === login) return response.end("<h1>Inside</h1>");
+      response.writeHead(401, { "www-authenticate": 'Basic realm="intranet"' }).end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.match(await cliError("open", `http://${host}/admin`), /asks for a user name and password \(HTTP authentication\); if the user gives them to you, open http:\/\/USER:PASSWORD@/);
+      assert.equal(await cli("open", `http://admin:s3cret-pw@${host}/admin`), `http://${host}/admin`);
+      assert.match(await cli("snapshot"), /heading Inside/);
+      assert.doesNotMatch(await cli("log", "--limit", "5"), /s3cret-pw/);
+      await cli("trace", "start", "Log in to the intranet");
+      await cli("open", `http://admin:s3cret-pw@${host}/admin`);
+      const id = (await cli("trace", "stop", "done")).match(/stopped trace ([\w-]+)/)![1];
+      assert.doesNotMatch(readFileSync(join(root, "state", "open-eyes", "traces", `${id}.jsonl`), "utf8"), /s3cret-pw/);
+      await cli("trace", "delete", id);
+    } finally {
+      server.close();
+    }
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");

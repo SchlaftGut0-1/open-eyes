@@ -352,11 +352,20 @@ export class Page {
     } catch (error) {
       return Promise.reject(error);
     }
+    const parsed = URL.parse(target);
+    // A password in the URL (https://user:password@host/) is never stored in a trace.
+    if (parsed?.password) this.typedSecret = true;
     return this.#audited("open", target, async () => {
       const reason = blockedReason(this.#policy, target);
       if (reason) throw new PolicyError("blocked", reason);
-      await this.#announce({ label: `opening ${target}` });
+      await this.#announce({ label: `opening ${parsed ? `${parsed.origin}${parsed.pathname}` : target}` });
       const { errorText } = await this.#send<{ errorText?: string }>("Page.navigate", { url: target });
+      if (errorText === "net::ERR_INVALID_AUTH_CREDENTIALS" && parsed) {
+        throw new Error(
+          `${parsed.origin}${parsed.pathname} asks for a user name and password (HTTP authentication)` +
+            (parsed.password ? ", and these were refused" : `; if the user gives them to you, open ${parsed.protocol}//USER:PASSWORD@${parsed.host}${parsed.pathname}`),
+        );
+      }
       if (errorText) throw new Error(`could not open ${target}: ${errorText}`);
       this.#state.refs = {};
       await this.#settle(30_000);
