@@ -590,6 +590,49 @@ export class Page {
   }
 
   /**
+   * Drags `from` onto `to` as a person does: press, move in steps, release. Pages using HTML5
+   * drag and drop get their drop through CDP's drag interception; pages listening to mouse
+   * events see the same moves.
+   */
+  drag(from: Target, to: Target): Promise<string> {
+    return this.#audited("drag", `${describeTarget(from)} to ${describeTarget(to)}`, async (entry) => {
+      await this.#guard();
+      const source = await this.#resolve(from);
+      const target = await this.#resolve(to);
+      entry.target = `${source.label} to ${target.label}`;
+      // shortcut: both must fit on screen together; a drag that needs scrolling midway is not supported yet.
+      await this.#locate(source.backendNodeId, source.ref, source.frame);
+      const end = await this.#locate(target.backendNodeId, target.ref, target.frame);
+      const start = await this.#locate(source.backendNodeId, source.ref, source.frame, { scroll: false });
+      const a = { x: start.x + start.width / 2, y: start.y + start.height / 2 };
+      const b = { x: end.x + end.width / 2, y: end.y + end.height / 2 };
+      await this.#announce({ label: `drag ${source.label} to ${target.label}`, ...a, busy: true });
+      const network = await this.#trackNetwork();
+      let dragged: unknown;
+      const stop = this.#cdp.on("Input.dragIntercepted", ({ data }, session) => {
+        if (session === this.#sessionId) dragged = data;
+      });
+      await this.#send("Input.setInterceptDrags", { enabled: true });
+      try {
+        const mouse = (type: string, p: { x: number; y: number }) =>
+          this.#send("Input.dispatchMouseEvent", { type, ...p, button: "left", clickCount: 1, buttons: type === "mouseReleased" ? 0 : 1 });
+        await mouse("mousePressed", a);
+        for (let step = 1; step <= 10; step++) {
+          await mouse("mouseMoved", { x: a.x + ((b.x - a.x) * step) / 10, y: a.y + ((b.y - a.y) * step) / 10 });
+          await sleep(20);
+        }
+        if (dragged) for (const type of ["dragEnter", "dragOver", "drop"]) await this.#send("Input.dispatchDragEvent", { type, ...b, data: dragged });
+        await mouse("mouseReleased", b);
+      } finally {
+        stop();
+        await this.#send("Input.setInterceptDrags", { enabled: false }).catch(() => {});
+      }
+      await this.#overlay({ type: "idle" });
+      return `dragged ${source.label} to ${target.label}${await this.#observe(entry.url, network)}`;
+    });
+  }
+
+  /**
    * A click on an option of a native dropdown chooses it, like `select` does, since the click
    * itself would do nothing. Returns undefined for any other option, which takes a real click.
    */
@@ -952,10 +995,15 @@ export class Page {
     await this.#send("Accessibility.enable");
     const { nodes } = await this.#send<{ nodes: AXNode[] }>("Accessibility.getFullAXTree");
     const frames = await this.#frameContents();
+    const { root } = await this.#send<{ root: { nodeId: number } }>("DOM.getDocument", { depth: 0 });
+    const { nodeIds } = await this.#send<{ nodeIds: number[] }>("DOM.querySelectorAll", { nodeId: root.nodeId, selector: '[draggable="true"]' });
+    const draggable = new Set<number>();
+    for (const nodeId of nodeIds) draggable.add((await this.#send<{ node: { backendNodeId: number } }>("DOM.describeNode", { nodeId })).node.backendNodeId);
     const { text, refs, nextRef, lineNodes } = formatSnapshot(
       nodes,
       { byNode, nextRef: sameDocument ? (this.#state.nextRef ?? 1) : 1 },
       frames,
+      draggable,
     );
 
     let previous: string[] | undefined;

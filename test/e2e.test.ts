@@ -954,6 +954,18 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("hover", refOf(snapshot, "image User avatar")), /\+ +"Ana María, admin"/);
   });
 
+  test("drag moves an element onto another, by drag and drop or by mouse", async () => {
+    await cli("open", fixture("drag.html"));
+    const snapshot = await cli("snapshot");
+    // draggable="true" elements get refs; Chromium calls them groups.
+    const [card, done] = [...snapshot.matchAll(/^group @(\d+)$/gm)].map((m) => `@${m[1]}`);
+    assert.match(await cli("drag", card, done), /^dragged group "" to group ""/);
+    assert.match(await cli("eval", "document.getElementById('done').textContent"), /got Card 1/);
+    await cli("drag", refOf(snapshot, "button Knob"), refOf(snapshot, "button Slot"));
+    assert.equal(await cli("eval", "document.getElementById('slot').textContent"), "Knob here");
+    assert.match(await cliError("drag", card), /usage: open-eyes drag <@N> <@M>/);
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");

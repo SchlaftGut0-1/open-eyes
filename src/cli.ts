@@ -60,6 +60,7 @@ Page (works in the agent's own window)
                          Alt+, Control+, Meta+ or Shift+ for a combination (Control+a)
   select <@N> <option>   Choose an option by its text in a dropdown (native or custom)
   hover <@N>             Move the mouse over an element and report what appeared
+  drag <@N> <@M>         Drag an element onto another (lists, boards, drop zones)
   upload <@N> <file...>  Attach local files to a file input (asks the user first)
                          Instead of <@N>, these take --name <text> [--role <role>]:
                          the element with that accessible name, no snapshot needed
@@ -80,7 +81,7 @@ Page (works in the agent's own window)
 
 Scripts (open-eyes run): \`page\` methods, all async
   goto(url)  snapshot({ full, find, scope, diff, interactive, limit, page })
-  click("@N", "right"|"double"?)  fill("@N", text)  press(key)  select("@N", option)  hover("@N")
+  click("@N", "right"|"double"?)  drag("@N", "@M")  fill("@N", text)  press(key)  select("@N", option)  hover("@N")
   upload("@N", [paths])   Each also takes { name, role? } instead of "@N"
   scroll(ref?, "down"|"up", px?)
   waitForText(text, ms?)  wait(ms)
@@ -399,6 +400,10 @@ async function main([command, ...args]: string[]): Promise<void> {
       const [target, label] = takeTarget(args, "upload <@N> <file...>");
       if (!args.length) throw new Error("usage: open-eyes upload <@N> <file...>");
       return withPage(`upload ${label} ${args.map((f) => f.split("/").pop()).join(" ")}`, (page) => page.upload(target, args));
+    }
+    case "drag": {
+      if (args.length !== 2 || !args.every((arg) => /^@\d+$/.test(arg))) throw new Error("usage: open-eyes drag <@N> <@M>");
+      return withPage(`drag ${args[0]} ${args[1]}`, (page) => page.drag(args[0], args[1]));
     }
     case "hover": {
       const [target, label] = takeTarget(args, "hover <@N>");
