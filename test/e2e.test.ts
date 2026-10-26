@@ -888,6 +888,19 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("snapshot"), /heading Second load/);
   });
 
+  test("press sends key combinations", async () => {
+    await cli("open", fixture("form.html"));
+    await cli("fill", refOf(await cli("snapshot"), "textbox Name"), "Ana María");
+    await cli("press", "Control+a"); // Selects the field's text, typing no "a".
+    await cli("press", "Backspace");
+    assert.equal(await cli("eval", "document.getElementById('name').value"), "");
+    await cli("press", "Tab");
+    assert.equal(await cli("eval", "document.activeElement.id"), "tos");
+    assert.match(await cli("press", "Shift+Tab"), /^pressed Shift\+Tab/);
+    assert.equal(await cli("eval", "document.activeElement.id"), "name");
+    assert.match(await cliError("press", "Hyper+a"), /unknown key "Hyper\+a"; .*Alt\+, Control\+, Meta\+ or Shift\+/);
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");

@@ -73,6 +73,9 @@ const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
   PageDown: { code: "PageDown", keyCode: 34 },
 };
 
+// CDP's modifier bits for Input.dispatchKeyEvent.
+const MODIFIERS: Record<string, number> = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
+
 // Resolves once the DOM has gone QUIET_MS without changes (or after MAX_MS for pages that
 // never stop, like carousels), so frameworks can finish re-rendering after an action.
 const QUIET_MS = 300;
@@ -500,10 +503,17 @@ export class Page {
   }
 
   async press(key: string, announce = true): Promise<string> {
-    const def = KEYS[key] ?? (key.length === 1 ? { code: "", keyCode: key.toUpperCase().charCodeAt(0), text: key } : null);
-    if (!def) throw new Error(`unknown key "${key}"; use a single character or one of: ${Object.keys(KEYS).join(", ")}`);
+    // "Control+Shift+a": modifiers, then the key (which may itself be "+").
+    const [, held, base] = /^((?:(?:Alt|Control|Meta|Shift)\+)*)(.+)$/.exec(key)!;
+    const modifiers = held.split("+").reduce((bits, name) => bits | (MODIFIERS[name] ?? 0), 0);
+    const known = KEYS[base] ?? (base.length === 1 ? { code: "", keyCode: base.toUpperCase().charCodeAt(0), text: base } : null);
+    if (!known) {
+      throw new Error(`unknown key "${key}"; use a single character or one of: ${Object.keys(KEYS).join(", ")}, after Alt+, Control+, Meta+ or Shift+ if needed`);
+    }
+    // With Alt, Control or Meta held, a key is a shortcut and types nothing.
+    const def = modifiers & ~MODIFIERS.Shift ? { ...known, text: undefined } : known;
     const dispatch = async () => {
-      const common = { key: key === "Space" ? " " : key, code: def.code, windowsVirtualKeyCode: def.keyCode };
+      const common = { key: base === "Space" ? " " : base, code: def.code, windowsVirtualKeyCode: def.keyCode, modifiers };
       await this.#send("Input.dispatchKeyEvent", { type: def.text ? "keyDown" : "rawKeyDown", text: def.text, ...common });
       await this.#send("Input.dispatchKeyEvent", { type: "keyUp", ...common });
     };
@@ -514,7 +524,7 @@ export class Page {
     return this.#audited("press", key, async (entry) => {
       await this.#guard();
       await this.#announce({ label: `press ${key}` });
-      const submits = key === "Enter" && (await this.#evaluate(SUBMITS_RISKY_FORM));
+      const submits = base === "Enter" && (await this.#evaluate(SUBMITS_RISKY_FORM));
       await this.#confirm("press Enter, which submits a form", submits === true);
       const finishDownload = await this.#watchDownloads();
       const network = await this.#trackNetwork();

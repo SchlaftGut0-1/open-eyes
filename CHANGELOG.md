@@ -23,6 +23,11 @@ All notable changes to open-eyes are documented here. The format follows
   `(the user allowed: click button "Send")`. Before, an approved risky action looked the
   same as one that never asked.
 
+### Added
+
+- `press` sends key combinations: `press Control+a`, `press Shift+Tab`,
+  `press Control+Enter` (Alt+, Control+, Meta+ and Shift+, in any number).
+
 ### Changed
 
 - The overlay shows only the agent's pointer while it acts, no longer a purple box around
