@@ -175,6 +175,10 @@ const IS_DISABLED = `function () {
   return this.matches?.(":disabled") || this.getAttribute?.("aria-disabled") === "true";
 }`;
 
+// Loaded and showing something. Some sites load again right after the first load, so the
+// document may still be loading here.
+const HAS_CONTENT = `document.readyState === "complete" && ((document.body?.innerText.trim() ?? "") !== "" || !!document.body?.querySelector("a[href], button, input, select, textarea, [role]"))`;
+
 const SELECT_CONTENTS = `function () {
   if (typeof this.select === "function") return this.select();
   if (this.isContentEditable) {
@@ -353,6 +357,10 @@ export class Page {
       if (errorText) throw new Error(`could not open ${target}: ${errorText}`);
       this.#state.refs = {};
       await this.#settle(30_000);
+      // Single-page apps load an empty shell first, and some sites (Amazon on a cold start)
+      // load again right away: wait until the page shows something.
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && !(await this.#evaluate(HAS_CONTENT).catch(() => true))) await sleep(100);
       await this.#leaveIfBlocked(); // A redirect may have gone somewhere else.
       const current = await this.url();
       await this.#announce({ label: `on ${current}` }, false);

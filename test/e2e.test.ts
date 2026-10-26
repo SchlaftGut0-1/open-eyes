@@ -881,6 +881,13 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("open", join(import.meta.dirname, "fixtures", "missing.html")), /no such file: .*missing\.html/);
   });
 
+  test("open waits for a page that renders after loading, or loads again", async () => {
+    await cli("open", fixture("late.html"));
+    assert.match(await cli("snapshot"), /heading Rendered\nbutton Go @\d+/);
+    await cli("open", fixture("reloads.html"));
+    assert.match(await cli("snapshot"), /heading Second load/);
+  });
+
   test("hover opens menus and tooltips and reports them", async () => {
     await cli("open", fixture("hover.html"));
     const snapshot = await cli("snapshot");
