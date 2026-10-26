@@ -168,6 +168,12 @@ const CLICK_SUBMITS_RISKY_FORM = `function () {
   return submits && !!this.form && (${RISKY_FORM})(this.form);
 }`;
 
+// Whether the element is a disabled control: disabled itself or by its fieldset (:disabled),
+// or marked aria-disabled, as custom buttons are.
+const IS_DISABLED = `function () {
+  return this.matches?.(":disabled") || this.getAttribute?.("aria-disabled") === "true";
+}`;
+
 const SELECT_CONTENTS = `function () {
   if (typeof this.select === "function") return this.select();
   if (this.isContentEditable) {
@@ -393,11 +399,15 @@ export class Page {
         const chosen = await this.#chooseNativeOption(backendNodeId, label, frame, entry);
         if (chosen) return chosen;
       }
+      // A click on a disabled control does nothing: say so, or the agent goes on as if it worked.
+      if ((await this.#callOn(backendNodeId, frame, IS_DISABLED)) === true) {
+        throw new Error(`${label} is disabled, so clicking it does nothing; something else on the page may need doing first (a required field, a checkbox), then take a new snapshot`);
+      }
       const box = await this.#locate(backendNodeId, ref, frame);
       const x = box.x + box.width / 2;
       const y = box.y + box.height / 2;
       await this.#announce({ label: `click ${label}`, x, y, busy: true });
-      const submits = await this.#clickSubmitsRiskyForm(backendNodeId, frame);
+      const submits = (await this.#callOn(backendNodeId, frame, CLICK_SUBMITS_RISKY_FORM)) === true;
       await this.#confirm(submits ? `click ${label}, which submits a form` : `click ${label}`, submits || isRiskyClick(label));
       const finishDownload = await this.#watchDownloads();
       const network = await this.#trackNetwork();
@@ -1063,14 +1073,15 @@ export class Page {
     };
   }
 
-  async #clickSubmitsRiskyForm(backendNodeId: number, frame?: string): Promise<boolean> {
+  /** Runs `functionDeclaration` with the element as `this` and returns its value. */
+  async #callOn(backendNodeId: number, frame: string | undefined, functionDeclaration: string): Promise<unknown> {
     const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
     const { result } = await this.#sendIn<{ result: { value?: unknown } }>(frame, "Runtime.callFunctionOn", {
       objectId: object.objectId,
-      functionDeclaration: CLICK_SUBMITS_RISKY_FORM,
+      functionDeclaration,
       returnByValue: true,
     });
-    return result.value === true;
+    return result.value;
   }
 
   /** Runs an action and records it in the audit log, whatever the outcome. */
