@@ -42,11 +42,11 @@ test("parsePolicy keeps only valid entries", () => {
   });
 });
 
-test("risky clicks are buttons that spend, send, delete or publish", () => {
-  for (const label of ['button "Buy now"', 'button "Send"', 'menuitem "Delete repository"', 'button "Pagar"', 'button "Place order"']) {
+test("risky clicks are buttons and links that spend, send, delete or publish", () => {
+  for (const label of ['button "Buy now"', 'button "Send"', 'menuitem "Delete repository"', 'button "Pagar"', 'button "Place order"', 'link "Delete"', 'link "Comprar ahora"']) {
     assert.ok(isRiskyClick(label), label);
   }
-  for (const label of ['button "Search"', 'link "Delete"', 'button "Posts"', 'checkbox "Accept terms"', 'button "Next"']) {
+  for (const label of ['button "Search"', 'link "About"', 'button "Posts"', 'checkbox "Accept terms"', 'button "Next"']) {
     assert.ok(!isRiskyClick(label), label);
   }
 });

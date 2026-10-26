@@ -141,19 +141,32 @@ const FIELD_KIND = `function () {
   return { kind: "none", instead: "click" };
 }`;
 
-// Whether Enter in the focused field submits a form worth asking about. A search is not:
-// a form in a search landmark, or one whose only field is a search box. A form with a
-// password field always is, and so is any other form.
-const SUBMITS_RISKY_FORM = `(() => {
-  const field = document.activeElement;
-  const form = field?.closest?.("form");
-  if (!form) return false;
+// Whether submitting a form is worth asking about. A search is not: a form in a search
+// landmark, or one whose only field is a search box. A form with a password field always
+// is, and so is any other form. Enter and a click on the form's submit button use the same
+// rule, so neither is a way around the other.
+const RISKY_FORM = `(form) => {
   if (form.querySelector("input[type=password]")) return true;
   if (form.closest("search, [role=search]")) return false;
   const fields = [...form.querySelectorAll("input, textarea, select")]
     .filter((f) => !["hidden", "submit", "button", "reset", "image"].includes(f.type));
-  return !(field.type === "search" && fields.length === 1);
+  return !(fields.length === 1 && fields[0].type === "search");
+}`;
+
+// Whether Enter in the focused field submits a form worth asking about.
+const SUBMITS_RISKY_FORM = `(() => {
+  const form = document.activeElement?.closest?.("form");
+  return !!form && (${RISKY_FORM})(form);
 })()`;
+
+// Whether clicking this element submits a form worth asking about: a submit button (a
+// <button> without a type is one) or a submit/image input, of a form.
+const CLICK_SUBMITS_RISKY_FORM = `function () {
+  const submits =
+    (this instanceof HTMLButtonElement && this.type === "submit") ||
+    (this instanceof HTMLInputElement && (this.type === "submit" || this.type === "image"));
+  return submits && !!this.form && (${RISKY_FORM})(this.form);
+}`;
 
 const SELECT_CONTENTS = `function () {
   if (typeof this.select === "function") return this.select();
@@ -384,7 +397,8 @@ export class Page {
       const x = box.x + box.width / 2;
       const y = box.y + box.height / 2;
       await this.#announce({ label: `click ${label}`, x, y, busy: true });
-      await this.#confirm(`click ${label}`, isRiskyClick(label));
+      const submits = await this.#clickSubmitsRiskyForm(backendNodeId, frame);
+      await this.#confirm(submits ? `click ${label}, which submits a form` : `click ${label}`, submits || isRiskyClick(label));
       const finishDownload = await this.#watchDownloads();
       const network = await this.#trackNetwork();
       await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
@@ -1047,6 +1061,16 @@ export class Page {
         await this.#cdp.send("Browser.setDownloadBehavior", { behavior: "default" }).catch(() => {});
       }
     };
+  }
+
+  async #clickSubmitsRiskyForm(backendNodeId: number, frame?: string): Promise<boolean> {
+    const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
+    const { result } = await this.#sendIn<{ result: { value?: unknown } }>(frame, "Runtime.callFunctionOn", {
+      objectId: object.objectId,
+      functionDeclaration: CLICK_SUBMITS_RISKY_FORM,
+      returnByValue: true,
+    });
+    return result.value === true;
   }
 
   /** Runs an action and records it in the audit log, whatever the outcome. */

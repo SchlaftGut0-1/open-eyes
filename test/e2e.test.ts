@@ -778,17 +778,23 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("trace", "stop", "done", "Hello, Ana (accepted)"), /^stopped trace [\w-]+: done, 5 commands$/);
 
     await cli("trace", "start", "Log in");
-    await cli("fill", "--name", "Password", "hunter2-secret");
+    await cli("open", fixture("login-get.html"));
+    await cli("fill", "--name", "User", "ana");
+    await cli("fill", "--name", "Secret", "hunter2-secret");
+    // Sent with GET: the password comes back in the URL the next output prints.
+    assert.match(await cli("click", "--name", "Log in"), /second\.html\?u=ana&p=hunter2-secret/);
     await cli("trace", "stop", "failed");
 
     const list = await cli("trace");
     assert.match(list, /done +5 commands  Sign up as Ana/);
-    assert.match(list, /failed +1 commands  Log in/);
+    assert.match(list, /failed +4 commands  Log in/);
     const [first, second] = list.split("\n").map((line) => line.split(" ")[0]);
     const shown = await cli("trace", "show", first);
     assert.match(shown, /^goal: Sign up as Ana\noutcome: done \(Hello, Ana \(accepted\)\)/);
     assert.match(shown, /\$ open-eyes fill @\d+ Ana\nfilled textbox "Name"/);
-    assert.match(await cli("trace", "show", second), /\$ open-eyes fill \(typed into a password field, not stored\)/);
+    const login = await cli("trace", "show", second);
+    assert.match(login, /\$ open-eyes fill \(typed into a password field, not stored\)/);
+    assert.match(login, /\$ open-eyes click --name "Log in"\n\(not stored: a password was typed earlier in this trace\)/);
     const stored = readFileSync(join(root, "state", "open-eyes", "traces", `${second}.jsonl`), "utf8");
     assert.doesNotMatch(stored, /hunter2/);
 
@@ -817,6 +823,42 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       const pressing = cliErrorWith(ask, "press", "Enter");
       await human.click("deny");
       assert.match(await pressing, /the user denied: press Enter, which submits a form/);
+    } finally {
+      human.close();
+    }
+  });
+
+  test("links with risky words ask like buttons", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    await cli("open", fixture("links.html"));
+    const snapshot = await cli("snapshot");
+    assert.match(await cliWith(ask, "click", refOf(snapshot, "link About")), /the page changed to .*second\.html/);
+    await cli("open", fixture("links.html"));
+    const human = await humanAt();
+    try {
+      const buying = cliErrorWith(ask, "click", refOf(await cli("snapshot"), "link Buy now"));
+      await human.click("deny");
+      assert.match(await buying, /the user denied: click link "Buy now"/);
+    } finally {
+      human.close();
+    }
+  });
+
+  test("clicking a form's submit button asks as Enter does", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    for (const button of ["button Go", "button Look up"]) {
+      await cli("open", fixture("site-search.html"));
+      assert.match(await cliWith(ask, "click", refOf(await cli("snapshot"), button)), /the page changed to .*second\.html/);
+    }
+    // "Log in" has none of the risky words; its form has a password field.
+    await cli("open", fixture("site-search.html"));
+    const snapshot = await cli("snapshot");
+    await cli("fill", refOf(snapshot, "textbox User"), "ana");
+    const human = await humanAt();
+    try {
+      const clicking = cliErrorWith(ask, "click", refOf(snapshot, "button Log in"));
+      await human.click("deny");
+      assert.match(await clicking, /the user denied: click button "Log in", which submits a form/);
     } finally {
       human.close();
     }
