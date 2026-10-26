@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Tab panel</title>
+<div role="tablist">
+  <button role="tab" id="tab" aria-controls="panel" aria-selected="false">Details</button>
+</div>
+<div style="height: 1500px"></div>
+<div role="tabpanel" id="panel" aria-labelledby="tab" tabindex="-1" hidden>
+  <h2>Owner</h2>
+  <div style="height: 2000px"></div>
+  <h2>License <a href="second.html" aria-label="About licenses">ⓘ</a></h2>
+  <p>BSD-3-Clause</p>
+  <div style="height: 2000px"></div>
+</div>
+<script>
+  // Like PyPI's tabs: opening the panel moves to it. With #lock, the page also pulls
+  // every scroll it did not get from the mouse wheel back to the panel's top.
+  const panel = document.getElementById("panel");
+  let wheel = 0;
+  addEventListener("wheel", () => (wheel = Date.now()));
+  document.getElementById("tab").addEventListener("click", (event) => {
+    event.currentTarget.setAttribute("aria-selected", "true");
+    panel.hidden = false;
+    panel.focus();
+    if (location.hash !== "#lock") return;
+    addEventListener("scroll", () => {
+      if (Date.now() - wheel > 500) scrollTo(0, panel.offsetTop);
+    });
+  });
+</script>
