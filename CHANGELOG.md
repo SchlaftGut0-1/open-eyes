@@ -8,6 +8,10 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Security
 
+- open-eyes never opens the browser's own pages (`chrome://`, `chrome-extension://`,
+  `devtools://`, `edge://`, `brave://`). Before, with no allow list, `open
+  chrome://password-manager/passwords` worked, so a page's hidden instructions could steer
+  the agent to the saved passwords or settings, in `connect` mode those of the user.
 - Clicking a form's submit button asks for approval under `confirm risky` by the same rule
   as pressing Enter: forms with a password field, and any form that is not a search. Before,
   a click only asked when the button's name had a risky word, so a login form was sent
