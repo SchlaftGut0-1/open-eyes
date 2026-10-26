@@ -191,6 +191,8 @@ const CONFIRM_TIMEOUT_MS = 120_000;
 export class Page {
   /** Set once text is typed into a password field, so traces can leave it out. */
   typedSecret = false;
+  /** Tabs the agent's window opened during the current action. */
+  #opened: string[] = [];
   #cdp: CDP;
   #sessionId: string;
   #state: State;
@@ -213,11 +215,37 @@ export class Page {
     cdp.on("Target.detachedFromTarget", ({ sessionId: session }) => {
       for (const [frame, info] of this.#frames) if (info.session === session) this.#frames.delete(frame);
     });
+    cdp.on("Target.targetCreated", ({ targetInfo }) => {
+      if (targetInfo.type === "page" && targetInfo.openerId === this.#state.targetId) this.#opened.push(targetInfo.targetId);
+    });
   }
 
   async init(): Promise<void> {
     // The agent's window is usually not focused; make the page behave as if it were.
     await this.#send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    await this.#cdp.send("Target.setDiscoverTargets", { discover: true });
+  }
+
+  /**
+   * After an action that opened a tab from the agent's window (a link with target=_blank,
+   * window.open), the agent follows it: that tab becomes the agent window.
+   */
+  async #followOpenedTab(): Promise<string> {
+    const targetId = this.#opened.at(-1);
+    this.#opened = [];
+    if (!targetId) return "";
+    await this.#overlay({ type: "hide" }); // The old tab is no longer the agent's.
+    const { sessionId } = await this.#cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
+    this.#sessionId = sessionId;
+    this.#frames.clear();
+    this.#autoAttached.clear();
+    Object.assign(this.#state, { targetId, refs: {}, refsLoaderId: undefined });
+    await this.init();
+    await this.#settle(10_000);
+    await this.#leaveIfBlocked();
+    const url = await this.url();
+    await this.#announce({ label: `on ${url}` }, false);
+    return `\nit opened a new tab, which is now the agent window: ${url}; run "open-eyes snapshot" to see it`;
   }
 
   goto(url: string): Promise<string> {
@@ -922,8 +950,10 @@ export class Page {
   async #audited<T>(action: string, target: string, run: (entry: AuditEntry) => Promise<T>): Promise<T> {
     const entry: AuditEntry = { action, target, outcome: "ok" };
     entry.url = await this.url().catch(() => undefined);
+    this.#opened = [];
     try {
-      return await run(entry);
+      const result = await run(entry);
+      return typeof result === "string" ? (`${result}${await this.#followOpenedTab()}` as T) : result;
     } catch (error) {
       entry.outcome = error instanceof PolicyError ? error.outcome : "error";
       entry.detail = (error as Error).message;

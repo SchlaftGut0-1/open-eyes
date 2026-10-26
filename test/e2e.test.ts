@@ -482,6 +482,30 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("scroll", "sideways"), /usage: open-eyes scroll/);
   });
 
+  test("the agent follows a tab its action opened", async () => {
+    for (const opener of ["link New tab", "link No opener", "button Pop up"]) {
+      await cli("open", fixture("popups.html"));
+      const opened = await cli("click", refOf(await cli("snapshot"), opener));
+      assert.match(opened, /it opened a new tab, which is now the agent window: .*second\.html;/, opener);
+      assert.match(await cli("snapshot"), /^title: "Second page"$/m, opener);
+    }
+
+    // The policy applies to the new tab too.
+    const server = createServer((_, response) => {
+      const port = (server.address() as AddressInfo).port;
+      response.end(`<a href="http://localhost:${port}/" target="_blank">Elsewhere</a>`);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      await cli("open", `http://127.0.0.1:${(server.address() as AddressInfo).port}/`);
+      await cli("policy", "block", "localhost");
+      assert.match(await cliError("click", refOf(await cli("snapshot"), "link Elsewhere")), /localhost is blocked by your open-eyes policy; open-eyes left it/);
+    } finally {
+      await cli("policy", "reset");
+      server.close();
+    }
+  });
+
   test("select chooses options in native and custom dropdowns", async () => {
     await cli("open", fixture("dropdowns.html"));
     const snapshot = await cli("snapshot");
