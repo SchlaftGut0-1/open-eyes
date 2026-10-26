@@ -8,6 +8,7 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Added
 
+- `open-eyes --version` and `open-eyes version` print the installed version.
 - `open-eyes do "<goal>"` lets a local model carry out a routine task in the agent
   window, through any OpenAI-compatible endpoint set in `OPEN_EYES_MODEL_URL` (llama.cpp's
   `llama-server`, Ollama). It prints the outcome (`done`, `not done`, `not sure` or
