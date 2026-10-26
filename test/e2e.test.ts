@@ -521,6 +521,20 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cliError("dialog", "dismiss", "text"), /dismiss takes no text/);
   });
 
+  test("a risky confirm needs the user's own answer", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    await cli("open", fixture("dialogs.html"));
+    const snapshot = await cli("snapshot");
+    await cli("click", refOf(snapshot, "button Delete"));
+    assert.match(await cliErrorWith(ask, "dialog", "accept"), /the confirm "Delete it\?" needs the user's own answer/);
+    assert.match(await cli("dialog"), /a confirm: "Delete it\?"/); // Still open, for the user.
+    assert.match(await cliWith(ask, "dialog", "dismiss"), /^dismissed the confirm/);
+    assert.equal(await cli("eval", "result.textContent"), "kept");
+    // A question with no risky word can still be answered by the agent.
+    await cli("click", refOf(snapshot, "button Name"));
+    assert.match(await cliWith(ask, "dialog", "accept", "Ana"), /^accepted the prompt "Your name\?" with "Ana"/);
+  });
+
   test("a dialog the page opens between commands is reported, not waited on", async () => {
     await cli("open", fixture("dialogs.html"));
     await cli("eval", "setTimeout(() => confirm('Keep going?'), 300), 1");

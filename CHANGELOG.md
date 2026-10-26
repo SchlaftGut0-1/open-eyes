@@ -8,6 +8,10 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Security
 
+- `open-eyes dialog accept` no longer accepts a risky confirm or prompt for the user: under
+  `confirm risky`, one whose text has a risky word ("Delete this repository?"), and under
+  `confirm always`, any. It stays open and the user answers it in the window. Before, a
+  button with no risky words could open such a confirm and the agent could accept it.
 - open-eyes never opens the browser's own pages (`chrome://`, `chrome-extension://`,
   `devtools://`, `edge://`, `brave://`). Before, with no allow list, `open
   chrome://password-manager/passwords` worked, so a page's hidden instructions could steer
