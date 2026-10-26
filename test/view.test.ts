@@ -69,6 +69,12 @@ describe("diffLines properties", () => {
 });
 
 describe("findLines", () => {
+  test("matches text joined by non-breaking spaces as typed with normal ones", () => {
+    const infobox = ["- table", '  - rowheader "Designed\u00a0by"', '  - link "Guido van Rossum" @28'];
+    assert.deepEqual(findLines(infobox, "Designed by"), ["- table", '  - rowheader "Designed\u00a0by"']);
+    assert.deepEqual(findLines(infobox, "guido  van"), ["- table", '  - link "Guido van Rossum" @28']);
+  });
+
   test("keeps matches with their ancestors, in order", () => {
     assert.deepEqual(findLines(page, "pears"), ['- list "Cart"', '  - listitem "Pears"']);
     assert.deepEqual(findLines(page, "remove"), [
@@ -169,6 +175,10 @@ describe("refsByName", () => {
     3: { backendNodeId: 3, label: 'link "Save"' },
     4: { backendNodeId: 4, label: 'textbox "Search \\"docs\\""' },
   };
+  test("matches names with non-breaking spaces", () => {
+    assert.deepEqual(refsByName({ 7: { backendNodeId: 7, label: 'link "Designed\u00a0by"' } }, "designed by"), ["@7"]);
+  });
+
   test("prefers exact names, ignoring case, and filters by role", () => {
     assert.deepEqual(refsByName(refs, "save"), ["@1", "@3"]);
     assert.deepEqual(refsByName(refs, "Save", "Button"), ["@1"]);

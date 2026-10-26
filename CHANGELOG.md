@@ -6,6 +6,65 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-25
+
+A local model can now carry out routine tasks for the main agent (`open-eyes do`), with a
+fine-tuned navigator that `open-eyes model install` downloads, and sessions can be
+recorded as training examples (`open-eyes trace`).
+
+### Security
+
+- The audit log keeps only the origin and path of URLs. Query strings and fragments often
+  carry what the user typed or secrets, such as a phone number or a sign-up token that a
+  site put in its redirect, and they were stored in full.
+
+### Added
+
+- `open-eyes --version` and `open-eyes version` print the installed version.
+- `open-eyes do "<goal>"` lets a local model carry out a routine task in the agent
+  window, through any OpenAI-compatible endpoint set in `OPEN_EYES_MODEL_URL` (llama.cpp's
+  `llama-server`, Ollama). It prints the outcome (`done`, `not done`, `not sure` or
+  `stopped`), the actions it took and the page it ended on, so the main agent reads a few
+  lines instead of every snapshot. The model may only read, click, fill, select, press,
+  scroll and hover; policy, approvals and the audit log apply to each action, and a
+  denial or the user taking control ends the run. `--steps` and `--timeout` limit it.
+- `open-eyes model install` downloads the recommended local model for `do`,
+  [open-eyes navigator v1](https://huggingface.co/SchlaftGut/open-eyes-navigator) (2.2 GB):
+  Gemma 4 E2B fine-tuned on open-eyes sessions, which passed 91.1% of held-out tasks with no
+  false success claims, against 84.4% and 3 for Gemma 4 E2B itself. It also downloads
+  llama.cpp's server, after showing what it downloads and asking. Downloads
+  resume and are verified against pinned checksums. `do` then starts the server on the
+  dedicated GPU for each run. `open-eyes model` shows what is installed and whether a newer
+  model is available; `open-eyes model remove` deletes it. `OPEN_EYES_MODEL_URL` still
+  takes precedence.
+- `open-eyes trace start "<goal>"` records each following command and what it printed,
+  until `open-eyes trace stop [done|failed] [answer]`, as examples for training the local
+  model. Recording is opt-in, stays on this computer, and never stores text typed into
+  password fields or uploaded files' contents. `trace`, `trace show` and `trace delete`
+  review and remove traces; `trace export` writes chat/tool-call JSONL in the exact format
+  of `open-eyes do`, leaving out traces it could not learn from and saying why.
+
+### Changed
+
+- Pressing Enter in a search box no longer asks for approval: a form in a search landmark,
+  or whose only field is a search box, is not a risky submit. Forms with a password field,
+  or any other form, still ask.
+- `snapshot --find` and `--name` treat any whitespace as a space, so "Designed by" finds
+  Wikipedia's "Designed&nbsp;by" (a non-breaking space) the way an agent types it.
+- `fill` on a native dropdown chooses the option with that text, as `select` does, and
+  `fill` on anything that cannot take text (a link, button, checkbox, radio, file input or
+  read-only field) fails with what to use instead (`click`, `upload`). Before, it reported
+  "filled" although nothing was typed, and agents went on as if it had worked.
+- `open-eyes do` asks the model for a tool call on every reply (`tool_choice: "required"`),
+  gives it room to think before acting (2048 reply tokens instead of 400), reminds it once
+  when it answers in plain text or sends a call that cannot be read, and still reports the
+  actions taken when the model server fails. On 15 held-out tasks, Gemma 4 E2B went from 6
+  of 9 (old set) to 13 of 15, with one false success claim.
+- Clicking an option of a native dropdown chooses it, as `select` does, and reports
+  `chose "<option>" in <dropdown>`. Before, the click did nothing, since Chromium shows
+  those options in a popup outside the page. Options of a list that shows them all
+  (`multiple` or `size` above 1) still get a real click.
+
 ## [0.4.2] - 2026-10-25
 
 ### Security
@@ -164,7 +223,9 @@ cost 11,423 tokens now costs 5,121.
   `eval`, multi-step `run` scripts, a live overlay showing each action, and an agent
   skill.
 
-[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0-beta.1...v0.4.0
 [0.4.0-beta.1]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.3.0...v0.4.0-beta.1
