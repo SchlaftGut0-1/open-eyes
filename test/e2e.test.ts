@@ -773,6 +773,16 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       assert.match(await cliWith(modelEnv, "do", "Anything"), /^stopped: the model answered without finishing: Really done\./);
     });
 
+    test("stops at a dialog, which only the main agent can answer", async () => {
+      await cli("open", fixture("dialogs.html"));
+      script = [{ command: "click --name Delete" }, { command: "snapshot" }, { answer: "Deleted", success: true }];
+      const report = await cliWith(modelEnv, "do", "Delete it");
+      assert.match(report, /^stopped: click button "Delete": the page is showing a confirm: "Delete it\?"\./);
+      assert.match(report, /actions:\n  click --name Delete → click button "Delete": the page is showing a confirm/);
+      assert.equal(script.length, 2, "the model was not asked again");
+      await cli("dialog", "dismiss");
+    });
+
     test("explains how to set up a model when none is configured", async () => {
       assert.match(await cliErrorWith({ OPEN_EYES_MODEL_URL: "" }, "do", "anything"), /needs a local model[^]*open-eyes model install[^]*OPEN_EYES_MODEL_URL/);
       assert.match(await cli("model"), /^navigator model: not installed/);
