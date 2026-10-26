@@ -48,6 +48,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Fixed
 
+- When the agent moved to another tab, the old dialog watcher could delete the new one's
+  socket as it exited, so `open-eyes dialog accept` failed with "the dialog watcher is not
+  answering". A watcher now removes the socket only while it is still the current one.
 - `open-eyes do` stops when the page opens a dialog and reports it, so the main agent can
   answer it with `open-eyes dialog`. Before, the local model, which cannot answer dialogs,
   retried until it ran out of steps or time.
