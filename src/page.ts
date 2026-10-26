@@ -777,8 +777,8 @@ export class Page {
 
   /** Evaluates a JavaScript expression in the page and returns its JSON value. */
   eval(expression: string): Promise<unknown> {
-    const target = expression.length > 200 ? `${expression.slice(0, 200)}…` : expression;
-    return this.#audited("eval", target, async () => {
+    // Never the code: it may set a field to a secret, as fill's text may be one.
+    return this.#audited("eval", `(${expression.length} characters)`, async () => {
       await this.#guard();
       return this.#evaluate(expression);
     });
