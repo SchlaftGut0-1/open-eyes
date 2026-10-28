@@ -10,7 +10,7 @@ import type { CDP } from "./cdp.ts";
 import { decisionExpression, OVERLAY_WORLD, OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
 import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
 import { formatSnapshot, nodeKey, type AXNode, type Frame, type LineNode } from "./snapshot.ts";
-import { stateDir, type Ref, type State } from "./state.ts";
+import { space, spaceDir, stateDir, type Ref, type State } from "./state.ts";
 import { diffLines, findLines, interactiveIndexes, paginate, refsByName, subtree, viewportView, type Position } from "./view.ts";
 
 export type Box = { x: number; y: number; width: number; height: number };
@@ -35,7 +35,7 @@ const PAGE_CHANGE_SHARE = 0.5;
 /** The URL without its #fragment: jumping to a section is not a page change. */
 const withoutHash = (url: string) => url.replace(/#.*$/, "");
 /** The last snapshot's text, the baseline for diffs. */
-const baselineFile = join(stateDir, "snapshot.txt");
+const baselineFile = () => join(spaceDir(), "snapshot.txt");
 
 export type SnapshotOptions = {
   /** The whole page instead of what is on screen. */
@@ -1020,15 +1020,15 @@ export class Page {
     let previous: string[] | undefined;
     if (sameDocument) {
       try {
-        const saved = readFileSync(baselineFile, "utf8");
+        const saved = readFileSync(baselineFile(), "utf8");
         previous = saved ? saved.split("\n") : [];
       } catch {
         // No baseline yet.
       }
     }
     Object.assign(this.#state, { refs, refsLoaderId: loaderId, nextRef });
-    mkdirSync(stateDir, { recursive: true });
-    if (!rows) writeFileSync(baselineFile, text); // Diffs compare snapshots of the same shape.
+    mkdirSync(spaceDir(), { recursive: true });
+    if (!rows) writeFileSync(baselineFile(), text); // Diffs compare snapshots of the same shape.
     return { lines: text ? text.split("\n") : [], previous, lineNodes };
   }
 
@@ -1260,7 +1260,7 @@ export class Page {
 
   /** Updates the overlay and returns who is in control; never fails over drawing. */
   async #overlay(cmd: OverlayCommand): Promise<Owner> {
-    const owner = ((await this.#evaluateInOverlayWorld(overlayExpression(cmd, this.#state.owner)).catch(() => null)) as Owner) ?? null;
+    const owner = ((await this.#evaluateInOverlayWorld(overlayExpression(cmd, this.#state.owner, space())).catch(() => null)) as Owner) ?? null;
     if (owner) this.#state.owner = owner;
     return owner;
   }

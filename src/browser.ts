@@ -224,6 +224,17 @@ export async function disconnectBrowser(state: State): Promise<boolean> {
   return true;
 }
 
+/** The URLs of the browser's open pages, by target id. */
+export async function openPages(state: State): Promise<Map<string, string>> {
+  const cdp = await CDP.connect(await browserEndpoint(state));
+  try {
+    const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string; url: string }[] }>("Target.getTargets");
+    return new Map(targetInfos.filter((t) => t.type === "page").map((t) => [t.targetId, t.url]));
+  } finally {
+    cdp.close();
+  }
+}
+
 /** Connects to the browser and attaches to the agent's window, opening one if needed. */
 export async function connectPage(state: State): Promise<{ cdp: CDP; page: Page }> {
   const { cdp, page } = await connectExistingPage(state);

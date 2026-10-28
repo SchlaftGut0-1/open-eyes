@@ -6,6 +6,14 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Spaces: several agents can work in the same browser at once, each in its own window.
+  Add `--space <name>` to any command (or set `OPEN_EYES_SPACE`) and that agent gets its
+  own window, refs, snapshot baseline, take-control state and dialog watcher; the banner
+  shows the space's name. `open-eyes spaces` lists them, and `close --space <name>` closes
+  one and forgets it. Without a space, commands use the `default` one, as before (#23).
+
 ## [0.6.0] - 2026-10-28
 
 ### Security

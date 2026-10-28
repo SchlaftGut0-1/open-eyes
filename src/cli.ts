@@ -11,6 +11,7 @@ import {
   disconnectBrowser,
   findEverydayBrowser,
   launch,
+  openPages,
 } from "./browser.ts";
 import { need, takeFlag, takeNumber, takeOption, takeTarget, takeTimeout } from "./args.ts";
 import { audit, readAudit } from "./audit.ts";
@@ -22,12 +23,16 @@ import type { Page } from "./page.ts";
 import { CONFIRM_MODES, hasRiskyWords, loadPolicy, normalizeSite, PolicyError, policyFile, savePolicy, type ConfirmMode } from "./policy.ts";
 import { runScript } from "./run.ts";
 import { formatUsage, readUsage, recordUsage, resetUsage, usageSummary } from "./usage.ts";
-import { loadState, profileDir, saveState, socketPath } from "./state.ts";
+import { loadState, profileDir, saveState, socketPath, space, spaceDir, spaces } from "./state.ts";
 import { activeTrace, deleteTraces, formatCommand, listTraces, readTrace, recordStep, startTrace, stopTrace, toExample, tracesDir } from "./trace.ts";
 
 const HELP = `open-eyes: give your AI agent eyes on a real browser, while you watch.
 
-Usage: open-eyes <command> [args]
+Usage: open-eyes <command> [args] [--space <name>]
+
+  --space <name>         Work in the agent window of space <name> (or set
+                         OPEN_EYES_SPACE), so several agents do not share one;
+                         each space has its own window and refs (default: default)
 
 Browser
   launch [--headless]    Start a visible browser with the open-eyes profile
@@ -38,7 +43,8 @@ Browser
     --endpoint <ws-url>  A local DevTools WebSocket URL to connect to directly
   disconnect             Stop using your everyday browser
   status                 Show the browser and the agent window
-  close                  Close the agent window
+  close                  Close the agent window (and forget its space)
+  spaces                 List the spaces and the page each one shows
   version, --version     Print the open-eyes version
 
 Page (works in the agent's own window)
@@ -215,7 +221,11 @@ async function withPage(label: string, action: (page: Page) => Promise<unknown>)
 /** The command as typed, for traces; args are consumed while parsing. */
 let commandWords: string[] = [];
 
-async function main([command, ...args]: string[]): Promise<void> {
+async function main(argv: string[]): Promise<void> {
+  const named = takeOption(argv, "--space");
+  if (named !== undefined) process.env.OPEN_EYES_SPACE = named; // Processes it starts work in it too.
+  space(); // Refuses a bad name before anything uses it.
+  const [command, ...args] = argv;
   commandWords = [command, ...args];
   switch (command) {
     case "launch": {
@@ -364,7 +374,12 @@ async function main([command, ...args]: string[]): Promise<void> {
       const state = loadState();
       const closed = await closeAgentWindow(state);
       saveState(state);
+      if (space() !== "default") rmSync(spaceDir(), { recursive: true, force: true });
       return print(closed ? "closed the agent window" : "no agent window to close");
+    }
+    case "spaces": {
+      const pages = await openPages(loadState()).catch(() => new Map<string, string>());
+      return print(spaces().map((name) => `${name}: ${pages.get(loadState(name).targetId ?? "") ?? "no window"}`).join("\n"));
     }
     case "open":
       return withPage(`open ${args[0] ?? ""}`, (page) => page.goto(need(args[0], "open <url>")));

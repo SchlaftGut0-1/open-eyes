@@ -202,8 +202,13 @@ agent that is itself compromised: it has a shell and could edit the policy file.
 | `log` | Show the last actions the agent took |
 | `usage [show\|hide\|reset]` | Tokens each command cost the agent; `show` puts a live counter in the agent window |
 | `close` | Close the agent window |
+| `spaces` | List the spaces and the page each one shows |
 
 Set `OPEN_EYES_SLOWMO=0` to drop the pause that lets you follow each action.
+
+Several agents can work side by side: add `--space <name>` to any command (or set
+`OPEN_EYES_SPACE=<name>`) and that agent gets its own window, refs and take-control
+state, named on its banner. `close --space <name>` closes the window and forgets the space.
 
 ## How it works
 
