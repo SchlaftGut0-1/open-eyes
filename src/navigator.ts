@@ -201,7 +201,8 @@ export async function navigate(page: Page, goal: string, endpoint: Endpoint, opt
         messages.push({ role: "user", content: NO_TOOL_REMINDER });
         continue;
       }
-      outcome = `stopped: the model answered without finishing: ${oneLine(reply.content ?? "").slice(0, 200)}`;
+      const said = oneLine(reply.content ?? "").trim().slice(0, 200);
+      outcome = said ? `stopped: the model answered without finishing: ${said}` : "not done: the model gave no answer";
       break;
     }
     for (const call of calls) {
