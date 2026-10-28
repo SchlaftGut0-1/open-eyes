@@ -8,6 +8,16 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Added
 
+- open-eyes Browser, a first preview in `app/`: a desktop browser of our own (Electron
+  44, Chromium 152), in its own profile. Tabs are icons down a slim sidebar that expands to
+  show their titles; the address bar opens addresses or searches; new tabs open our own
+  page. Spaces (Work, Personal...) each have their own tabs, icon and color, and their own
+  logins, cookies and site data, kept apart from the others and restored when the app
+  opens again. Sign-in popups ("Sign in with GitHub") stay tied to their page. It runs
+  once per profile. DevTools listens on 127.0.0.1 only; pages are sandboxed and cannot
+  reach the app or `chrome://` pages. Run it with `cd app && npm install && npm start`;
+  the CLI cannot drive it yet (#82), and Google refuses to sign in while DevTools is on
+  (#80).
 - Spaces: several agents can work in the same browser at once, each in its own window.
   Add `--space <name>` to any command (or set `OPEN_EYES_SPACE`) and that agent gets its
   own window, refs, snapshot baseline, take-control state and dialog watcher; the banner
