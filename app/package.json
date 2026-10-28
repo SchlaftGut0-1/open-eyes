@@ -18,5 +18,8 @@
     "@types/node": "^22.20.5",
     "electron": "44.7.2",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "lucide": "1.57.0"
   }
 }

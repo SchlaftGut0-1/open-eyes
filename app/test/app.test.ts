@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -83,5 +83,38 @@ describe("open-eyes Browser", () => {
     await evaluate(tab, `window.open(${JSON.stringify(fixture("second.html"))}); true`);
     await until(async () => (await tabs()).length === 2);
     assert.deepEqual((await tabs()).map((t) => t.url).sort(), [FIRST, fixture("second.html")].sort());
+  });
+
+  test("a new tab shows our own page, and a pinned tab moves to the front", async () => {
+    const ui = (await pages()).find((t) => t.url.endsWith("/ui/index.html"))!;
+    const before = (await tabs()).length;
+    await evaluate(ui, "window.browser.send({ type: 'newTab' })");
+    await until(async () => (await tabs()).some((t) => t.url.endsWith("/newtab/index.html")));
+    assert.equal((await tabs()).length, before + 1);
+    const titles = () => evaluate(ui, "[...document.querySelectorAll('.tab')].map((t) => t.className + ' ' + t.title)") as Promise<string[]>;
+    await evaluate(ui, "document.querySelectorAll('.tab')[1].dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }))");
+    await until(async () => (await titles())[0].startsWith("tab pinned"));
+    assert.equal((await titles()).filter((t) => t.startsWith("tab pinned")).length, 1);
+    assert.equal((await evaluate(ui, "document.getElementById('address').value")), "", "the new tab page shows no address");
+  });
+
+  test("each space has its own tabs and its own site data, and is saved", async () => {
+    const ui = (await pages()).find((t) => t.url.endsWith("/ui/index.html"))!;
+    await until(async () => (await tabs()).some((t) => t.url === FIRST));
+    const firstTab = (await tabs()).find((t) => t.url === FIRST)!;
+    await evaluate(firstTab, "localStorage.setItem('who', 'first space'); true");
+    await evaluate(ui, "window.browser.send({ type: 'newSpace', name: 'Work', color: '#0d9488' })");
+    await until(async () => (await evaluate(ui, "document.querySelectorAll('.space:not(.add)').length")) === 2);
+    assert.equal(await evaluate(ui, "document.querySelectorAll('.tab').length"), 1, "a new space starts with one tab");
+    // The Work space's tab is the one that reaches the same page now.
+    const before = new Set((await tabs()).filter((t) => t.url === FIRST).map((t) => t.targetId));
+    await evaluate(ui, `window.browser.send({ type: 'navigate', input: ${JSON.stringify(FIRST)} })`);
+    let workTab: Target | undefined;
+    await until(async () => (workTab = (await tabs()).find((t) => t.url === FIRST && !before.has(t.targetId))) !== undefined);
+    assert.equal(await evaluate(workTab!, "localStorage.getItem('who')"), null, "the Work space does not see the first space's data");
+    // Saved half a second after the last change.
+    await until(async () => existsSync(join(profile, "spaces.json")) && readFileSync(join(profile, "spaces.json"), "utf8").includes('"Work"'));
+    const saved = JSON.parse(readFileSync(join(profile, "spaces.json"), "utf8"));
+    assert.deepEqual(saved.spaces.map((s: { name: string }) => s.name), ["Personal", "Work"]);
   });
 });

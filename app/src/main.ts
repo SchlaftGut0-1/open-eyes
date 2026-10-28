@@ -1,12 +1,16 @@
+import { randomUUID } from "node:crypto";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { app, BaseWindow, ipcMain, Menu, session, WebContentsView, type Input, type WebContents } from "electron";
+import { pathToFileURL } from "node:url";
+import { app, BaseWindow, ipcMain, Menu, nativeTheme, session, WebContentsView, type Input, type Session, type WebContents } from "electron";
 import { allowedInTab, toAddress } from "./address.ts";
+import { parseSaved, spaceColor, spaceName, type Saved, type SavedTab } from "./spaces.ts";
 
 /**
- * open-eyes Browser: our own window around Chromium's pages. The window's UI (sidebar, tabs,
- * address bar) is a sandboxed page of ours; each tab is a separate sandboxed view with no
- * access to the app. The CLI drives the tabs over DevTools, which listens only on this machine.
+ * open-eyes Browser: our own window around Chromium's pages. The window's UI (spaces rail,
+ * tabs, address bar) is a sandboxed page of ours; each tab is a separate sandboxed view with
+ * no access to the app. The CLI drives the tabs over DevTools, which listens only on this machine.
  */
 
 // Its own profile, apart from the user's browsers and from the one `open-eyes launch` uses.
@@ -15,91 +19,187 @@ app.setPath("userData", process.env.OPEN_EYES_BROWSER_PROFILE ?? join(dataHome, 
 // A port the system picks, on loopback only; Chromium writes it to DevToolsActivePort in the profile.
 app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 app.commandLine.appendSwitch("remote-debugging-port", "0");
+// Thin scrollbars over the page, so a page that does not declare its colors keeps no light track.
+app.commandLine.appendSwitch("enable-features", "OverlayScrollbar");
 app.setName("open-eyes Browser");
 
 const UI = join(import.meta.dirname, "ui", "index.html");
 const PRELOAD = join(import.meta.dirname, "preload.cjs");
-const NEW_TAB = "about:blank";
+const NEW_TAB = pathToFileURL(join(import.meta.dirname, "newtab", "index.html")).href;
+const SPACES_FILE = join(app.getPath("userData"), "spaces.json");
 
-type Tab = { id: number; view: WebContentsView };
+type Tab = { id: number; view: WebContentsView; favicon?: string; pinned?: boolean };
+/** A space: its own tabs and its own sessions. Saved tabs open the first time it is shown. */
+type Space = { id: string; name: string; color: string; tabs: Tab[]; active?: Tab; saved?: { tabs: SavedTab[]; active: number } };
 type Bounds = { x: number; y: number; width: number; height: number };
 /** What the UI asks for; anything else is ignored. */
 type Request =
   | { type: "newTab"; input?: string }
-  | { type: "closeTab"; id: number }
-  | { type: "activate"; id: number }
+  | { type: "closeTab" | "activate" | "pin"; id: number }
   | { type: "navigate"; input: string }
   | { type: "back" | "forward" | "reload" }
-  | { type: "bounds"; bounds: Bounds };
+  | { type: "bounds"; bounds: Bounds }
+  | { type: "newSpace"; name: string; color: string }
+  | { type: "renameSpace"; id: string; name: string; color: string }
+  | { type: "switchSpace" | "deleteSpace"; id: string }
+  | { type: "dialog"; open: boolean };
 
 let window: BaseWindow;
 let ui: WebContentsView;
-const tabs: Tab[] = [];
-let active: Tab | undefined;
+let spaces: Space[] = [];
+let current: Space;
 let nextId = 1;
 let page: Bounds = { x: 0, y: 0, width: 0, height: 0 };
+/** While the UI shows a dialog, the page steps aside so the dialog is not drawn under it. */
+let dialogOpen = false;
 
 const sandboxed = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true };
+const guarded = new WeakSet<Session>();
 
-/** Sends the tabs to the UI, which draws them. */
+/** The space's own sessions, with the same rules as every other. */
+function sessionFor(space: { id: string }): Session {
+  const ses = session.fromPartition(`persist:space-${space.id}`);
+  if (!guarded.has(ses)) {
+    // shortcut: every permission (camera, location, notifications...) is refused until the UI can ask the user.
+    ses.setPermissionRequestHandler((_contents, _permission, answer) => answer(false));
+    ses.setPermissionCheckHandler(() => false);
+    guarded.add(ses);
+  }
+  return ses;
+}
+
+let saveTimer: NodeJS.Timeout | undefined;
+/** Saves spaces and their tabs a moment after the last change, whole or not at all. */
+function save(): void {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const saved: Saved = {
+      current: current.id,
+      spaces: spaces.map((space) => {
+        if (space.saved) return { id: space.id, name: space.name, color: space.color, ...space.saved };
+        const open = space.tabs.filter((tab) => tab.view.webContents.getURL() !== NEW_TAB);
+        return {
+          id: space.id,
+          name: space.name,
+          color: space.color,
+          tabs: open.map((tab) => ({ url: tab.view.webContents.getURL(), ...(tab.pinned ? { pinned: true } : {}) })),
+          active: Math.max(0, open.indexOf(space.active!)),
+        };
+      }),
+    };
+    const temporary = `${SPACES_FILE}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(saved, null, 2), { mode: 0o600 });
+    renameSync(temporary, SPACES_FILE);
+  }, 500);
+}
+
+/** Sends the spaces and the current space's tabs to the UI, which draws them. */
 function publish(): void {
-  const history = active?.view.webContents.navigationHistory;
+  const history = current.active?.view.webContents.navigationHistory;
   ui.webContents.send("state", {
-    tabs: tabs.map(({ id, view }) => ({
+    newTab: NEW_TAB,
+    spaces: spaces.map(({ id, name, color, tabs, saved }) => ({ id, name, color, current: id === current.id, tabs: saved?.tabs.length ?? tabs.length })),
+    tabs: current.tabs.map(({ id, view, favicon, pinned }) => ({
       id,
+      favicon,
+      pinned: pinned ?? false,
       title: view.webContents.getTitle() || "New tab",
       url: view.webContents.getURL(),
       loading: view.webContents.isLoading(),
-      active: id === active?.id,
+      active: id === current.active?.id,
     })),
     canGoBack: history?.canGoBack() ?? false,
     canGoForward: history?.canGoForward() ?? false,
   });
+  save();
 }
 
-function activate(tab: Tab): void {
-  active = tab;
-  for (const { view } of tabs) view.setVisible(view === tab.view);
-  tab.view.setBounds(page);
+/** Shows the space's active tab and hides every other page. */
+function show(): void {
+  for (const space of spaces) for (const { view } of space.tabs) view.setVisible(!dialogOpen && view === current.active?.view);
+  current.active?.view.setBounds(page);
   publish();
 }
 
-function openTab(url = NEW_TAB): Tab {
-  const view = new WebContentsView({ webPreferences: sandboxed });
-  const tab = { id: nextId++, view };
-  view.setBorderRadius(14);
-  guardTab(view.webContents);
+function activate(tab: Tab): void {
+  current.active = tab;
+  show();
+}
+
+function switchTo(space: Space): void {
+  current = space;
+  if (space.saved) {
+    const { tabs, active } = space.saved;
+    space.saved = undefined;
+    for (const tab of tabs) openTab(space, tab.url, tab.pinned);
+    if (space.tabs[active]) space.active = space.tabs[active];
+  }
+  if (!space.tabs.length) openTab(space);
+  show();
+}
+
+function openTab(space: Space, url = NEW_TAB, pinned = false): Tab {
+  const view = new WebContentsView({ webPreferences: { ...sandboxed, session: sessionFor(space) } });
+  // The color shown before a page paints: the UI's, not a white flash.
+  view.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#13111d" : "#ffffff");
+  const tab: Tab = { id: nextId++, view, ...(pinned ? { pinned } : {}) };
+  guardTab(space, view.webContents);
+  view.webContents.on("page-favicon-updated", (_event, favicons) => {
+    tab.favicon = favicons.find((url) => /^(https|data):/.test(url));
+    publish();
+  });
+  view.webContents.on("did-navigate", () => (tab.favicon = undefined));
   for (const event of ["page-title-updated", "did-navigate", "did-navigate-in-page", "did-start-loading", "did-stop-loading"] as const) {
-    view.webContents.on(event as "did-stop-loading", publish);
+    view.webContents.on(event as "did-stop-loading", () => space === current && publish());
   }
   view.webContents.on("before-input-event", (event, input) => shortcut(event, input));
+  view.setVisible(false);
   window.contentView.addChildView(view);
-  tabs.push(tab);
+  space.tabs.push(tab);
   void view.webContents.loadURL(allowedInTab(url) ? url : NEW_TAB);
-  activate(tab);
+  space.active = tab;
+  if (space === current) show();
   return tab;
 }
 
-function closeTab(id: number): void {
-  const at = tabs.findIndex((tab) => tab.id === id);
+function closeTab(space: Space, id: number): void {
+  const at = space.tabs.findIndex((tab) => tab.id === id);
   if (at === -1) return;
-  const [tab] = tabs.splice(at, 1);
+  const [tab] = space.tabs.splice(at, 1);
   window.contentView.removeChildView(tab.view);
   tab.view.webContents.close();
-  if (!tabs.length) return void openTab();
-  if (active === tab) activate(tabs[Math.min(at, tabs.length - 1)]);
-  else publish();
+  if (!space.tabs.length) return void openTab(space);
+  if (space.active === tab) space.active = space.tabs[Math.min(at, space.tabs.length - 1)];
+  show();
 }
 
-/** A page may only go where a tab is allowed to, and opens new windows as tabs. */
-function guardTab(contents: WebContents): void {
+function focusAddress(text = ""): void {
+  ui.webContents.focus();
+  ui.webContents.send("focusAddress", text);
+}
+
+/** Pinned tabs come first; pinning moves a tab to the end of them, unpinning to just after. */
+function pin(space: Space, tab: Tab): void {
+  tab.pinned = !tab.pinned;
+  space.tabs.splice(space.tabs.indexOf(tab), 1);
+  space.tabs.splice(space.tabs.filter((t) => t.pinned).length, 0, tab);
+  publish();
+}
+
+/** A page may only go where a tab is allowed to, and opens new windows as tabs of its own space. */
+function guardTab(space: Space, contents: WebContents): void {
   const refuse = (event: { preventDefault(): void }, url: string) => {
-    if (!allowedInTab(url)) event.preventDefault();
+    if (allowedInTab(url)) return;
+    event.preventDefault();
+    // Our new tab page hands typing to the address bar; no other page may.
+    if (contents.getURL() === NEW_TAB && url.startsWith("open-eyes://focus-address")) {
+      focusAddress(URL.parse(url)?.searchParams.get("text") ?? "");
+    }
   };
   contents.on("will-navigate", refuse);
   contents.on("will-redirect", refuse);
   contents.setWindowOpenHandler(({ url }) => {
-    if (allowedInTab(url)) openTab(url);
+    if (allowedInTab(url)) openTab(space, url);
     return { action: "deny" };
   });
 }
@@ -109,33 +209,54 @@ function shortcut(event: { preventDefault(): void }, input: Input): void {
   if (input.type !== "keyDown") return;
   const ctrl = input.control || input.meta;
   const key = input.key.toLowerCase();
+  const contents = current.active?.view.webContents;
   const action =
-    ctrl && key === "t" ? () => openTab()
-    : ctrl && key === "w" ? () => active && closeTab(active.id)
-    : ctrl && key === "l" ? () => (ui.webContents.focus(), ui.webContents.send("focusAddress"))
-    : (ctrl && key === "r") || key === "f5" ? () => active?.view.webContents.reload()
-    : input.alt && key === "arrowleft" ? () => active?.view.webContents.navigationHistory.goBack()
-    : input.alt && key === "arrowright" ? () => active?.view.webContents.navigationHistory.goForward()
+    ctrl && key === "t" ? () => openTab(current)
+    : ctrl && key === "w" ? () => current.active && closeTab(current, current.active.id)
+    : ctrl && key === "l" ? () => focusAddress()
+    : (ctrl && key === "r") || key === "f5" ? () => contents?.reload()
+    : input.alt && key === "arrowleft" ? () => contents?.navigationHistory.goBack()
+    : input.alt && key === "arrowright" ? () => contents?.navigationHistory.goForward()
     : undefined;
   if (!action) return;
   event.preventDefault();
   action();
 }
 
+const nameTaken = (name: string, except?: Space) => spaces.some((s) => s !== except && s.name.toLowerCase() === name.toLowerCase());
+
+/** Closes a space's tabs and erases its sessions (cookies, logins, site data). */
+async function deleteSpace(space: Space): Promise<void> {
+  if (spaces.length === 1) return;
+  for (const tab of [...space.tabs]) {
+    window.contentView.removeChildView(tab.view);
+    tab.view.webContents.close();
+  }
+  spaces = spaces.filter((s) => s !== space);
+  if (current === space) switchTo(spaces[0]);
+  else publish();
+  const ses = sessionFor(space);
+  await ses.clearStorageData();
+  await ses.clearCache();
+}
+
 function handle(request: Request): void {
-  const contents = active?.view.webContents;
+  const contents = current.active?.view.webContents;
+  const tab = "id" in request && typeof request.id === "number" ? current.tabs.find((t) => t.id === request.id) : undefined;
+  const space = "id" in request && typeof request.id === "string" ? spaces.find((s) => s.id === request.id) : undefined;
   switch (request.type) {
     case "newTab":
-      openTab(request.input ? toAddress(request.input) : undefined);
+      openTab(current, request.input ? toAddress(request.input) : undefined);
       break;
     case "closeTab":
-      closeTab(request.id);
+      if (tab) closeTab(current, tab.id);
       break;
-    case "activate": {
-      const tab = tabs.find((t) => t.id === request.id);
+    case "pin":
+      if (tab) pin(current, tab);
+      break;
+    case "activate":
       if (tab) activate(tab);
       break;
-    }
     case "navigate":
       if (contents) void contents.loadURL(toAddress(request.input));
       break;
@@ -150,18 +271,59 @@ function handle(request: Request): void {
       break;
     case "bounds": {
       const { x, y, width, height } = request.bounds;
-      page = { x: Math.round(x), y: Math.round(y), width: Math.max(0, Math.round(width)), height: Math.max(0, Math.round(height)) };
-      active?.view.setBounds(page);
+      // Whole pixels that cover the box, so no sliver of the UI shows around the page.
+      const left = Math.floor(x);
+      const top = Math.floor(y);
+      page = { x: left, y: top, width: Math.max(0, Math.ceil(x + width) - left), height: Math.max(0, Math.ceil(y + height) - top) };
+      current.active?.view.setBounds(page);
       break;
     }
+    case "newSpace": {
+      const name = spaceName(request.name);
+      if (!name || nameTaken(name)) break;
+      const created: Space = { id: randomUUID().replace(/-/g, "").slice(0, 12), name, color: spaceColor(request.color), tabs: [] };
+      spaces.push(created);
+      switchTo(created);
+      break;
+    }
+    case "renameSpace": {
+      const name = spaceName(request.name);
+      if (space && name && !nameTaken(name, space)) Object.assign(space, { name, color: spaceColor(request.color) });
+      publish();
+      break;
+    }
+    case "switchSpace":
+      if (space) switchTo(space);
+      break;
+    case "deleteSpace":
+      if (space) void deleteSpace(space);
+      break;
+    case "dialog":
+      dialogOpen = request.open === true;
+      show();
+      break;
   }
+}
+
+function loadSpaces(): void {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(SPACES_FILE, "utf8"));
+  } catch {
+    // First run, or an unreadable file: start with one space.
+  }
+  const saved = parseSaved(raw);
+  spaces = saved.spaces.map(({ id, name, color, tabs, active }) => ({ id, name, color, tabs: [], saved: { tabs, active } }));
+  current = spaces.find((s) => s.id === saved.current)!;
 }
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
-  // shortcut: every permission (camera, location, notifications...) is refused until the UI can ask the user.
+  // Nothing should use the default session; refuse its permissions too.
+  sessionFor({ id: "default" });
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, answer) => answer(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
+  loadSpaces();
 
   window = new BaseWindow({ width: 1280, height: 820, minWidth: 720, minHeight: 480, title: "open-eyes Browser", backgroundColor: "#0b0a14" });
   ui = new WebContentsView({ webPreferences: { ...sandboxed, preload: PRELOAD } });
@@ -179,7 +341,15 @@ app.whenReady().then(() => {
   ipcMain.on("browser", (event, request: Request) => {
     if (event.sender === ui.webContents) handle(request);
   });
-  ui.webContents.once("did-finish-load", () => openTab(process.argv.find((arg) => /^(https?|file):/.test(arg))));
+  ui.webContents.once("did-finish-load", () => {
+    // An address given on the command line opens as the space's active tab.
+    const url = process.argv.find((arg) => /^(https?|file):/.test(arg));
+    if (url && current.saved) {
+      current.saved.tabs.push({ url });
+      current.saved.active = current.saved.tabs.length - 1;
+    }
+    switchTo(current);
+  });
   void ui.webContents.loadFile(UI);
   window.on("closed", () => app.quit());
 });

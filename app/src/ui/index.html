@@ -2,58 +2,87 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:">
 <title>open-eyes Browser</title>
 <link rel="stylesheet" href="ui.css">
 </head>
 <body>
-<header class="titlebar">
-  <div class="brand">
-    <img src="icon.svg" alt="" width="26" height="26">
-    <span>open-eyes</span>
+<nav class="rail" aria-label="Spaces">
+  <img class="logo" src="icon.svg" alt="open-eyes" width="30" height="30">
+  <div id="spaces" class="spaces"></div>
+  <button id="new-space" class="space add" aria-label="New space" title="New space">
+    <i data-lucide="plus"></i>
+  </button>
+</nav>
+<div class="chrome">
+  <div class="tabstrip">
+    <div id="tabs" class="tabs" role="tablist" aria-label="Tabs"></div>
+    <button id="new-tab" class="icon" aria-label="New tab" title="New tab (Ctrl+T)"><i data-lucide="plus"></i></button>
   </div>
-  <nav class="tabs" aria-label="Tabs in your space">
-    <div id="tabs" class="tablist"></div>
-    <button id="new-tab" class="icon" aria-label="New tab" title="New tab (Ctrl+T)">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-    </button>
-  </nav>
-</header>
-<div class="body">
-  <aside class="sidebar" aria-label="Spaces">
-    <section>
-      <h2>Your space</h2>
-      <div class="space current">
-        <span class="avatar" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
-        </span>
-        <span class="space-text"><span class="space-name">You</span><span id="tab-count" class="muted">1 tab</span></span>
-      </div>
-    </section>
-    <section>
-      <h2>Agent spaces</h2>
-      <p class="empty">Agents you start with <code>open-eyes</code> will work here, each in its own space.</p>
-    </section>
-  </aside>
-  <main class="content">
-    <form id="toolbar" class="toolbar">
-      <button type="button" id="back" class="icon" aria-label="Back" title="Back (Alt+Left)">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
-      </button>
-      <button type="button" id="forward" class="icon" aria-label="Forward" title="Forward (Alt+Right)">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
-      </button>
-      <button type="button" id="reload" class="icon" aria-label="Reload" title="Reload (Ctrl+R)">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
-      </button>
-      <label class="address">
-        <span class="visually-hidden">Address</span>
-        <input id="address" type="text" spellcheck="false" autocomplete="off" placeholder="Search or type an address">
-      </label>
-    </form>
+  <form id="toolbar" class="toolbar">
+    <button type="button" id="back" class="icon" aria-label="Back" title="Back (Alt+Left)"><i data-lucide="arrow-left"></i></button>
+    <button type="button" id="forward" class="icon" aria-label="Forward" title="Forward (Alt+Right)"><i data-lucide="arrow-right"></i></button>
+    <button type="button" id="reload" class="icon" aria-label="Reload" title="Reload (Ctrl+R)"><i data-lucide="rotate-cw"></i></button>
+    <label class="address">
+      <span id="security" class="security" aria-hidden="true"></span>
+      <span class="visually-hidden">Address</span>
+      <input id="address" type="text" spellcheck="false" autocomplete="off" placeholder="Search or type an address">
+      <span id="pretty" class="pretty" aria-hidden="true"><span id="host" class="host"></span><span id="rest" class="rest"></span></span>
+    </label>
+    <button type="button" id="agent" class="icon agent" aria-label="Agent panel" aria-expanded="false" aria-controls="panel" title="Agent panel"><i data-lucide="eye"></i></button>
+  </form>
+  <div id="loading" class="loading" hidden></div>
+  <div class="viewport">
     <div id="page" class="page" aria-hidden="true"></div>
-  </main>
+    <aside id="panel" class="panel" aria-label="Agent" hidden>
+      <header class="panel-head">
+        <h2>Agent</h2>
+        <button type="button" id="panel-close" class="icon" aria-label="Fold the agent panel" title="Fold"><i data-lucide="chevrons-right"></i></button>
+      </header>
+      <div class="panel-empty">
+        <span class="panel-eye" aria-hidden="true"><i data-lucide="eye"></i></span>
+        <p class="panel-title">No agent is working here yet</p>
+        <p class="panel-text">When you give an agent a space, it works there with that space's logins, in tabs of its own. You will see here what it does, step by step, and answer when it asks before a risky action.</p>
+      </div>
+    </aside>
+  </div>
 </div>
+
+<dialog id="space-dialog" class="dialog" aria-labelledby="space-dialog-title">
+  <form id="space-form" method="dialog">
+    <h2 id="space-dialog-title">New space</h2>
+    <p class="dialog-text">Each space keeps its own tabs and its own logins, apart from the others.</p>
+    <label class="field">
+      <span>Name</span>
+      <input id="space-name" type="text" maxlength="32" required autocomplete="off" placeholder="Work, Personal, Research…">
+    </label>
+    <fieldset class="colors">
+      <legend>Color</legend>
+      <div id="space-colors" class="swatches"></div>
+    </fieldset>
+    <p id="space-error" class="error" role="alert"></p>
+    <div class="dialog-actions">
+      <button type="button" id="space-delete" class="danger" hidden><i data-lucide="trash-2"></i>Delete space</button>
+      <span class="spacer"></span>
+      <button type="button" id="space-cancel" class="secondary">Cancel</button>
+      <button type="submit" id="space-save" class="primary">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="delete-dialog" class="dialog" aria-labelledby="delete-dialog-title">
+  <form method="dialog">
+    <h2 id="delete-dialog-title">Delete this space?</h2>
+    <p id="delete-text" class="dialog-text"></p>
+    <div class="dialog-actions">
+      <span class="spacer"></span>
+      <button type="button" id="delete-cancel" class="secondary">Keep it</button>
+      <button type="button" id="delete-confirm" class="danger solid">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="../../node_modules/lucide/dist/umd/lucide.min.js"></script>
 <script src="ui.js"></script>
 </body>
 </html>
