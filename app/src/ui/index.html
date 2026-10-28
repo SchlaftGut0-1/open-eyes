@@ -16,8 +16,9 @@
   <button id="new-tab" class="rail-add" aria-label="New tab" title="New tab (Ctrl+T)"><i data-lucide="plus"></i><span class="label">New tab</span></button>
   <span class="spacer"></span>
   <hr class="divider">
-  <button id="space-current" class="space" aria-haspopup="menu"></button>
+  <button id="space-current" class="space" aria-haspopup="menu" aria-expanded="false" aria-controls="space-menu"></button>
 </nav>
+<div id="space-menu" class="menu" role="menu" aria-label="Spaces" hidden></div>
 <div class="chrome">
   <form id="toolbar" class="toolbar">
     <button type="button" id="back" class="icon" aria-label="Back" title="Back (Alt+Left)"><i data-lucide="arrow-left"></i></button>

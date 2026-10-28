@@ -44,7 +44,6 @@ type Request =
   | { type: "newSpace"; name: string; color: string; icon: string }
   | { type: "renameSpace"; id: string; name: string; color: string; icon: string }
   | { type: "switchSpace" | "deleteSpace"; id: string }
-  | { type: "spaceMenu"; x: number; y: number }
   | { type: "dialog"; open: boolean };
 
 let window: BaseWindow;
@@ -53,8 +52,6 @@ let spaces: Space[] = [];
 let current: Space;
 let nextId = 1;
 let page: Bounds = { x: 0, y: 0, width: 0, height: 0 };
-/** While the UI shows a dialog, the page steps aside so the dialog is not drawn under it. */
-let dialogOpen = false;
 
 const sandboxed = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true };
 const guarded = new WeakSet<Session>();
@@ -120,7 +117,7 @@ function publish(): void {
 
 /** Shows the space's active tab and hides every other page. */
 function show(): void {
-  for (const space of spaces) for (const { view } of space.tabs) view.setVisible(!dialogOpen && view === current.active?.view);
+  for (const space of spaces) for (const { view } of space.tabs) view.setVisible(view === current.active?.view);
   current.active?.view.setBounds(page);
   publish();
 }
@@ -309,18 +306,11 @@ function handle(request: Request): void {
     case "deleteSpace":
       if (space) void deleteSpace(space);
       break;
-    case "spaceMenu":
-      // A native menu: drawn above the page, which a menu in the UI page would be hidden under.
-      Menu.buildFromTemplate([
-        ...spaces.map((s) => ({ label: s.name, type: "radio" as const, checked: s === current, click: () => switchTo(s) })),
-        { type: "separator" },
-        { label: "New space…", click: () => ui.webContents.send("spaceDialog", null) },
-        { label: `Edit ${current.name}…`, click: () => ui.webContents.send("spaceDialog", current.id) },
-      ]).popup({ window, x: Math.round(request.x), y: Math.round(request.y) });
-      break;
     case "dialog":
-      dialogOpen = request.open === true;
-      show();
+      // Pages are drawn over the UI. While the UI shows a menu or dialog it comes on top, and
+      // the page shows through it; afterwards the pages go back on top, in their order.
+      if (request.open === true) window.contentView.addChildView(ui);
+      else for (const space of spaces) for (const { view } of space.tabs) window.contentView.addChildView(view);
       break;
   }
 }
@@ -347,6 +337,7 @@ app.whenReady().then(() => {
 
   window = new BaseWindow({ width: 1280, height: 820, minWidth: 720, minHeight: 480, title: "open-eyes Browser", backgroundColor: "#0b0a14" });
   ui = new WebContentsView({ webPreferences: { ...sandboxed, preload: PRELOAD } });
+  ui.setBackgroundColor("#00000000"); // Clear where the page is, so menus can be drawn over it.
   window.contentView.addChildView(ui);
   const fit = () => {
     const [width, height] = window.getContentSize();

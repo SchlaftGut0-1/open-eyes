@@ -80,15 +80,68 @@ function showCurrentSpace(space) {
   chevron.classList.add("chevron");
   button.replaceChildren(icon(space.icon), name, chevron);
 }
-$("space-current").addEventListener("click", () => {
-  const { right, top } = $("space-current").getBoundingClientRect();
-  send({ type: "spaceMenu", x: right + 6, y: top });
+// The UI comes on top of the page while a menu or dialog is open (see "dialog" in main.ts).
+const syncOverlay = () => send({ type: "dialog", open: !!document.querySelector("dialog[open]") || !$("space-menu").hidden });
+
+function menuItem(label, iconName, onClick, extra = {}) {
+  const item = Object.assign(document.createElement("button"), { className: `menu-item ${extra.className ?? ""}` });
+  item.setAttribute("role", extra.checked === undefined ? "menuitem" : "menuitemradio");
+  if (extra.checked !== undefined) item.setAttribute("aria-checked", String(extra.checked));
+  const glyph = icon(iconName);
+  if (extra.color) glyph.style.color = extra.color;
+  const name = Object.assign(document.createElement("span"), { className: "name", textContent: label });
+  item.append(glyph, name);
+  if (extra.checked) {
+    const check = icon("check");
+    check.classList.add("check");
+    item.append(check);
+  }
+  item.addEventListener("click", () => {
+    closeSpaceMenu();
+    onClick();
+  });
+  return item;
+}
+
+function openSpaceMenu() {
+  const current = state.spaces.find((s) => s.current);
+  const separator = Object.assign(document.createElement("div"), { className: "menu-sep", role: "separator" });
+  $("space-menu").replaceChildren(
+    ...state.spaces.map((s) => menuItem(s.name, s.icon, () => send({ type: "switchSpace", id: s.id }), { color: s.color, checked: s.current })),
+    separator,
+    menuItem("New space", "plus", () => openSpaceDialog(), { className: "secondary" }),
+    menuItem(`Edit ${current.name}`, "pencil", () => openSpaceDialog(current), { className: "secondary" }),
+  );
+  $("space-menu").hidden = false;
+  $("space-current").setAttribute("aria-expanded", "true");
+  syncOverlay();
+  $("space-menu").querySelector("[aria-checked=true]")?.focus();
+}
+function closeSpaceMenu() {
+  if ($("space-menu").hidden) return;
+  $("space-menu").hidden = true;
+  $("space-current").setAttribute("aria-expanded", "false");
+  syncOverlay();
+}
+$("space-current").addEventListener("click", () => ($("space-menu").hidden ? openSpaceMenu() : closeSpaceMenu()));
+document.addEventListener("mousedown", (event) => {
+  if (!$("space-menu").contains(event.target) && !$("space-current").contains(event.target)) closeSpaceMenu();
+});
+$("space-menu").addEventListener("keydown", (event) => {
+  const items = [...$("space-menu").querySelectorAll(".menu-item")];
+  const at = items.indexOf(document.activeElement);
+  if (event.key === "Escape") {
+    closeSpaceMenu();
+    $("space-current").focus();
+  } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    items[(at + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+  }
 });
 $("space-current").addEventListener("contextmenu", (event) => {
   event.preventDefault();
   openSpaceDialog(state.spaces.find((s) => s.current));
 });
-window.browser.onSpaceDialog((id) => openSpaceDialog(id ? state.spaces.find((s) => s.id === id) : undefined));
 
 // Expanded, the rail shows tab titles and the space's name; the choice stays on this computer.
 function expand(open) {
@@ -141,14 +194,10 @@ window.browser.onFocusAddress((text) => {
 
 // Dialogs: the page is a separate view drawn over the UI, so it steps aside while one is open.
 function openDialog(dialog) {
-  send({ type: "dialog", open: true });
   dialog.showModal();
+  syncOverlay();
 }
-for (const dialog of document.querySelectorAll("dialog")) {
-  dialog.addEventListener("close", () => {
-    if (!document.querySelector("dialog[open]")) send({ type: "dialog", open: false });
-  });
-}
+for (const dialog of document.querySelectorAll("dialog")) dialog.addEventListener("close", syncOverlay);
 
 /** The space a dialog is editing; none while creating one. */
 let editing;
