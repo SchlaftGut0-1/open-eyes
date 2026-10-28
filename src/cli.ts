@@ -3,6 +3,9 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 import {
+  APP_CLOSED,
+  appEndpoint,
+  appInstalled,
   browserVersion,
   closeAgentWindow,
   connectBrowser,
@@ -245,8 +248,9 @@ async function main(argv: string[]): Promise<void> {
         print(`browser: your everyday browser, connected through the open-eyes daemon (pid ${state.daemonPid})`);
       } else {
         const version = await browserVersion(state.port);
-        if (!version) return print(`no browser on port ${state.port}; run "open-eyes launch" or "open-eyes connect"`);
-        print(`browser: ${version.Browser} on port ${state.port}`);
+        if (version) print(`browser: ${version.Browser} on port ${state.port}`);
+        else if (await appEndpoint()) print("browser: open-eyes Browser");
+        else return print(appInstalled() ? APP_CLOSED : `no browser on port ${state.port}; run "open-eyes launch" or "open-eyes connect"`);
       }
       // Only look: status must not open an agent window in the user's browser.
       try {

@@ -34,11 +34,11 @@ function favicon(tab, newTab) {
 
 function tabElement(tab, newTab) {
   const element = document.createElement("div");
-  element.className = tab.pinned ? "tab pinned" : "tab";
+  element.className = ["tab", tab.pinned && "pinned", tab.agent && "agent"].filter(Boolean).join(" ");
   element.setAttribute("role", "tab");
   element.setAttribute("aria-selected", String(tab.active));
   element.tabIndex = tab.active ? 0 : -1;
-  element.title = tab.title;
+  element.title = tab.agent ? `${tab.title} · your agent works here` : tab.title;
   element.addEventListener("mousedown", (event) => {
     if (event.button === 1) send({ type: "closeTab", id: tab.id });
     else if (event.button === 0) send({ type: "activate", id: tab.id });
@@ -50,7 +50,7 @@ function tabElement(tab, newTab) {
     event.preventDefault();
     send({ type: "pin", id: tab.id });
   });
-  element.setAttribute("aria-label", tab.pinned ? `${tab.title} (pinned)` : tab.title);
+  element.setAttribute("aria-label", [tab.title, tab.pinned && "(pinned)", tab.agent && "(agent)"].filter(Boolean).join(" "));
   const close = Object.assign(document.createElement("button"), { className: "close" });
   close.setAttribute("aria-label", `Close ${tab.title}`);
   close.append(icon("X"));
@@ -58,6 +58,11 @@ function tabElement(tab, newTab) {
   close.addEventListener("click", () => send({ type: "closeTab", id: tab.id }));
   const title = Object.assign(document.createElement("span"), { className: "label", textContent: tab.title });
   element.append(favicon(tab, newTab), title, close);
+  if (tab.agent) {
+    const badge = Object.assign(document.createElement("span"), { className: "agent-badge" });
+    badge.append(icon("bot"));
+    element.append(badge);
+  }
   return element;
 }
 

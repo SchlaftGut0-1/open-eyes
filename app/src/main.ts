@@ -5,13 +5,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BaseWindow, ipcMain, Menu, nativeTheme, session, WebContentsView, type Input, type Session, type WebContents } from "electron";
 import { allowedInTab, toAddress } from "./address.ts";
+import { AgentBridge, agentSocketPath } from "./agent.ts";
 import { COLORS, ICONS, parseSaved, spaceColor, spaceIcon, spaceName, type Saved, type SavedTab } from "./spaces.ts";
 
 const dataHome = process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
 app.setPath("userData", process.env.OPEN_EYES_BROWSER_PROFILE ?? join(dataHome, "open-eyes", "browser"));
-// A port the system picks, on loopback only; Chromium writes it to DevToolsActivePort in the profile.
-app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
-app.commandLine.appendSwitch("remote-debugging-port", "0");
 app.commandLine.appendSwitch("enable-features", "OverlayScrollbar");
 app.setName("open-eyes Browser");
 // Say "Chrome", as the Chromium inside is: sites such as Google refuse to sign in browsers that say "Electron".
@@ -46,6 +44,15 @@ let page: Bounds = { x: 0, y: 0, width: 0, height: 0 };
 
 const sandboxed = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true };
 const guarded = new WeakSet<Session>();
+const findTab = (contents: WebContents) => spaces.flatMap((space) => space.tabs.map((tab) => ({ space, tab }))).find(({ tab }) => tab.view.webContents === contents);
+const agents = new AgentBridge({
+  product: `open-eyes Browser/${app.getVersion()} Chrome/${process.versions.chrome}`,
+  open: (url) => openTab(current, url).view.webContents,
+  close: (contents) => {
+    const found = findTab(contents);
+    if (found) closeTab(found.space, found.tab.id);
+  },
+});
 
 function sessionFor(space: { id: string }): Session {
   const ses = session.fromPartition(`persist:space-${space.id}`);
@@ -97,6 +104,7 @@ function publish(): void {
       id,
       favicon,
       pinned: pinned ?? false,
+      agent: agents.isAgentTab(view.webContents),
       title: view.webContents.getTitle() || "New tab",
       url: view.webContents.getURL(),
       loading: view.webContents.isLoading(),
@@ -199,7 +207,8 @@ function guardTab(space: Space, contents: WebContents): void {
     if (disposition === "new-window") {
       return { action: "allow", overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: "#13111d", webPreferences: { ...sandboxed, session: sessionFor(space) } } };
     }
-    openTab(space, url);
+    const opened = openTab(space, url);
+    if (agents.isAgentTab(contents)) void agents.adopt(opened.view.webContents, contents).then(publish);
     return { action: "deny" };
   });
   contents.on("did-create-window", (popup) => guardTab(space, popup.webContents));
@@ -358,6 +367,7 @@ app.whenReady().then(() => {
     switchTo(current);
   });
   void ui.webContents.loadFile(UI);
+  agents.listen(agentSocketPath(app.getPath("userData")));
   window.on("close", writeSpaces);
   window.on("closed", () => app.quit());
 });
