@@ -75,6 +75,11 @@ describe("findLines", () => {
     assert.deepEqual(findLines(infobox, "guido  van"), ["- table", '  - link "Guido van Rossum" @28']);
   });
 
+  test("shows a match in a table row with its whole row", () => {
+    const table = ["row", '  "Smith"', '  "jsmith@gmail.com"', "  link edit @3", "row", '  "Bach"', '  "fbach@yahoo.com"'];
+    assert.deepEqual(findLines(table, "jsmith"), ["row", '  "Smith"', '  "jsmith@gmail.com"', "  link edit @3"]);
+  });
+
   test("keeps matches with their ancestors, in order", () => {
     assert.deepEqual(findLines(page, "pears"), ['- list "Cart"', '  - listitem "Pears"']);
     assert.deepEqual(findLines(page, "remove"), [

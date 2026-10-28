@@ -38,16 +38,16 @@ You need Node.js 22 or newer and Chromium, Chrome, Brave or Edge. Install the pa
 from the latest [release](https://github.com/SchlaftGut0-1/open-eyes/releases):
 
 ```bash
-npm install -g https://github.com/SchlaftGut0-1/open-eyes/releases/download/v0.5.0/open-eyes-0.5.0.tgz
+npm install -g https://github.com/SchlaftGut0-1/open-eyes/releases/download/v0.6.0/open-eyes-0.6.0.tgz
 ```
 
 To check the package first, download it with its checksum and provenance from the
 release page, then:
 
 ```bash
-sha256sum -c open-eyes-0.5.0.tgz.sha256
-gh attestation verify open-eyes-0.5.0.tgz -R SchlaftGut0-1/open-eyes
-npm install -g ./open-eyes-0.5.0.tgz
+sha256sum -c open-eyes-0.6.0.tgz.sha256
+gh attestation verify open-eyes-0.6.0.tgz -R SchlaftGut0-1/open-eyes
+npm install -g ./open-eyes-0.6.0.tgz
 ```
 
 To use it from an agent, copy the skill into your agent's skills directory (for Claude
@@ -142,8 +142,9 @@ open-eyes trace delete --all
 
 A trace holds the goal, each command and what it printed, which includes page content
 and full URLs (the model learns from them), so review it before sharing it with anyone. Text typed into password fields and the
-contents of uploaded files are never stored, and a trace that typed a password is left
-out of the export. The export uses the exact prompt and tools of `open-eyes do`, so a
+contents of uploaded files are never stored, nor anything printed after a password was
+typed (it could come back in a URL), and a trace that typed a password is left out of the
+export. The export uses the exact prompt and tools of `open-eyes do`, so a
 model trained on it sees the same format it works with. Commands the local model cannot
 run (`eval`, `run`, `upload`, `open` after the first snapshot) also leave a trace out.
 
@@ -161,12 +162,12 @@ open-eyes log                                       # what the agent did
 
 - The agent cannot open, read or act on a site outside the policy, and open-eyes leaves
   the page if a click or redirect lands there.
-- Before a risky action, the window highlights the target and asks **Allow / Deny**.
+- Before a risky action, the window points at the target and asks **Allow / Deny**.
   Only real clicks from you count; page scripts cannot answer. `confirm always` asks for
   every action; `confirm never` turns questions off (for unattended runs).
-- The audit log records every action and its outcome, never the text typed into fields,
-  and keeps only the origin and path of URLs: query strings and fragments often hold what
-  you typed or secrets such as tokens and codes.
+- The audit log records every action, its outcome and what you allowed on screen, never
+  the text typed into fields, and keeps only the origin and path of URLs: query strings
+  and fragments often hold what you typed or secrets such as tokens and codes.
 
 These guardrails stop pages from steering a well-behaved agent. They cannot stop an
 agent that is itself compromised: it has a shell and could edit the policy file.

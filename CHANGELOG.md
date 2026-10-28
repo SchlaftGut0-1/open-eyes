@@ -6,6 +6,113 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-28
+
+### Security
+
+- A password in a URL (`https://user:password@host/`) is never stored: the audit log drops
+  `user:password@` from every URL, and a trace leaves out the command, as for typing into a
+  password field. Before, both kept it.
+- The audit log records `eval` by its length (`eval (57 characters)`), as it does `fill`.
+  Before, it kept the first 200 characters of the code, so an `eval` that set a password
+  field put the password in the log.
+- `open-eyes dialog accept` no longer accepts a risky confirm or prompt for the user: under
+  `confirm risky`, one whose text has a risky word ("Delete this repository?"), and under
+  `confirm always`, any. It stays open and the user answers it in the window. Before, a
+  button with no risky words could open such a confirm and the agent could accept it.
+- open-eyes never opens the browser's own pages (`chrome://`, `chrome-extension://`,
+  `devtools://`, `edge://`, `brave://`). Before, with no allow list, `open
+  chrome://password-manager/passwords` worked, so a page's hidden instructions could steer
+  the agent to the saved passwords or settings, in `connect` mode those of the user.
+- Clicking a form's submit button asks for approval under `confirm risky` by the same rule
+  as pressing Enter: forms with a password field, and any form that is not a search. Before,
+  a click only asked when the button's name had a risky word, so a login form was sent
+  without asking when its button said "Log in" or "Continue".
+- Links whose name has a risky word ("Buy now", "Delete account", "Comprar ahora") ask for
+  approval under `confirm risky`, as buttons do. Shops and apps often style links as
+  buttons; before, they were clicked without asking.
+- Traces no longer keep a password that comes back in a later command's output, such as
+  the URL of a form sent with GET (`?p=…`). Once a trace typed into a password field, the
+  outputs of the commands after it are not stored. Such traces were already left out of
+  the export; now the local file does not have it either.
+- The audit log says which actions the user allowed on screen: `open-eyes log` shows
+  `(the user allowed: click button "Send")`. Before, an approved risky action looked the
+  same as one that never asked.
+
+### Added
+
+- `open-eyes drag @N @M` drags an element onto another: press, move in steps, release.
+  It works with HTML5 drag and drop and with widgets that follow the mouse. Elements with
+  `draggable="true"` get refs for it.
+- Rich-text editors (`contenteditable`: TinyMCE, Gmail, Notion, comment boxes) and named
+  images get `@N` refs, so `fill` types into editors and `hover` reaches images that reveal
+  something (a profile card, a caption). On four benchmark pages snapshots grew 0–3%.
+- `click --right` right-clicks (context menus) and `click --double` double-clicks (editing a
+  cell, opening a file); in scripts, `page.click("@N", "right")` and `"double"`.
+- `press` sends key combinations: `press Control+a`, `press Shift+Tab`,
+  `press Control+Enter` (Alt+, Control+, Meta+ and Shift+, in any number).
+
+### Changed
+
+- `snapshot --find` shows a match in a table with its whole row, so a found email or price
+  comes with the name it belongs to. Other snapshots are unchanged in size.
+- A link with no name (a logo, an icon, a vote arrow) shows where it goes: `link url=/ @1`,
+  the path on the same site, the host for another site, and only `#fragment` on the same
+  page. Before, it was a bare `link @1`, and the local model clicked Hacker News' logo
+  instead of the first story. It costs about 1% more tokens on a Wikipedia article and
+  20% on Hacker News' front page, where every vote arrow is such a link.
+- The overlay shows only the agent's pointer while it acts, no longer a purple box around
+  the element, which stayed on screen after the action.
+- `scroll` moves the page in small steps that speed up and slow down, as a person does,
+  instead of one jump; `scroll @N` scrolls the element into view smoothly.
+
+### Fixed
+
+- When the local model replies with nothing, `open-eyes do` reports `not done: the model
+  gave no answer` instead of `stopped: the model answered without finishing:` and an empty
+  quote.
+- A page behind HTTP authentication (intranets, routers, staging sites) no longer fails with
+  a bare `net::ERR_INVALID_AUTH_CREDENTIALS`: `open` says it asks for a user name and
+  password and how to pass them, `https://USER:PASSWORD@host/path`.
+- The token counter in the agent window (`usage show`) keeps running totals instead of
+  rereading the whole usage log on every command, which added ~0.2 s per command after a
+  year of heavy use (29 MB).
+- When the agent moved to another tab, the old dialog watcher could delete the new one's
+  socket as it exited, so `open-eyes dialog accept` failed with "the dialog watcher is not
+  answering". A watcher now removes the socket only while it is still the current one.
+- `open-eyes do` stops when the page opens a dialog and reports it, so the main agent can
+  answer it with `open-eyes dialog`. Before, the local model, which cannot answer dialogs,
+  retried until it ran out of steps or time.
+- A page stuck in a script that never ends no longer hangs open-eyes: a request the browser
+  does not answer within 60 s fails with "the page stopped responding". Before, a click on
+  a button that looped forever never returned.
+- `open-eyes do` stops the local model when it is killed (a timeout, Ctrl+C), also while
+  the model is starting. Before, `llama-server` kept running and held the model in GPU
+  memory.
+- `open` waits (up to 5 s) until the page shows something. Single-page apps load an empty
+  shell first, and Amazon on a cold start loads itself again right after loading, so the
+  snapshot after `open` came out empty (2 lines, no refs).
+- `open` takes a file path (`/home/me/page.html`, `./page.html`, `~/page.html`) and opens it
+  as a `file://` URL. Before, it became `https:///home/me/page.html` and failed.
+- `click` on a disabled control (`disabled`, inside a disabled fieldset, or
+  `aria-disabled="true"`) fails and says it is disabled. Before, it reported "clicked"
+  although nothing happened, and agents went on as if it had worked.
+- On a scaled screen (125%, 200%), the default snapshot showed the wrong part of the page:
+  elements on screen were listed as below it, so after `scroll @N` the element seemed still
+  off screen. What is on screen is now measured in the page's own pixels.
+- `scroll @N` says when the element is still off screen once the page settles (some pages
+  pull the scroll back) and which way to scroll, instead of `scrolled to`.
+- When an action opens a tab from the agent window (a link with `target=_blank`,
+  `window.open`), the agent follows it: that tab becomes the agent window and the action
+  says so. Before, the agent stayed on the old tab and could not reach the new one.
+- Dialogs no longer stop the agent. An action that opens an alert, confirm or prompt
+  returns at once and says what the page asked; the dialog stays open, as for a person,
+  until the agent answers it with `open-eyes dialog accept [text]` or
+  `open-eyes dialog dismiss` (`open-eyes dialog` shows it). While it is open, other
+  commands say so instead of hanging. Before, the action waited until a person closed the
+  dialog, and every command after it hung. A background process keeps the connection
+  that sees the window's dialogs, since only that connection can answer them.
+
 ## [0.5.0] - 2026-10-25
 
 A local model can now carry out routine tasks for the main agent (`open-eyes do`), with a
@@ -223,7 +330,8 @@ cost 11,423 tokens now costs 5,121.
   `eval`, multi-step `run` scripts, a live overlay showing each action, and an agent
   skill.
 
-[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0...v0.4.1

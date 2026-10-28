@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -7,7 +7,7 @@ import { after, test } from "node:test";
 // usage.ts resolves its file from XDG_STATE_HOME when imported.
 const dir = mkdtempSync(join(tmpdir(), "open-eyes-usage-"));
 process.env.XDG_STATE_HOME = dir;
-const { estimateTokens, formatUsage, readUsage, recordUsage, resetUsage, usageSummary } = await import("../src/usage.ts");
+const { estimateTokens, formatUsage, readUsage, recordUsage, resetUsage, usageFile, usageSummary } = await import("../src/usage.ts");
 after(() => rmSync(dir, { recursive: true, force: true }));
 
 test("estimates tokens at about 3.8 characters each", () => {
@@ -30,4 +30,18 @@ test("records, totals and resets command usage", () => {
   assert.match(table, /total +106 tok +in 2 actions/);
   resetUsage();
   assert.match(formatUsage(readUsage(), 10), /no actions recorded/);
+});
+
+test("the counter keeps running totals instead of rereading the log", () => {
+  resetUsage();
+  // A log from before the totals existed: counted once, on the next command.
+  const old = JSON.stringify({ time: "2026-10-01T00:00:00Z", command: "snapshot", tokens: 50, ms: 1 });
+  appendFileSync(usageFile, `${old}\n${old}\n`);
+  const last = recordUsage("click @3", "x".repeat(38), 10);
+  assert.equal(usageSummary(last), "last 10 tok · total 110 tok · 3 actions");
+  // Lines the counter did not write are not read again for the summary.
+  appendFileSync(usageFile, `${old}\n`);
+  assert.equal(usageSummary(last), "last 10 tok · total 110 tok · 3 actions");
+  resetUsage();
+  assert.equal(usageSummary(recordUsage("snapshot", "", 1)), "last 0 tok · total 0 tok · 1 actions");
 });

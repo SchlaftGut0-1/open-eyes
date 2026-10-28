@@ -201,7 +201,8 @@ export async function navigate(page: Page, goal: string, endpoint: Endpoint, opt
         messages.push({ role: "user", content: NO_TOOL_REMINDER });
         continue;
       }
-      outcome = `stopped: the model answered without finishing: ${oneLine(reply.content ?? "").slice(0, 200)}`;
+      const said = oneLine(reply.content ?? "").trim().slice(0, 200);
+      outcome = said ? `stopped: the model answered without finishing: ${said}` : "not done: the model gave no answer";
       break;
     }
     for (const call of calls) {
@@ -236,6 +237,11 @@ export async function navigate(page: Page, goal: string, endpoint: Endpoint, opt
         lastFailed = true;
       }
       if (!command.startsWith("snapshot")) actions.push(`${command} → ${oneLine(output)}`);
+      // A dialog waits for an answer the model has no tool for: hand it to the main agent.
+      if (/the page is showing an? (alert|confirm|prompt):/.test(output)) {
+        outcome = `stopped: ${oneLine(output.replace(/^error: /, ""))}`;
+        break;
+      }
       messages.push({ role: "tool", tool_call_id: call.id, content: output.slice(0, TOOL_OUTPUT_LIMIT) });
       if (steps >= maxSteps) break;
     }

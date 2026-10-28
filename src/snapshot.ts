@@ -61,6 +61,11 @@ const SKIPPED = new Set(["InlineTextBox", "LineBreak"]);
 const DROPPED = new Set(["ListMarker", "separator"]);
 const MAX_TEXT = 120;
 
+const property = (node: AXNode, name: string) => node.properties?.find((p) => p.name === name)?.value.value;
+
+/** The root of a contenteditable region: editable and focusable, unlike the text inside it. */
+const isEditorRoot = (node: AXNode) => property(node, "editable") !== undefined && property(node, "focusable") === true;
+
 /** Whether Chromium built the name from the node's own content (as for a table cell). */
 const nameFromContents = (node: AXNode) =>
   node.name?.sources?.find((s) => !s.superseded && (s.value !== undefined || s.attributeValue !== undefined))?.type ===
@@ -107,8 +112,21 @@ export type Frame = { nodes: AXNode[]; url: string; frame?: string };
 export const nodeKey = (frame: string | undefined, backendNodeId: number) =>
   frame ? `${frame}:${backendNodeId}` : String(backendNodeId);
 
-/** Where a node lives: its tree, and for iframe content the frame, URL and <iframe> to place it by. */
-type Context = { byId: Map<string, AXNode>; frame?: string; url?: string; place?: number };
+/**
+ * Where a node lives: its tree, and for iframe content the frame, URL and <iframe> to place it by.
+ * `base` is the URL of the document the node is in.
+ */
+type Context = { byId: Map<string, AXNode>; frame?: string; url?: string; place?: number; base?: string };
+
+/** Where a link goes, as short as it can be said: the #fragment on the same page, the path on the same site, else host and path. */
+function linkHint(href: string, base: string | undefined): string {
+  const url = URL.parse(href, base);
+  if (!url || !url.protocol.startsWith("http")) return href;
+  const page = URL.parse(base ?? "");
+  const path = `${url.pathname}${url.search}`;
+  if (page?.origin !== url.origin) return `${url.host}${path === "/" ? "" : path}${url.hash}`;
+  return url.hash && path === `${page.pathname}${page.search}` ? url.hash : `${path}${url.hash}`;
+}
 
 /**
  * Turns Chromium's accessibility tree into compact, indented text the model can read,
@@ -120,6 +138,10 @@ export function formatSnapshot(
   nodes: AXNode[],
   known: KnownRefs = { byNode: new Map(), nextRef: 1 },
   frames: Map<string, Frame> = new Map(),
+  /** Elements of the page (not its iframes) with draggable="true", which the tree does not mark. */
+  draggable: Set<number> = new Set(),
+  /** Keep table rows as `row` lines, so --find can show a match with its row (#100). */
+  rows = false,
 ): { text: string; refs: Record<string, Ref>; nextRef: number; lineNodes: LineNode[] } {
   const refs: Record<string, Ref> = {};
   const lines: string[] = [];
@@ -167,12 +189,22 @@ export function formatSnapshot(
       return;
     }
 
-    const interactive = INTERACTIVE.has(role) && node.backendDOMNodeId !== undefined;
-    if (!interactive && !name && TRANSPARENT.has(role)) return visitChildren(depth, parentName);
+    // Also actionable: a rich-text editor (fill types into it), a named image (hover may
+    // reveal what it hides) and anything draggable (drag moves it).
+    const actionable =
+      INTERACTIVE.has(role) ||
+      isEditorRoot(node) ||
+      (role === "image" && name !== "") ||
+      (ctx.frame === undefined && ctx.place === undefined && draggable.has(node.backendDOMNodeId!));
+    const interactive = actionable && node.backendDOMNodeId !== undefined;
+    if (!interactive && !name && TRANSPARENT.has(role) && !(rows && role === "row")) return visitChildren(depth, parentName);
     if (role === "image" && !name && !interactive) return; // Decorative.
 
     let line = `${indent}${role}`;
     if (name) line += ` ${bare(truncate(name))}`;
+    // An unnamed link (a logo, an icon) says nothing else about itself (#166).
+    const href = role === "link" && !name ? property(node, "url") : undefined;
+    if (typeof href === "string" && href) line += ` url=${bare(truncate(linkHint(href, ctx.base)))}`;
     const value = node.value?.value;
     if (value !== undefined && value !== "" && String(value) !== name) {
       line += ` value=${bare(truncate(String(value)))}`;
@@ -193,7 +225,9 @@ export function formatSnapshot(
 
   // The root is the document itself; its title is printed separately (or on the iframe line).
   const visitTree = (tree: AXNode[], depth: number, where: Omit<Context, "byId">) => {
-    const ctx = { ...where, byId: new Map(tree.map((node) => [node.nodeId, node])) };
+    const root = tree[0] && property(tree[0], "url");
+    const base = typeof root === "string" ? root : where.url;
+    const ctx = { ...where, base, byId: new Map(tree.map((node) => [node.nodeId, node])) };
     for (const id of tree[0]?.childIds ?? []) {
       const child = ctx.byId.get(id);
       if (child) visit(child, depth, "", ctx);

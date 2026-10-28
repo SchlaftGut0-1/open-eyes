@@ -4,8 +4,9 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CDP } from "./cdp.ts";
+import { ensureWatcher } from "./dialogs.ts";
 import { Page } from "./page.ts";
-import { profileDir, socketPath, stateDir, type State } from "./state.ts";
+import { isAlive, profileDir, socketPath, stateDir, type State } from "./state.ts";
 
 const BROWSER_NAMES = [
   "chromium",
@@ -92,15 +93,6 @@ export function isLocalDevToolsUrl(url: string, port?: number): boolean {
     (port === undefined || ws.port === String(port))
   );
 }
-
-const isAlive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 export type BrowserVersion = { Browser: string; webSocketDebuggerUrl: string };
 
@@ -241,12 +233,13 @@ export async function connectPage(state: State): Promise<{ cdp: CDP; page: Page 
     newWindow: true,
   });
   Object.assign(state, { targetId, refs: {} });
-  return { cdp, page: await attach(cdp, targetId, state) };
+  return { cdp, page: await attach(cdp, await browserEndpoint(state), targetId, state) };
 }
 
 /** Like connectPage, but never opens a window: `page` is undefined when there is none. */
 export async function connectExistingPage(state: State): Promise<{ cdp: CDP; page?: Page }> {
-  const cdp = await CDP.connect(await browserEndpoint(state));
+  const endpoint = await browserEndpoint(state);
+  const cdp = await CDP.connect(endpoint);
   const { targetInfos } = await cdp.send<{ targetInfos: { targetId: string; type: string }[] }>(
     "Target.getTargets",
   );
@@ -255,10 +248,11 @@ export async function connectExistingPage(state: State): Promise<{ cdp: CDP; pag
     Object.assign(state, { targetId: undefined, refs: {} });
     return { cdp };
   }
-  return { cdp, page: await attach(cdp, targetId, state) };
+  return { cdp, page: await attach(cdp, endpoint, targetId, state) };
 }
 
-async function attach(cdp: CDP, targetId: string, state: State): Promise<Page> {
+async function attach(cdp: CDP, endpoint: string, targetId: string, state: State): Promise<Page> {
+  await ensureWatcher(endpoint, targetId); // Sees the dialogs the page opens, between commands too.
   const { sessionId } = await cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
   const page = new Page(cdp, sessionId, state);
   await page.init();

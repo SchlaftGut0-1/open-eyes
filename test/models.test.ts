@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import { download, installedNavigator, installNavigator, navigatorStatus, pickDevice, type Manifest } from "../src/models.ts";
 
 const root = mkdtempSync(join(tmpdir(), "open-eyes-models-"));
@@ -109,4 +112,54 @@ describe("pickDevice", () => {
     assert.equal(pickDevice("Available devices:\n  Vulkan0: NVIDIA GeForce RTX 3060 (12288 MiB, 11000 MiB free)"), undefined);
     assert.equal(pickDevice("  Vulkan0: Intel(R) UHD Graphics (8000 MiB, 6000 MiB free)\n  Vulkan1: llvmpipe (LLVM 19) (16000 MiB, 16000 MiB free)"), undefined);
   });
+});
+
+test("a signal that ends the process stops the model server too", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "open-eyes-server-"));
+  let pid = 0;
+  try {
+    // A stand-in for llama-server: writes its pid, answers /health on the port it is given.
+    const server = join(dir, "llama-server");
+    const pidFile = join(dir, "server.pid");
+    writeFileSync(
+      server,
+      `#!/usr/bin/env node
+if (process.argv.includes("--list-devices")) process.exit(0);
+require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
+require("node:http").createServer((_, res) => res.end("ok")).listen(port, "127.0.0.1");
+`,
+      { mode: 0o755 },
+    );
+    const installed = { model: "m", modelFile: join(dir, "m.gguf"), server: "s", serverBinary: server };
+    const runner = spawn(
+      process.execPath,
+      ["--input-type=module", "-e", `import { startNavigator } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "..", "src", "models.ts")).href)};
+await startNavigator(${JSON.stringify(installed)}); console.log("ready"); setInterval(() => {}, 1000);`],
+      { stdio: ["ignore", "pipe", "inherit"] },
+    );
+    await new Promise<void>((resolve) => runner.stdout.once("data", () => resolve()));
+    pid = Number(readFileSync(pidFile, "utf8"));
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    assert.ok(alive(), "the server runs");
+    runner.kill("SIGTERM");
+    const [code] = await once(runner, "exit");
+    assert.equal(code, 143);
+    for (let i = 0; i < 50 && alive(); i++) await sleep(100);
+    assert.ok(!alive(), "the server stopped with the process");
+  } finally {
+    try {
+      if (pid) process.kill(pid); // A failed run must not leave it behind.
+    } catch {
+      // Already gone.
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -34,7 +34,13 @@ export function findLines(lines: string[], query: string): string[] {
   const keep = new Set<number>();
   lines.forEach((line, i) => {
     if (!comparable(line).includes(needle)) return;
-    for (let at = i; at !== -1 && !keep.has(at); at = parentIndex(lines, at)) keep.add(at);
+    for (let at = i; at !== -1; at = parentIndex(lines, at)) {
+      keep.add(at);
+      // A match in a table row comes with the whole row: a cell alone says nothing.
+      if (lines[at].trim() === "row") {
+        for (let below = at + 1; below < lines.length && indentOf(lines[below]) > indentOf(lines[at]); below++) keep.add(below);
+      }
+    }
   });
   return [...keep].sort((a, b) => a - b).map((i) => lines[i]);
 }

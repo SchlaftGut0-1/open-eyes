@@ -1,0 +1,7 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Late</title>
+<script>
+  // Like a single-page app: an empty shell that renders after the page has loaded.
+  addEventListener("load", () => setTimeout(() => (document.body.innerHTML = "<h1>Rendered</h1><button>Go</button>"), 1500));
+</script>

@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import { audit, type AuditEntry } from "./audit.ts";
+import { describeDialog, openDialog, type Dialog } from "./dialogs.ts";
 import type { CDP } from "./cdp.ts";
 import { decisionExpression, OVERLAY_WORLD, OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
 import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
@@ -70,6 +72,9 @@ const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
   PageUp: { code: "PageUp", keyCode: 33 },
   PageDown: { code: "PageDown", keyCode: 34 },
 };
+
+// CDP's modifier bits for Input.dispatchKeyEvent.
+const MODIFIERS: Record<string, number> = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
 
 // Resolves once the DOM has gone QUIET_MS without changes (or after MAX_MS for pages that
 // never stop, like carousels), so frameworks can finish re-rendering after an action.
@@ -140,19 +145,42 @@ const FIELD_KIND = `function () {
   return { kind: "none", instead: "click" };
 }`;
 
-// Whether Enter in the focused field submits a form worth asking about. A search is not:
-// a form in a search landmark, or one whose only field is a search box. A form with a
-// password field always is, and so is any other form.
-const SUBMITS_RISKY_FORM = `(() => {
-  const field = document.activeElement;
-  const form = field?.closest?.("form");
-  if (!form) return false;
+// Whether submitting a form is worth asking about. A search is not: a form in a search
+// landmark, or one whose only field is a search box. A form with a password field always
+// is, and so is any other form. Enter and a click on the form's submit button use the same
+// rule, so neither is a way around the other.
+const RISKY_FORM = `(form) => {
   if (form.querySelector("input[type=password]")) return true;
   if (form.closest("search, [role=search]")) return false;
   const fields = [...form.querySelectorAll("input, textarea, select")]
     .filter((f) => !["hidden", "submit", "button", "reset", "image"].includes(f.type));
-  return !(field.type === "search" && fields.length === 1);
+  return !(fields.length === 1 && fields[0].type === "search");
+}`;
+
+// Whether Enter in the focused field submits a form worth asking about.
+const SUBMITS_RISKY_FORM = `(() => {
+  const form = document.activeElement?.closest?.("form");
+  return !!form && (${RISKY_FORM})(form);
 })()`;
+
+// Whether clicking this element submits a form worth asking about: a submit button (a
+// <button> without a type is one) or a submit/image input, of a form.
+const CLICK_SUBMITS_RISKY_FORM = `function () {
+  const submits =
+    (this instanceof HTMLButtonElement && this.type === "submit") ||
+    (this instanceof HTMLInputElement && (this.type === "submit" || this.type === "image"));
+  return submits && !!this.form && (${RISKY_FORM})(this.form);
+}`;
+
+// Whether the element is a disabled control: disabled itself or by its fieldset (:disabled),
+// or marked aria-disabled, as custom buttons are.
+const IS_DISABLED = `function () {
+  return this.matches?.(":disabled") || this.getAttribute?.("aria-disabled") === "true";
+}`;
+
+// Loaded and showing something. Some sites load again right after the first load, so the
+// document may still be loading here.
+const HAS_CONTENT = `document.readyState === "complete" && ((document.body?.innerText.trim() ?? "") !== "" || !!document.body?.querySelector("a[href], button, input, select, textarea, [role]"))`;
 
 const SELECT_CONTENTS = `function () {
   if (typeof this.select === "function") return this.select();
@@ -163,6 +191,19 @@ const SELECT_CONTENTS = `function () {
     selection.removeAllRanges();
     selection.addRange(range);
   }
+}`;
+
+// Scrolls the element into view so a person sees the page move, and resolves once it stopped
+// (or after a second, for pages that never say so).
+const SMOOTH_INTO_VIEW = `function () {
+  const r = this.getBoundingClientRect();
+  if (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) return;
+  return new Promise((resolve) => {
+    const done = () => resolve();
+    document.addEventListener("scrollend", done, { once: true, capture: true });
+    setTimeout(done, 1000);
+    this.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+  });
 }`;
 
 /** Where downloads started by agent actions are saved. */
@@ -187,10 +228,35 @@ const FIND_FILE_INPUT = `function () {
 /** How long a risky action waits for the user to allow it before it is denied. */
 const CONFIRM_TIMEOUT_MS = 120_000;
 
+/** How long a page may take to answer before open-eyes says it is blocked. */
+const BLOCKED_MS = 2000;
+
+const BLOCKED_BY_DIALOG =
+  "the page is not responding: it is running a script that never ends, or showing a dialog " +
+  "(alert, confirm or prompt) that open-eyes cannot answer. Ask the user to answer it in the " +
+  'agent window, or run "open-eyes close" to close the window';
+
+/**
+ * What `open` should load for what the agent typed: a URL as is, a file path (absolute,
+ * ./ ../ ~/, or a Windows drive) as a file:// URL, and anything else as https://.
+ */
+export function toUrl(input: string, cwd = process.cwd()): string {
+  const drive = /^[a-z]:[\\/]/i.test(input);
+  const path = drive || /^(\/(?!\/)|\.{1,2}[\\/]|~[\\/])/.test(input);
+  if (!path) return /^[a-z][a-z0-9+.-]*:/i.test(input) ? input : input.startsWith("//") ? `https:${input}` : `https://${input}`;
+  const file = input.startsWith("~") ? join(homedir(), input.slice(2)) : resolve(cwd, input);
+  if (!existsSync(file)) throw new Error(`no such file: ${file}`);
+  return pathToFileURL(file).href;
+}
+
 /** The agent's window. Every action is drawn on the page before it happens. */
 export class Page {
   /** Set once text is typed into a password field, so traces can leave it out. */
   typedSecret = false;
+  /** What the user allowed during the current action, for the audit log. */
+  #allowed: string[] = [];
+  /** Tabs the agent's window opened during the current action. */
+  #opened: string[] = [];
   #cdp: CDP;
   #sessionId: string;
   #state: State;
@@ -213,23 +279,100 @@ export class Page {
     cdp.on("Target.detachedFromTarget", ({ sessionId: session }) => {
       for (const [frame, info] of this.#frames) if (info.session === session) this.#frames.delete(frame);
     });
+    cdp.on("Target.targetCreated", ({ targetInfo }) => {
+      if (targetInfo.type === "page" && targetInfo.openerId === this.#state.targetId) this.#opened.push(targetInfo.targetId);
+    });
   }
 
   async init(): Promise<void> {
-    // The agent's window is usually not focused; make the page behave as if it were.
-    await this.#send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    this.#refuseIfDialog();
+    // A dialog nobody watched (opened before open-eyes was) blocks the page: say so in
+    // seconds instead of hanging.
+    let timer: NodeJS.Timeout | undefined;
+    const blocked = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(BLOCKED_BY_DIALOG)), BLOCKED_MS)));
+    try {
+      await Promise.race([
+        (async () => {
+          // The agent's window is usually not focused; make the page behave as if it were.
+          await this.#send("Emulation.setFocusEmulationEnabled", { enabled: true });
+          await this.#evaluate("1");
+        })(),
+        blocked,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+    await this.#cdp.send("Target.setDiscoverTargets", { discover: true });
+  }
+
+  /** While a dialog is open the page cannot do anything else: the agent must answer it. */
+  #refuseIfDialog(): void {
+    const dialog = openDialog(this.#state.targetId);
+    if (dialog) throw new Error(describeDialog(dialog));
+  }
+
+  /** Resolves with the dialog the page opens, if it opens one before `stop` is called. */
+  #watchForDialog(): { opened: Promise<Dialog>; stop: () => void } {
+    let timer: NodeJS.Timeout | undefined;
+    const opened = new Promise<Dialog>((resolve) => {
+      timer = setInterval(() => {
+        const dialog = openDialog(this.#state.targetId);
+        if (dialog) resolve(dialog);
+      }, 100);
+    });
+    return { opened, stop: () => clearInterval(timer) };
+  }
+
+  /**
+   * After an action that opened a tab from the agent's window (a link with target=_blank,
+   * window.open), the agent follows it: that tab becomes the agent window.
+   */
+  async #followOpenedTab(): Promise<string> {
+    const targetId = this.#opened.at(-1);
+    this.#opened = [];
+    if (!targetId) return "";
+    await this.#overlay({ type: "hide" }); // The old tab is no longer the agent's.
+    const { sessionId } = await this.#cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
+    this.#sessionId = sessionId;
+    this.#frames.clear();
+    this.#autoAttached.clear();
+    Object.assign(this.#state, { targetId, refs: {}, refsLoaderId: undefined });
+    await this.init();
+    await this.#settle(10_000);
+    await this.#leaveIfBlocked();
+    const url = await this.url();
+    await this.#announce({ label: `on ${url}` }, false);
+    return `\nit opened a new tab, which is now the agent window: ${url}; run "open-eyes snapshot" to see it`;
   }
 
   goto(url: string): Promise<string> {
-    const target = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`;
+    let target: string;
+    try {
+      target = toUrl(url);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const parsed = URL.parse(target);
+    // A password in the URL (https://user:password@host/) is never stored in a trace.
+    if (parsed?.password) this.typedSecret = true;
     return this.#audited("open", target, async () => {
       const reason = blockedReason(this.#policy, target);
       if (reason) throw new PolicyError("blocked", reason);
-      await this.#announce({ label: `opening ${target}` });
+      await this.#announce({ label: `opening ${parsed ? `${parsed.origin}${parsed.pathname}` : target}` });
       const { errorText } = await this.#send<{ errorText?: string }>("Page.navigate", { url: target });
+      if (errorText === "net::ERR_INVALID_AUTH_CREDENTIALS" && parsed) {
+        throw new Error(
+          `${parsed.origin}${parsed.pathname} asks for a user name and password (HTTP authentication)` +
+            (parsed.password ? ", and these were refused" : `; if the user gives them to you, open ${parsed.protocol}//USER:PASSWORD@${parsed.host}${parsed.pathname}`),
+        );
+      }
       if (errorText) throw new Error(`could not open ${target}: ${errorText}`);
       this.#state.refs = {};
       await this.#settle(30_000);
+      // Single-page apps load an empty shell first, and some sites (Amazon on a cold start)
+      // load again right away: wait until the page shows something.
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && !(await this.#evaluate(HAS_CONTENT).catch(() => true))) await sleep(100);
       await this.#leaveIfBlocked(); // A redirect may have gone somewhere else.
       const current = await this.url();
       await this.#announce({ label: `on ${current}` }, false);
@@ -238,9 +381,11 @@ export class Page {
   }
 
   async snapshot(options: SnapshotOptions = {}): Promise<string> {
+    this.#refuseIfDialog();
     await this.#guard();
     if (options.interactive && options.diff) throw new Error("--interactive cannot be combined with --diff");
-    const captured = await this.#capture();
+    // Only --find needs table rows; other snapshots stay as small as they were.
+    const captured = await this.#capture({ rows: options.find !== undefined });
     const { previous } = captured;
     let { lines, lineNodes } = captured;
     if (options.interactive) {
@@ -285,25 +430,37 @@ export class Page {
     return `url: ${await this.url()}\ntitle: ${JSON.stringify(title)}${header}\n\n${shown.join("\n")}`;
   }
 
-  click(target: Target): Promise<string> {
-    return this.#audited("click", describeTarget(target), async (entry) => {
+  click(target: Target, how: "left" | "right" | "double" = "left"): Promise<string> {
+    const verb = { left: "click", right: "right-click", double: "double-click" }[how];
+    return this.#audited(verb, describeTarget(target), async (entry) => {
       await this.#guard();
       const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = label;
-      if (label.startsWith("option ")) {
+      if (how === "left" && label.startsWith("option ")) {
         const chosen = await this.#chooseNativeOption(backendNodeId, label, frame, entry);
         if (chosen) return chosen;
+      }
+      // A click on a disabled control does nothing: say so, or the agent goes on as if it worked.
+      if ((await this.#callOn(backendNodeId, frame, IS_DISABLED)) === true) {
+        throw new Error(`${label} is disabled, so clicking it does nothing; something else on the page may need doing first (a required field, a checkbox), then take a new snapshot`);
       }
       const box = await this.#locate(backendNodeId, ref, frame);
       const x = box.x + box.width / 2;
       const y = box.y + box.height / 2;
-      await this.#announce({ label: `click ${label}`, x, y, box, busy: true });
-      await this.#confirm(`click ${label}`, isRiskyClick(label));
+      await this.#announce({ label: `${verb} ${label}`, x, y, busy: true });
+      // A right click opens a menu; the other two act like a click.
+      if (how !== "right") {
+        const submits = (await this.#callOn(backendNodeId, frame, CLICK_SUBMITS_RISKY_FORM)) === true;
+        await this.#confirm(submits ? `${verb} ${label}, which submits a form` : `${verb} ${label}`, submits || isRiskyClick(label));
+      }
       const finishDownload = await this.#watchDownloads();
       const network = await this.#trackNetwork();
       await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
-      for (const type of ["mousePressed", "mouseReleased"]) {
-        await this.#send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+      // A double click is two clicks, the second with clickCount 2, as Chromium needs for dblclick.
+      for (const clickCount of how === "double" ? [1, 2] : [1]) {
+        for (const type of ["mousePressed", "mouseReleased"]) {
+          await this.#send("Input.dispatchMouseEvent", { type, x, y, button: how === "right" ? "right" : "left", clickCount });
+        }
       }
       await this.#overlay({ type: "idle" });
       await sleep(150);
@@ -312,7 +469,7 @@ export class Page {
       const observed = await this.#observe(entry.url, network);
       const download = await finishDownload();
       if (download.saved) entry.target += ` (downloaded ${basename(download.saved)})`;
-      return `clicked ${label}${observed}${download.report}`;
+      return `${verb}ed ${label}${observed}${download.report}`;
     });
   }
 
@@ -338,7 +495,7 @@ export class Page {
         // Typing into a native dropdown means choosing the option with that text.
         entry.action = "select";
         entry.target = `${label} → ${text}`;
-        await this.#announce({ label: `choose "${text}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+        await this.#announce({ label: `choose "${text}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
         const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
           objectId: object.objectId,
           functionDeclaration: CHOOSE_OPTION,
@@ -349,7 +506,7 @@ export class Page {
         if (!chosen.chosen) throw new Error(`no option "${text}" in ${label}; options: ${chosen.available.join(", ")}`);
         return `chose "${chosen.chosen}" in ${label}${await this.#observe(entry.url)}`;
       }
-      await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2, box });
+      await this.#announce({ label: `typing into ${label}`, x: box.x + 8, y: box.y + box.height / 2 });
       await this.#confirm(`type into ${label}, a password field`, kind === "password");
       if (kind === "password") this.typedSecret = true;
       await this.#sendIn(frame, "DOM.focus", { backendNodeId });
@@ -363,10 +520,17 @@ export class Page {
   }
 
   async press(key: string, announce = true): Promise<string> {
-    const def = KEYS[key] ?? (key.length === 1 ? { code: "", keyCode: key.toUpperCase().charCodeAt(0), text: key } : null);
-    if (!def) throw new Error(`unknown key "${key}"; use a single character or one of: ${Object.keys(KEYS).join(", ")}`);
+    // "Control+Shift+a": modifiers, then the key (which may itself be "+").
+    const [, held, base] = /^((?:(?:Alt|Control|Meta|Shift)\+)*)(.+)$/.exec(key)!;
+    const modifiers = held.split("+").reduce((bits, name) => bits | (MODIFIERS[name] ?? 0), 0);
+    const known = KEYS[base] ?? (base.length === 1 ? { code: "", keyCode: base.toUpperCase().charCodeAt(0), text: base } : null);
+    if (!known) {
+      throw new Error(`unknown key "${key}"; use a single character or one of: ${Object.keys(KEYS).join(", ")}, after Alt+, Control+, Meta+ or Shift+ if needed`);
+    }
+    // With Alt, Control or Meta held, a key is a shortcut and types nothing.
+    const def = modifiers & ~MODIFIERS.Shift ? { ...known, text: undefined } : known;
     const dispatch = async () => {
-      const common = { key: key === "Space" ? " " : key, code: def.code, windowsVirtualKeyCode: def.keyCode };
+      const common = { key: base === "Space" ? " " : base, code: def.code, windowsVirtualKeyCode: def.keyCode, modifiers };
       await this.#send("Input.dispatchKeyEvent", { type: def.text ? "keyDown" : "rawKeyDown", text: def.text, ...common });
       await this.#send("Input.dispatchKeyEvent", { type: "keyUp", ...common });
     };
@@ -377,7 +541,7 @@ export class Page {
     return this.#audited("press", key, async (entry) => {
       await this.#guard();
       await this.#announce({ label: `press ${key}` });
-      const submits = key === "Enter" && (await this.#evaluate(SUBMITS_RISKY_FORM));
+      const submits = base === "Enter" && (await this.#evaluate(SUBMITS_RISKY_FORM));
       await this.#confirm("press Enter, which submits a form", submits === true);
       const finishDownload = await this.#watchDownloads();
       const network = await this.#trackNetwork();
@@ -406,7 +570,7 @@ export class Page {
       const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = `${label} <- ${names}`;
       const box = await this.#locate(backendNodeId, ref, frame);
-      await this.#announce({ label: `upload ${names} to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+      await this.#announce({ label: `upload ${names} to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
       const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
       const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: FIND_FILE_INPUT });
       if (!result.objectId) throw new Error(`${label} is not a file input and no file input belongs to it`);
@@ -426,12 +590,55 @@ export class Page {
       const box = await this.#locate(backendNodeId, ref, frame);
       const x = box.x + box.width / 2;
       const y = box.y + box.height / 2;
-      await this.#announce({ label: `hover over ${label}`, x, y, box, busy: true });
+      await this.#announce({ label: `hover over ${label}`, x, y, busy: true });
       // A real mouse move fires CSS :hover and mouseenter/mouseover listeners alike.
       const network = await this.#trackNetwork();
       await this.#send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
       await this.#overlay({ type: "idle" });
       return `hovered over ${label}${await this.#observe(entry.url, network)}`;
+    });
+  }
+
+  /**
+   * Drags `from` onto `to` as a person does: press, move in steps, release. Pages using HTML5
+   * drag and drop get their drop through CDP's drag interception; pages listening to mouse
+   * events see the same moves.
+   */
+  drag(from: Target, to: Target): Promise<string> {
+    return this.#audited("drag", `${describeTarget(from)} to ${describeTarget(to)}`, async (entry) => {
+      await this.#guard();
+      const source = await this.#resolve(from);
+      const target = await this.#resolve(to);
+      entry.target = `${source.label} to ${target.label}`;
+      // shortcut: both must fit on screen together; a drag that needs scrolling midway is not supported yet.
+      await this.#locate(source.backendNodeId, source.ref, source.frame);
+      const end = await this.#locate(target.backendNodeId, target.ref, target.frame);
+      const start = await this.#locate(source.backendNodeId, source.ref, source.frame, { scroll: false });
+      const a = { x: start.x + start.width / 2, y: start.y + start.height / 2 };
+      const b = { x: end.x + end.width / 2, y: end.y + end.height / 2 };
+      await this.#announce({ label: `drag ${source.label} to ${target.label}`, ...a, busy: true });
+      const network = await this.#trackNetwork();
+      let dragged: unknown;
+      const stop = this.#cdp.on("Input.dragIntercepted", ({ data }, session) => {
+        if (session === this.#sessionId) dragged = data;
+      });
+      await this.#send("Input.setInterceptDrags", { enabled: true });
+      try {
+        const mouse = (type: string, p: { x: number; y: number }) =>
+          this.#send("Input.dispatchMouseEvent", { type, ...p, button: "left", clickCount: 1, buttons: type === "mouseReleased" ? 0 : 1 });
+        await mouse("mousePressed", a);
+        for (let step = 1; step <= 10; step++) {
+          await mouse("mouseMoved", { x: a.x + ((b.x - a.x) * step) / 10, y: a.y + ((b.y - a.y) * step) / 10 });
+          await sleep(20);
+        }
+        if (dragged) for (const type of ["dragEnter", "dragOver", "drop"]) await this.#send("Input.dispatchDragEvent", { type, ...b, data: dragged });
+        await mouse("mouseReleased", b);
+      } finally {
+        stop();
+        await this.#send("Input.setInterceptDrags", { enabled: false }).catch(() => {});
+      }
+      await this.#overlay({ type: "idle" });
+      return `dragged ${source.label} to ${target.label}${await this.#observe(entry.url, network)}`;
     });
   }
 
@@ -455,7 +662,7 @@ export class Page {
     entry.action = "select";
     entry.target = `${selectLabel} → ${name.replace(/^"|"$/g, "")}`;
     const box = await this.#locate(node.backendNodeId, selectRef ? `@${selectRef}` : "the dropdown", frame);
-    await this.#announce({ label: `choose ${name} in ${selectLabel}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+    await this.#announce({ label: `choose ${name} in ${selectLabel}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
     const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
       objectId: object.objectId,
       functionDeclaration: CHOOSE_THIS_OPTION,
@@ -474,7 +681,7 @@ export class Page {
       const { backendNodeId, label, ref, frame } = await this.#resolve(target);
       entry.target = `${label} → ${option}`;
       const box = await this.#locate(backendNodeId, ref, frame);
-      await this.#announce({ label: `choose "${option}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+      await this.#announce({ label: `choose "${option}" in ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
       const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
       const { result } = await this.#sendIn(frame, "Runtime.callFunctionOn", {
         objectId: object.objectId,
@@ -529,12 +736,21 @@ export class Page {
       const [width, height, before] = (await this.#evaluate("[innerWidth, innerHeight, scrollY]")) as number[];
       let summary: string;
       let network: (() => Promise<boolean>) | undefined;
+      let check: (() => Promise<void>) | undefined;
       if (ref && !direction) {
         const { backendNodeId, label, frame } = await this.#resolve(ref);
         entry.target = label;
-        const box = await this.#locate(backendNodeId, ref, frame); // Scrolls it into view.
-        await this.#announce({ label: `scroll to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2, box });
+        await this.#smoothIntoView(backendNodeId, frame);
+        const box = await this.#locate(backendNodeId, ref, frame); // Already in view, unless in an iframe.
+        await this.#announce({ label: `scroll to ${label}`, x: box.x + box.width / 2, y: box.y + box.height / 2 });
         summary = `scrolled to ${label}`;
+        // Only claim it once it is still on screen when the page has settled.
+        check = async () => {
+          const now = await this.#locate(backendNodeId, ref, frame, { scroll: false });
+          if (await this.#inWindow(now)) return;
+          const where = now.y + now.height <= 0 ? "above" : "below";
+          summary = `could not bring ${label} into view: it is still ${where} the screen; try scroll ${where === "above" ? "up" : "down"}`;
+        };
       } else {
         let x = width / 2;
         let y = height / 2;
@@ -550,18 +766,46 @@ export class Page {
         const dir = direction ?? "down";
         await this.#announce({ label: `scroll ${dir} ${where}`, x, y, busy: true });
         network = await this.#trackNetwork(); // Lazy loading fetches as the page moves.
-        await this.#send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: dir === "down" ? distance : -distance });
+        await this.#wheel(x, y, dir === "down" ? distance : -distance);
         await this.#overlay({ type: "idle" });
         summary = `scrolled ${dir} ${distance} px in ${where}`;
       }
       await this.#settleAfterAction(network);
       await sleep(150); // Let smooth scrolling settle.
+      await check?.();
       const after = (await this.#evaluate("scrollY")) as number;
       if (!ref && after === before) {
         summary += ` but the page did not move (already at the ${direction === "up" ? "top" : "bottom"}, or the content scrolls inside a container: try scroll @N ${direction ?? "down"})`;
       }
       return `${summary}\n${await this.snapshot()}`;
     });
+  }
+
+  /**
+   * Turns the mouse wheel by `delta` pixels over (x, y) in small steps that speed up and slow
+   * down, as a person scrolling does, instead of one jump.
+   */
+  async #wheel(x: number, y: number, delta: number): Promise<void> {
+    const steps = Math.min(Math.max(Math.round(Math.abs(delta) / 30), 6), 24);
+    const pause = Math.min(Math.max(Math.abs(delta) * 0.6, 250), 600) / steps;
+    const ease = (t: number) => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2);
+    let done = 0;
+    for (let step = 1; step <= steps; step++) {
+      const next = Math.round(delta * ease(step / steps));
+      await this.#send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: next - done });
+      done = next;
+      await sleep(pause);
+    }
+  }
+
+  /** Scrolls the element to the middle of its scroller smoothly, if it is not on screen. */
+  async #smoothIntoView(backendNodeId: number, frame?: string): Promise<void> {
+    const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
+    await this.#sendIn(frame, "Runtime.callFunctionOn", {
+      objectId: object.objectId,
+      awaitPromise: true,
+      functionDeclaration: SMOOTH_INTO_VIEW,
+    }).catch(() => {}); // #locate scrolls it anyway.
   }
 
   /**
@@ -593,8 +837,8 @@ export class Page {
 
   /** Evaluates a JavaScript expression in the page and returns its JSON value. */
   eval(expression: string): Promise<unknown> {
-    const target = expression.length > 200 ? `${expression.slice(0, 200)}…` : expression;
-    return this.#audited("eval", target, async () => {
+    // Never the code: it may set a field to a secret, as fill's text may be one.
+    return this.#audited("eval", `(${expression.length} characters)`, async () => {
       await this.#guard();
       return this.#evaluate(expression);
     });
@@ -636,6 +880,7 @@ export class Page {
 
   /** Shows the token counter in the agent window, or hides it with null. */
   async showUsage(text: string | null): Promise<void> {
+    if (openDialog(this.#state.targetId)) return; // The overlay cannot draw until it is answered.
     await this.#overlay({ type: "usage", text });
   }
 
@@ -645,6 +890,11 @@ export class Page {
   }
 
   async url(): Promise<string> {
+    const { targetId } = this.#state;
+    // A dialog stops the page's scripts; the browser still knows where the page is.
+    if (targetId && openDialog(targetId)) {
+      return (await this.#cdp.send<{ targetInfo: { url: string } }>("Target.getTargetInfo", { targetId })).targetInfo.url;
+    }
     return String(await this.#evaluate("location.href"));
   }
 
@@ -745,7 +995,7 @@ export class Page {
    * Reads the page and numbers its elements, keeping the refs of elements already seen
    * on this document. Returns the lines and, for the same document, the previous ones.
    */
-  async #capture(): Promise<{ lines: string[]; previous?: string[]; lineNodes: LineNode[] }> {
+  async #capture({ rows = false } = {}): Promise<{ lines: string[]; previous?: string[]; lineNodes: LineNode[] }> {
     const loaderId = await this.#loaderId();
     const sameDocument = this.#state.refsLoaderId === loaderId;
     const byNode = new Map<string, number>();
@@ -755,10 +1005,16 @@ export class Page {
     await this.#send("Accessibility.enable");
     const { nodes } = await this.#send<{ nodes: AXNode[] }>("Accessibility.getFullAXTree");
     const frames = await this.#frameContents();
+    const { root } = await this.#send<{ root: { nodeId: number } }>("DOM.getDocument", { depth: 0 });
+    const { nodeIds } = await this.#send<{ nodeIds: number[] }>("DOM.querySelectorAll", { nodeId: root.nodeId, selector: '[draggable="true"]' });
+    const draggable = new Set<number>();
+    for (const nodeId of nodeIds) draggable.add((await this.#send<{ node: { backendNodeId: number } }>("DOM.describeNode", { nodeId })).node.backendNodeId);
     const { text, refs, nextRef, lineNodes } = formatSnapshot(
       nodes,
       { byNode, nextRef: sameDocument ? (this.#state.nextRef ?? 1) : 1 },
       frames,
+      draggable,
+      rows,
     );
 
     let previous: string[] | undefined;
@@ -772,7 +1028,7 @@ export class Page {
     }
     Object.assign(this.#state, { refs, refsLoaderId: loaderId, nextRef });
     mkdirSync(stateDir, { recursive: true });
-    writeFileSync(baselineFile, text);
+    if (!rows) writeFileSync(baselineFile, text); // Diffs compare snapshots of the same shape.
     return { lines: text ? text.split("\n") : [], previous, lineNodes };
   }
 
@@ -786,12 +1042,19 @@ export class Page {
     )) as number[];
     // Layout bounds are in page coordinates; fixed elements appear at the current scroll.
     const { documents } = await this.#send<{
-      documents: { nodes: { backendNodeId: number[] }; layout: { nodeIndex: number[]; bounds: number[][] } }[];
+      documents: {
+        nodes: { backendNodeId: number[] };
+        layout: { nodeIndex: number[]; bounds: number[][] };
+        contentHeight?: number;
+      }[];
     }>("DOMSnapshot.captureSnapshot", { computedStyles: [] });
     const main = documents[0];
+    // On a scaled screen (125%, 200%) the bounds are in device pixels, not the page's CSS
+    // pixels (#99). The page's height in both units gives the factor.
+    const scale = main?.contentHeight && pageHeight ? main.contentHeight / pageHeight : 1;
     const boxes = new Map<number, [number, number, number, number]>(); // left, top, right, bottom
     main?.layout.nodeIndex.forEach((nodeIndex, i) => {
-      const [x, y, w, h] = main.layout.bounds[i];
+      const [x, y, w, h] = main.layout.bounds[i].map((value) => value / scale);
       if (w <= 0 && h <= 0) return;
       const id = main.nodes.backendNodeId[nodeIndex];
       const box = boxes.get(id);
@@ -918,17 +1181,43 @@ export class Page {
     };
   }
 
+  /** Runs `functionDeclaration` with the element as `this` and returns its value. */
+  async #callOn(backendNodeId: number, frame: string | undefined, functionDeclaration: string): Promise<unknown> {
+    const { object } = await this.#sendIn<{ object: { objectId: string } }>(frame, "DOM.resolveNode", { backendNodeId });
+    const { result } = await this.#sendIn<{ result: { value?: unknown } }>(frame, "Runtime.callFunctionOn", {
+      objectId: object.objectId,
+      functionDeclaration,
+      returnByValue: true,
+    });
+    return result.value;
+  }
+
   /** Runs an action and records it in the audit log, whatever the outcome. */
   async #audited<T>(action: string, target: string, run: (entry: AuditEntry) => Promise<T>): Promise<T> {
+    this.#refuseIfDialog();
     const entry: AuditEntry = { action, target, outcome: "ok" };
+    this.#allowed = [];
     entry.url = await this.url().catch(() => undefined);
+    this.#opened = [];
+    // An action that opens a dialog does not finish until it is answered: report it instead.
+    const watch = this.#watchForDialog();
     try {
-      return await run(entry);
+      const running = run(entry);
+      running.catch(() => {}); // If a dialog wins, the rest of the action is dropped.
+      const outcome = await Promise.race([running.then((result) => ({ result })), watch.opened.then((dialog) => ({ dialog }))]);
+      if ("result" in outcome) {
+        const { result } = outcome;
+        return typeof result === "string" ? (`${result}${await this.#followOpenedTab()}` as T) : result;
+      }
+      entry.detail = `the page opened a ${outcome.dialog.type}`;
+      return `${action} ${entry.target}: ${describeDialog(outcome.dialog)}` as T;
     } catch (error) {
       entry.outcome = error instanceof PolicyError ? error.outcome : "error";
       entry.detail = (error as Error).message;
       throw error;
     } finally {
+      watch.stop();
+      if (this.#allowed.length) entry.allowed = this.#allowed;
       audit(entry);
     }
   }
@@ -959,7 +1248,10 @@ export class Page {
       // Asked again every round, so the question comes back if the page reloads.
       await this.#overlay({ type: "confirm", id, message: action });
       const decision = await this.#evaluateInOverlayWorld(decisionExpression(id)).catch(() => null);
-      if (decision === "allow") return;
+      if (decision === "allow") {
+        this.#allowed.push(action);
+        return;
+      }
       if (decision === "deny") throw new PolicyError("denied", `the user denied: ${action}`);
       await sleep(300);
     }
@@ -1011,8 +1303,11 @@ export class Page {
     return frameTree.frame.loaderId;
   }
 
-  /** Where the element is in the window, after scrolling it (and any iframe holding it) into view. */
-  async #locate(backendNodeId: number, ref: string, frame?: string): Promise<Box> {
+  /**
+   * Where the element is in the window, after scrolling it (and any iframe holding it) into
+   * view. Without `scroll`, only measures it.
+   */
+  async #locate(backendNodeId: number, ref: string, frame?: string, { scroll = true } = {}): Promise<Box> {
     try {
       // A cross-origin iframe measures from its own corner: find where each <iframe> sits.
       const owners: { frame?: string; owner: number }[] = [];
@@ -1023,26 +1318,36 @@ export class Page {
         if (found?.owner === undefined) throw new Error("iframe gone");
         owners.unshift({ frame: found.parent, owner: found.owner });
       }
-      let offsetX = 0;
-      let offsetY = 0;
+      const measure = async (): Promise<Box> => {
+        let offsetX = 0;
+        let offsetY = 0;
+        for (const { frame: parent, owner } of owners) {
+          const { model } = await this.#sendIn<{ model: { content: number[] } }>(parent, "DOM.getBoxModel", { backendNodeId: owner });
+          offsetX += model.content[0];
+          offsetY += model.content[1];
+        }
+        const { model } = await this.#sendIn<{ model: { border: number[] } }>(frame, "DOM.getBoxModel", { backendNodeId });
+        const xs = model.border.filter((_, i) => i % 2 === 0);
+        const ys = model.border.filter((_, i) => i % 2 === 1);
+        const x = Math.min(...xs);
+        const y = Math.min(...ys);
+        return { x: x + offsetX, y: y + offsetY, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+      };
+      if (!scroll) return await measure();
       for (const { frame: parent, owner } of owners) {
         await this.#sendIn(parent, "DOM.scrollIntoViewIfNeeded", { backendNodeId: owner });
       }
       await this.#sendIn(frame, "DOM.scrollIntoViewIfNeeded", { backendNodeId });
-      for (const { frame: parent, owner } of owners) {
-        const { model } = await this.#sendIn<{ model: { content: number[] } }>(parent, "DOM.getBoxModel", { backendNodeId: owner });
-        offsetX += model.content[0];
-        offsetY += model.content[1];
-      }
-      const { model } = await this.#sendIn<{ model: { border: number[] } }>(frame, "DOM.getBoxModel", { backendNodeId });
-      const xs = model.border.filter((_, i) => i % 2 === 0);
-      const ys = model.border.filter((_, i) => i % 2 === 1);
-      const x = Math.min(...xs);
-      const y = Math.min(...ys);
-      return { x: x + offsetX, y: y + offsetY, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+      return await measure();
     } catch {
       throw new Error(`${ref} is gone or not visible; the page changed, run "open-eyes snapshot" again`);
     }
+  }
+
+  /** Whether any part of the box is inside the window. */
+  async #inWindow(box: Box): Promise<boolean> {
+    const [width, height] = (await this.#evaluate("[innerWidth, innerHeight]")) as number[];
+    return box.y < height && box.y + box.height > 0 && box.x < width && box.x + box.width > 0;
   }
 
   /** Waits for the document to finish loading, tolerating navigations in progress. */

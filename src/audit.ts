@@ -11,22 +11,36 @@ export type AuditEntry = {
   url?: string;
   outcome: "ok" | "error" | "blocked" | "denied";
   detail?: string;
+  /** What the user allowed on screen before the action went ahead, if it asked. */
+  allowed?: string[];
 };
 
 /**
- * Cuts the query string and fragment off every URL in `text`. They often carry what the user
- * typed (searches, emails, phone numbers) or secrets (tokens, codes), which the audit log
- * promises never to keep; origin and path still say where the agent was.
+ * Cuts the query string, fragment and `user:password@` off every URL in `text`. They often
+ * carry what the user typed (searches, emails, phone numbers) or secrets (tokens, codes, the
+ * password of a site behind HTTP authentication), which the audit log promises never to
+ * keep; origin and path still say where the agent was.
  */
-export function withoutQueries(text: string): string {
-  // Lazy, so punctuation that ends a sentence (as in "changed to <url>; run ...") stays.
-  return text.replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s?#"'<>]*)[?#][^\s"'<>]*?(?=[;,.)]*(?:[\s"'<>]|$))/gi, "$1");
+export function withoutSecrets(text: string): string {
+  return (
+    text
+      .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@"'<>]*@/gi, "$1")
+      // Lazy, so punctuation that ends a sentence (as in "changed to <url>; run ...") stays.
+      .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s?#"'<>]*)[?#][^\s"'<>]*?(?=[;,.)]*(?:[\s"'<>]|$))/gi, "$1")
+  );
 }
 
 /** Appends one JSON line per agent action, so the user can review what happened. */
 export function audit(entry: AuditEntry): void {
-  const clean = (text?: string) => (text === undefined ? undefined : withoutQueries(text));
-  const line = { time: new Date().toISOString(), ...entry, target: clean(entry.target), url: clean(entry.url), detail: clean(entry.detail) };
+  const clean = (text?: string) => (text === undefined ? undefined : withoutSecrets(text));
+  const line = {
+    time: new Date().toISOString(),
+    ...entry,
+    target: clean(entry.target),
+    url: clean(entry.url),
+    detail: clean(entry.detail),
+    allowed: entry.allowed?.map(clean),
+  };
   try {
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
     appendFileSync(auditFile, `${JSON.stringify(line)}\n`, { mode: 0o600 });
@@ -47,7 +61,8 @@ export function readAudit(limit: number): string[] {
     try {
       const e = JSON.parse(line) as AuditEntry & { time: string };
       const parts = [e.time, e.outcome.toUpperCase().padEnd(7), e.action, e.target ?? "", e.url ? `on ${e.url}` : ""];
-      return [...parts, e.detail ? `(${e.detail})` : ""].filter(Boolean).join("  ");
+      const allowed = e.allowed?.length ? `(the user allowed: ${e.allowed.join("; ")})` : "";
+      return [...parts, allowed, e.detail ? `(${e.detail})` : ""].filter(Boolean).join("  ");
     } catch {
       return line;
     }

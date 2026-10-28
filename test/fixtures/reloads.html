@@ -1,0 +1,12 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Reloads</title>
+<script>
+  // Like Amazon on a cold start: right after the first load, the page loads itself again.
+  if (!sessionStorage.reloaded) {
+    sessionStorage.reloaded = "1";
+    addEventListener("load", () => setTimeout(() => location.reload(), 300));
+  } else {
+    document.write("<h1>Second load</h1>");
+  }
+</script>

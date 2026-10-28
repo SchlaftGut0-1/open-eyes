@@ -46,8 +46,15 @@ export function startTrace(goal: string): string {
   return id;
 }
 
+/** Stands for the output of every command after a password was typed. */
+export const HIDDEN_AFTER_SECRET = "(not stored: a password was typed earlier in this trace)";
+
 export function recordStep(id: string, step: TraceStep): void {
   try {
+    // A typed password can come back in a later output (a form sent with GET puts it in the
+    // URL, a page may echo it), so once one was typed nothing printed after it is kept.
+    // Such traces are never exported anyway.
+    if (!step.secret && readTrace(id).steps.some((earlier) => earlier.secret)) step = { ...step, output: HIDDEN_AFTER_SECRET };
     append(id, { type: "step", ...step });
   } catch {
     // Recording must never break the command itself.

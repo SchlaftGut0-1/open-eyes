@@ -14,6 +14,10 @@ test("normalizes site names", () => {
 test("with no lists, everything is allowed", () => {
   assert.equal(blockedReason(policy({}), "https://example.com/a"), undefined);
   assert.equal(blockedReason(policy({}), "file:///tmp/a.html"), undefined);
+  // The browser's own pages, with or without an allow list.
+  for (const url of ["chrome://password-manager/passwords", "chrome://settings", "chrome-extension://abc/popup.html", "devtools://devtools/x", "edge://settings", "brave://settings"]) {
+    assert.match(blockedReason(policy({}), url)!, /the browser's own/, url);
+  }
 });
 
 test("blocked sites and their subdomains are refused, even if allowed", () => {
@@ -42,11 +46,11 @@ test("parsePolicy keeps only valid entries", () => {
   });
 });
 
-test("risky clicks are buttons that spend, send, delete or publish", () => {
-  for (const label of ['button "Buy now"', 'button "Send"', 'menuitem "Delete repository"', 'button "Pagar"', 'button "Place order"']) {
+test("risky clicks are buttons and links that spend, send, delete or publish", () => {
+  for (const label of ['button "Buy now"', 'button "Send"', 'menuitem "Delete repository"', 'button "Pagar"', 'button "Place order"', 'link "Delete"', 'link "Comprar ahora"']) {
     assert.ok(isRiskyClick(label), label);
   }
-  for (const label of ['button "Search"', 'link "Delete"', 'button "Posts"', 'checkbox "Accept terms"', 'button "Next"']) {
+  for (const label of ['button "Search"', 'link "About"', 'button "Posts"', 'checkbox "Accept terms"', 'button "Next"']) {
     assert.ok(!isRiskyClick(label), label);
   }
 });

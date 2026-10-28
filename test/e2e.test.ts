@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { once } from "node:events";
 import { after, before, describe, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -77,6 +78,7 @@ async function humanAt(): Promise<{
   overlay: (expression: string) => Promise<any>;
   click: (part: string) => Promise<void>;
   navigate: (url: string) => Promise<void>;
+  send: (method: string, params?: object) => Promise<any>;
   close: () => void;
 }> {
   const { targetId } = JSON.parse(readFileSync(join(env.XDG_STATE_HOME, "open-eyes", "state.json"), "utf8"));
@@ -108,6 +110,7 @@ async function humanAt(): Promise<{
       await cdp.send("Page.navigate", { url }, sessionId);
       await until(() => evaluate(`location.href === ${JSON.stringify(url)} && document.readyState === "complete"`), url);
     },
+    send: (method, params = {}) => cdp.send(method, params, sessionId),
     close: () => cdp.close(),
   };
 }
@@ -300,6 +303,11 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       const sending = cliWith(ask, "click", refOf(snapshot, 'button Send'));
       await human.click("allow");
       assert.match(await sending, /clicked button "Send"/);
+      // The log says which actions the user allowed, and only those.
+      const [terms, send] = (await cli("log", "--limit", "2")).split("\n");
+      assert.match(terms, /OK +click {2}checkbox "Accept terms"/);
+      assert.doesNotMatch(terms, /the user allowed/);
+      assert.match(send, /OK +click {2}button "Send" .*\(the user allowed: click button "Send"\)/);
 
       const again = cliErrorWith(ask, "click", refOf(snapshot, 'button Send'));
       await human.click("deny");
@@ -363,6 +371,7 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
 
   test("the audit log records actions and outcomes, never typed text", async () => {
     await cli("open", `${fixture("form.html")}?phone=0991234567&token=hunter3#code=42`);
+    await cli("eval", "document.getElementById('pw').value = 'hunter4-secret', 1");
     const log = await cli("log", "--limit", "50");
     assert.match(log, /OK +open +file:\/\/\S*form\.html +on/, "the page is logged without its query");
     assert.doesNotMatch(log, /0991234567|hunter3|code=42/);
@@ -371,6 +380,8 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(log, /BLOCKED +open +https:\/\/www\.example\.com\//);
     assert.match(log, /fill +textbox "Password" \(14 characters\)/);
     assert.doesNotMatch(log, /hunter2-secret/);
+    assert.match(log, /OK +eval +\(57 characters\)/);
+    assert.doesNotMatch(log, /hunter4/);
   });
 
   test("status never opens an agent window", async () => {
@@ -480,6 +491,158 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.ok(Number(await cli("eval", "document.getElementById('list').scrollTop")) > 0, "the list scrolled");
     assert.match(inList, /button Message 1\d @\d+/);
     assert.match(await cliError("scroll", "sideways"), /usage: open-eyes scroll/);
+  });
+
+  test("a dialog stays open until the agent answers it", async () => {
+    await cli("open", fixture("dialogs.html"));
+    const snapshot = await cli("snapshot");
+    const answer = /It stays open until answered/;
+
+    // The action returns at once and says what the page asked.
+    const remove = refOf(snapshot, "button Delete");
+    assert.match(await cli("click", remove), /^click button "Delete": the page is showing a confirm: "Delete it\?"\./);
+    assert.match(await cliError("snapshot"), answer);
+    assert.match(await cli("dialog"), /a confirm: "Delete it\?"/);
+    assert.equal(await cli("dialog", "dismiss"), 'dismissed the confirm "Delete it?"; run "open-eyes snapshot" to see the page');
+    assert.equal(await cli("eval", "result.textContent"), "kept");
+    await cli("click", remove);
+    assert.match(await cli("dialog", "accept"), /^accepted the confirm/);
+    assert.equal(await cli("eval", "result.textContent"), "deleted");
+
+    const name = refOf(snapshot, "button Name");
+    await cli("click", name);
+    assert.match(await cli("dialog", "accept", "Ana", "María"), /accepted the prompt "Your name\?" with "Ana María"/);
+    assert.equal(await cli("eval", "result.textContent"), "Ana María");
+    await cli("click", name);
+    await cli("dialog", "accept"); // Keeps the page's suggestion, as OK does.
+    assert.equal(await cli("eval", "result.textContent"), "guest");
+
+    assert.match(await cli("click", refOf(snapshot, "button Alert")), /an alert: "Saved"/);
+    assert.match(await cli("dialog", "accept"), /^closed the alert "Saved"/);
+    assert.equal(await cli("dialog"), "no dialog is open");
+    assert.match(await cliError("dialog", "accept"), /no dialog is open/);
+    assert.match(await cliError("dialog", "dismiss", "text"), /dismiss takes no text/);
+  });
+
+  test("a risky confirm needs the user's own answer", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    await cli("open", fixture("dialogs.html"));
+    const snapshot = await cli("snapshot");
+    await cli("click", refOf(snapshot, "button Delete"));
+    assert.match(await cliErrorWith(ask, "dialog", "accept"), /the confirm "Delete it\?" needs the user's own answer/);
+    assert.match(await cli("dialog"), /a confirm: "Delete it\?"/); // Still open, for the user.
+    assert.match(await cliWith(ask, "dialog", "dismiss"), /^dismissed the confirm/);
+    assert.equal(await cli("eval", "result.textContent"), "kept");
+    // A question with no risky word can still be answered by the agent.
+    await cli("click", refOf(snapshot, "button Name"));
+    assert.match(await cliWith(ask, "dialog", "accept", "Ana"), /^accepted the prompt "Your name\?" with "Ana"/);
+  });
+
+  test("a dialog the page opens between commands is reported, not waited on", async () => {
+    await cli("open", fixture("dialogs.html"));
+    await cli("eval", "setTimeout(() => confirm('Keep going?'), 300), 1");
+    await sleep(800);
+    const started = Date.now();
+    assert.match(await cliError("snapshot"), /the page is showing a confirm: "Keep going\?"/);
+    assert.ok(Date.now() - started < 5000, "it did not hang");
+    assert.match(await cli("dialog", "accept"), /accepted the confirm "Keep going\?"/);
+    assert.match(await cli("snapshot"), /button Delete @\d+/);
+  });
+
+  test("the agent follows a tab its action opened", async () => {
+    for (const opener of ["link New tab", "link No opener", "button Pop up"]) {
+      await cli("open", fixture("popups.html"));
+      const opened = await cli("click", refOf(await cli("snapshot"), opener));
+      assert.match(opened, /it opened a new tab, which is now the agent window: .*second\.html;/, opener);
+      assert.match(await cli("snapshot"), /^title: "Second page"$/m, opener);
+    }
+
+    // The policy applies to the new tab too.
+    const server = createServer((_, response) => {
+      const port = (server.address() as AddressInfo).port;
+      response.end(`<a href="http://localhost:${port}/" target="_blank">Elsewhere</a>`);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      await cli("open", `http://127.0.0.1:${(server.address() as AddressInfo).port}/`);
+      await cli("policy", "block", "localhost");
+      assert.match(await cliError("click", refOf(await cli("snapshot"), "link Elsewhere")), /localhost is blocked by your open-eyes policy; open-eyes left it/);
+    } finally {
+      await cli("policy", "reset");
+      server.close();
+    }
+  });
+
+  test("scroll moves the page in steps, as a person does", async () => {
+    await cli("open", fixture("tall.html"));
+    await cli("eval", "window.positions = new Set(); addEventListener('scroll', () => positions.add(scrollY)), 1");
+    assert.match(await cli("scroll", "down", "1200"), /^scrolled down 1200 px in the page$/m);
+    assert.ok(Number(await cli("eval", "positions.size")) >= 4, "the page passed through several positions");
+    assert.equal(await cli("eval", "scrollY"), "1200");
+
+    await cli("eval", "positions.clear(), 1");
+    const intoView = await cli("scroll", refOf(await cli("snapshot", "--find", "Bottom button"), "button Bottom button"));
+    assert.match(intoView, /button Bottom button @\d+/);
+    assert.ok(Number(await cli("eval", "positions.size")) >= 2, "scrolling to the element was smooth");
+  });
+
+  test("snapshot finds what is on screen on a scaled screen", async () => {
+    // A screen at 125%, as on many laptops: the page's layout comes back in device pixels.
+    const scaledPort = port + 500;
+    const dir = join(root, "scaled");
+    const browser = spawn(
+      findBrowser()!,
+      [`--remote-debugging-port=${scaledPort}`, `--user-data-dir=${join(dir, "profile")}`, "--no-first-run", "--no-default-browser-check", "--headless=new", "--force-device-scale-factor=1.25"],
+      { stdio: "ignore" },
+    );
+    const scaled = { OPEN_EYES_PORT: String(scaledPort), XDG_STATE_HOME: join(dir, "state") };
+    try {
+      await until(() => browserVersion(scaledPort), "the scaled browser");
+      await cliWith(scaled, "open", fixture("tall.html"));
+      const button = refOf(await cliWith(scaled, "snapshot", "--find", "Bottom button"), "button Bottom button");
+      const intoView = await cliWith(scaled, "scroll", button);
+      assert.match(intoView, /^scrolled to button "Bottom button"$/m);
+      assert.match(intoView, new RegExp(`button Bottom button ${button}$`, "m"));
+      assert.doesNotMatch(intoView, /heading Bottom \(below\)/);
+    } finally {
+      browser.kill();
+      await once(browser, "exit");
+    }
+  });
+
+  test("snapshot finds what is on screen when the page is emulated at another scale", async () => {
+    await cli("open", fixture("tall.html"));
+    const human = await humanAt();
+    try {
+      // Emulated scaling changes devicePixelRatio but not the units of the page's layout.
+      await human.send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: 1.25, mobile: false });
+      const intoView = await cli("scroll", refOf(await cli("snapshot", "--find", "Bottom button"), "button Bottom button"));
+      assert.match(intoView, /^scrolled to button "Bottom button"$/m);
+      assert.match(intoView, /button Bottom button @\d+$/m);
+      assert.doesNotMatch(intoView, /heading Bottom \(below\)/);
+    } finally {
+      await human.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+      human.close();
+    }
+  });
+
+  test("scroll @N in a tab panel ends with the element on screen, or says it is not", async () => {
+    await cli("open", fixture("tab-panel.html"));
+    await cli("click", refOf(await cli("snapshot"), "tab Details"));
+    const link = refOf(await cli("snapshot", "--find", "About licenses"), "link About licenses");
+    const intoView = await cli("scroll", link);
+    assert.match(intoView, /^scrolled to link "About licenses"$/m);
+    assert.match(intoView, new RegExp(`link About licenses ${link}$`, "m"));
+
+    // The page pulls every scroll but the mouse wheel's back to the panel's top.
+    await cli("open", fixture("second.html"));
+    await cli("open", `${fixture("tab-panel.html")}#lock`);
+    await cli("click", refOf(await cli("snapshot"), "tab Details"));
+    const locked = refOf(await cli("snapshot", "--find", "About licenses"), "link About licenses");
+    const pulledBack = await cli("scroll", locked);
+    assert.match(pulledBack, /^could not bring link "About licenses" into view: it is still below the screen; try scroll down$/m);
+    assert.doesNotMatch(pulledBack, /link About licenses @\d+$/m);
+    assert.match(await cli("scroll", "down", "2000"), /link About licenses @\d+$/m);
   });
 
   test("select chooses options in native and custom dropdowns", async () => {
@@ -608,6 +771,19 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       assert.match(report, /^stopped: the model sent tool calls that could not be read\nactions:\n  click --name Send → clicked button "Send"/);
       script = [{ text: "Done." }, { text: "Really done." }];
       assert.match(await cliWith(modelEnv, "do", "Anything"), /^stopped: the model answered without finishing: Really done\./);
+      // An empty reply is no answer at all, not a stop with an empty quote (#134).
+      script = [{ text: "" }, { text: "" }];
+      assert.match(await cliWith(modelEnv, "do", "Anything"), /^not done: the model gave no answer\nactions: none/);
+    });
+
+    test("stops at a dialog, which only the main agent can answer", async () => {
+      await cli("open", fixture("dialogs.html"));
+      script = [{ command: "click --name Delete" }, { command: "snapshot" }, { answer: "Deleted", success: true }];
+      const report = await cliWith(modelEnv, "do", "Delete it");
+      assert.match(report, /^stopped: click button "Delete": the page is showing a confirm: "Delete it\?"\./);
+      assert.match(report, /actions:\n  click --name Delete → click button "Delete": the page is showing a confirm/);
+      assert.equal(script.length, 2, "the model was not asked again");
+      await cli("dialog", "dismiss");
     });
 
     test("explains how to set up a model when none is configured", async () => {
@@ -632,17 +808,23 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("trace", "stop", "done", "Hello, Ana (accepted)"), /^stopped trace [\w-]+: done, 5 commands$/);
 
     await cli("trace", "start", "Log in");
-    await cli("fill", "--name", "Password", "hunter2-secret");
+    await cli("open", fixture("login-get.html"));
+    await cli("fill", "--name", "User", "ana");
+    await cli("fill", "--name", "Secret", "hunter2-secret");
+    // Sent with GET: the password comes back in the URL the next output prints.
+    assert.match(await cli("click", "--name", "Log in"), /second\.html\?u=ana&p=hunter2-secret/);
     await cli("trace", "stop", "failed");
 
     const list = await cli("trace");
     assert.match(list, /done +5 commands  Sign up as Ana/);
-    assert.match(list, /failed +1 commands  Log in/);
+    assert.match(list, /failed +4 commands  Log in/);
     const [first, second] = list.split("\n").map((line) => line.split(" ")[0]);
     const shown = await cli("trace", "show", first);
     assert.match(shown, /^goal: Sign up as Ana\noutcome: done \(Hello, Ana \(accepted\)\)/);
     assert.match(shown, /\$ open-eyes fill @\d+ Ana\nfilled textbox "Name"/);
-    assert.match(await cli("trace", "show", second), /\$ open-eyes fill \(typed into a password field, not stored\)/);
+    const login = await cli("trace", "show", second);
+    assert.match(login, /\$ open-eyes fill \(typed into a password field, not stored\)/);
+    assert.match(login, /\$ open-eyes click --name "Log in"\n\(not stored: a password was typed earlier in this trace\)/);
     const stored = readFileSync(join(root, "state", "open-eyes", "traces", `${second}.jsonl`), "utf8");
     assert.doesNotMatch(stored, /hunter2/);
 
@@ -673,6 +855,148 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       assert.match(await pressing, /the user denied: press Enter, which submits a form/);
     } finally {
       human.close();
+    }
+  });
+
+  test("links with risky words ask like buttons", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    await cli("open", fixture("links.html"));
+    const snapshot = await cli("snapshot");
+    assert.match(await cliWith(ask, "click", refOf(snapshot, "link About")), /the page changed to .*second\.html/);
+    await cli("open", fixture("links.html"));
+    const human = await humanAt();
+    try {
+      const buying = cliErrorWith(ask, "click", refOf(await cli("snapshot"), "link Buy now"));
+      await human.click("deny");
+      assert.match(await buying, /the user denied: click link "Buy now"/);
+    } finally {
+      human.close();
+    }
+  });
+
+  test("clicking a form's submit button asks as Enter does", async () => {
+    const ask = { OPEN_EYES_CONFIRM: "risky" };
+    for (const button of ["button Go", "button Look up"]) {
+      await cli("open", fixture("site-search.html"));
+      assert.match(await cliWith(ask, "click", refOf(await cli("snapshot"), button)), /the page changed to .*second\.html/);
+    }
+    // "Log in" has none of the risky words; its form has a password field.
+    await cli("open", fixture("site-search.html"));
+    const snapshot = await cli("snapshot");
+    await cli("fill", refOf(snapshot, "textbox User"), "ana");
+    const human = await humanAt();
+    try {
+      const clicking = cliErrorWith(ask, "click", refOf(snapshot, "button Log in"));
+      await human.click("deny");
+      assert.match(await clicking, /the user denied: click button "Log in", which submits a form/);
+    } finally {
+      human.close();
+    }
+  });
+
+  test("click on a disabled control fails instead of reporting a click", async () => {
+    await cli("open", fixture("disabled.html"));
+    const snapshot = await cli("snapshot");
+    for (const button of ["button Pay", "button Save", "button Next step"]) {
+      assert.match(await cliError("click", refOf(snapshot, button)), /is disabled, so clicking it does nothing/, button);
+    }
+    assert.match(await cli("click", refOf(snapshot, "button Reset")), /^clicked button "Reset"/);
+    assert.equal(await cli("eval", "result.textContent"), "reset");
+  });
+
+  test("open takes a file path as well as a URL", async () => {
+    const path = join(import.meta.dirname, "fixtures", "second.html");
+    assert.equal(await cli("open", path), fixture("second.html"));
+    assert.equal(await cli("open", "./test/fixtures/second.html"), fixture("second.html")); // From the working directory.
+    assert.match(await cliError("open", join(import.meta.dirname, "fixtures", "missing.html")), /no such file: .*missing\.html/);
+  });
+
+  test("open waits for a page that renders after loading, or loads again", async () => {
+    await cli("open", fixture("late.html"));
+    assert.match(await cli("snapshot"), /heading Rendered\nbutton Go @\d+/);
+    await cli("open", fixture("reloads.html"));
+    assert.match(await cli("snapshot"), /heading Second load/);
+  });
+
+  test("press sends key combinations", async () => {
+    await cli("open", fixture("form.html"));
+    await cli("fill", refOf(await cli("snapshot"), "textbox Name"), "Ana María");
+    await cli("press", "Control+a"); // Selects the field's text, typing no "a".
+    await cli("press", "Backspace");
+    assert.equal(await cli("eval", "document.getElementById('name').value"), "");
+    await cli("press", "Tab");
+    assert.equal(await cli("eval", "document.activeElement.id"), "tos");
+    assert.match(await cli("press", "Shift+Tab"), /^pressed Shift\+Tab/);
+    assert.equal(await cli("eval", "document.activeElement.id"), "name");
+    assert.match(await cliError("press", "Hyper+a"), /unknown key "Hyper\+a"; .*Alt\+, Control\+, Meta\+ or Shift\+/);
+  });
+
+  test("open refuses the browser's own pages", async () => {
+    assert.match(await cliError("open", "chrome://password-manager/passwords"), /chrome: pages are the browser's own/);
+    assert.doesNotMatch(await cli("status"), /password-manager/);
+  });
+
+  test("click --right opens a context menu, --double double-clicks", async () => {
+    await cli("open", fixture("clicks.html"));
+    const cell = refOf(await cli("snapshot"), "button Cell");
+    const right = await cli("click", cell, "--right");
+    assert.match(right, /^right-clicked button "Cell"/);
+    assert.match(right, /\+ +menuitem Rename @\d+/);
+    assert.match(await cli("click", cell, "--double"), /^double-clicked button "Cell"[^]*\+ +button Editing/);
+    assert.match(await cliError("click", cell, "--right", "--double"), /not both/);
+  });
+
+  test("rich-text editors and named images get refs", async () => {
+    await cli("open", fixture("editor.html"));
+    const snapshot = await cli("snapshot");
+    assert.match(await cli("fill", refOf(snapshot, "Message"), "Hola"), /^filled generic "Message"/);
+    assert.equal(await cli("eval", "document.querySelector('[contenteditable]').textContent"), "Hola");
+    // The same inside an iframe, whose body is the editor.
+    assert.match(await cli("fill", refOf(snapshot, "Old comment"), "Nuevo"), /^filled /);
+    assert.equal(await cli("eval", "document.querySelector('iframe').contentDocument.body.textContent"), "Nuevo");
+    assert.match(await cli("hover", refOf(snapshot, "image User avatar")), /\+ +"Ana María, admin"/);
+  });
+
+  test("drag moves an element onto another, by drag and drop or by mouse", async () => {
+    await cli("open", fixture("drag.html"));
+    const snapshot = await cli("snapshot");
+    // draggable="true" elements get refs; Chromium calls them groups.
+    const [card, done] = [...snapshot.matchAll(/^group @(\d+)$/gm)].map((m) => `@${m[1]}`);
+    assert.match(await cli("drag", card, done), /^dragged group "" to group ""/);
+    assert.match(await cli("eval", "document.getElementById('done').textContent"), /got Card 1/);
+    await cli("drag", refOf(snapshot, "button Knob"), refOf(snapshot, "button Slot"));
+    assert.equal(await cli("eval", "document.getElementById('slot').textContent"), "Knob here");
+    assert.match(await cliError("drag", card), /usage: open-eyes drag <@N> <@M>/);
+  });
+
+  test("snapshot --find shows a table cell with its whole row", async () => {
+    await cli("open", fixture("table.html"));
+    assert.doesNotMatch(await cli("snapshot"), /^\s*row$/m, "other snapshots stay without row lines");
+    const found = await cli("snapshot", "--find", "jsmith");
+    assert.match(found, /row\n +"Smith"\n +"jsmith@example\.com"\n +"\$50\.00"\n +link edit @\d+/);
+    assert.doesNotMatch(found, /Bach/);
+  });
+
+  test("a page behind HTTP authentication says how to log in, and its password is kept nowhere", async () => {
+    const login = `Basic ${Buffer.from("admin:s3cret-pw").toString("base64")}`;
+    const server = createServer((request, response) => {
+      if (request.headers.authorization === login) return response.end("<h1>Inside</h1>");
+      response.writeHead(401, { "www-authenticate": 'Basic realm="intranet"' }).end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.match(await cliError("open", `http://${host}/admin`), /asks for a user name and password \(HTTP authentication\); if the user gives them to you, open http:\/\/USER:PASSWORD@/);
+      assert.equal(await cli("open", `http://admin:s3cret-pw@${host}/admin`), `http://${host}/admin`);
+      assert.match(await cli("snapshot"), /heading Inside/);
+      assert.doesNotMatch(await cli("log", "--limit", "5"), /s3cret-pw/);
+      await cli("trace", "start", "Log in to the intranet");
+      await cli("open", `http://admin:s3cret-pw@${host}/admin`);
+      const id = (await cli("trace", "stop", "done")).match(/stopped trace ([\w-]+)/)![1];
+      assert.doesNotMatch(readFileSync(join(root, "state", "open-eyes", "traces", `${id}.jsonl`), "utf8"), /s3cret-pw/);
+      await cli("trace", "delete", id);
+    } finally {
+      server.close();
     }
   });
 
