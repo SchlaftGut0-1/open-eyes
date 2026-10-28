@@ -771,6 +771,9 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       assert.match(report, /^stopped: the model sent tool calls that could not be read\nactions:\n  click --name Send → clicked button "Send"/);
       script = [{ text: "Done." }, { text: "Really done." }];
       assert.match(await cliWith(modelEnv, "do", "Anything"), /^stopped: the model answered without finishing: Really done\./);
+      // An empty reply is no answer at all, not a stop with an empty quote (#134).
+      script = [{ text: "" }, { text: "" }];
+      assert.match(await cliWith(modelEnv, "do", "Anything"), /^not done: the model gave no answer\nactions: none/);
     });
 
     test("stops at a dialog, which only the main agent can answer", async () => {

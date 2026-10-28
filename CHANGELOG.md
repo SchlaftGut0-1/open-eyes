@@ -61,6 +61,9 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Fixed
 
+- When the local model replies with nothing, `open-eyes do` reports `not done: the model
+  gave no answer` instead of `stopped: the model answered without finishing:` and an empty
+  quote.
 - A page behind HTTP authentication (intranets, routers, staging sites) no longer fails with
   a bare `net::ERR_INVALID_AUTH_CREDENTIALS`: `open` says it asks for a user name and
   password and how to pass them, `https://USER:PASSWORD@host/path`.
