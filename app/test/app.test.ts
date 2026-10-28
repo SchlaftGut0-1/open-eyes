@@ -131,4 +131,15 @@ describe("open-eyes Browser", () => {
     await until(async () => (await evaluate(tab, "document.title")) === "signed in: ok");
     assert.equal(await evaluate(tab, "document.title"), "signed in: ok");
   });
+
+  test("opening the app again brings this one forward and opens the address as a tab", async () => {
+    const second = spawn(electron as unknown as string, [APP, "--ozone-platform=headless", fixture("links.html")], {
+      env: { ...process.env, OPEN_EYES_BROWSER_PROFILE: profile },
+      stdio: "ignore",
+    });
+    const code = await new Promise((resolve) => second.once("exit", resolve));
+    assert.equal(code, 0, "the second instance hands over and quits");
+    await until(async () => (await tabs()).some((t) => t.url === fixture("links.html")));
+    assert.ok((await tabs()).some((t) => t.url === fixture("links.html")));
+  });
 });

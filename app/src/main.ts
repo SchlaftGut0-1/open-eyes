@@ -327,6 +327,16 @@ function loadSpaces(): void {
   current = spaces.find((s) => s.id === saved.current)!;
 }
 
+// One app per profile: opening it again brings this window forward (with the address given, if any).
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on("second-instance", (_event, argv) => {
+  if (!window) return;
+  if (window.isMinimized()) window.restore();
+  window.focus();
+  const url = argv.find((arg) => /^(https?|file):/.test(arg));
+  if (url) openTab(current, url);
+});
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   // Nothing should use the default session; refuse its permissions too.
