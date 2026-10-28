@@ -84,8 +84,10 @@ left alone. `open-eyes disconnect` closes that window and stops the daemon.
 
 ## open-eyes Browser (preview)
 
-A desktop browser of our own (Electron, so Chromium inside), in `app/`: your tabs, a
-sidebar for the spaces agents work in, and its own profile apart from your other browsers.
+A desktop browser of our own (Electron, so Chromium inside), in `app/`, with its own
+profile apart from your other browsers. Tabs are icons down a slim sidebar (expand it to
+see their titles). Spaces keep work apart: each has its own tabs, icon and color, and its
+own logins and cookies; switch or add one from the space at the bottom of the sidebar.
 It is in early work: for now it browses, and the CLI cannot drive it yet. On Linux, from
 the repository:
 
