@@ -208,7 +208,12 @@ Set `OPEN_EYES_SLOWMO=0` to drop the pause that lets you follow each action.
 
 Several agents can work side by side: add `--space <name>` to any command (or set
 `OPEN_EYES_SPACE=<name>`) and that agent gets its own window, refs and take-control
-state, named on its banner. `close --space <name>` closes the window and forgets the space.
+state, named on its banner. `close --space <name>` closes the window and forgets the space. Commands in
+different spaces can run at the same time. They share one browser, which has two limits:
+only one window has the keyboard focus, so a page that reacts to losing it (a menu that
+closes on blur) behaves as in a background window; and downloads are browser-wide, so a
+download that starts while another space is downloading may be reported to that space.
+Within one space, run one command at a time.
 
 ## How it works
 

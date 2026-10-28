@@ -13,7 +13,9 @@ All notable changes to open-eyes are documented here. The format follows
   own window, refs, snapshot baseline, take-control state and dialog watcher; the banner
   shows the space's name. `open-eyes spaces` lists them, and `close --space <name>` closes
   one and forgets it; `disconnect` closes the windows of every space. Without a space,
-  commands use the `default` one, as before (#23).
+  commands use the `default` one, as before (#23). Commands in different spaces can run
+  at the same time: each space writes only its own state, every write is atomic, and a
+  command writes back only the shared settings it changed itself (#24).
 
 ## [0.6.0] - 2026-10-28
 

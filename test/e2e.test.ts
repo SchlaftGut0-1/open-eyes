@@ -81,7 +81,7 @@ async function humanAt(): Promise<{
   send: (method: string, params?: object) => Promise<any>;
   close: () => void;
 }> {
-  const { targetId } = JSON.parse(readFileSync(join(env.XDG_STATE_HOME, "open-eyes", "state.json"), "utf8"));
+  const { targetId } = JSON.parse(readFileSync(join(env.XDG_STATE_HOME, "open-eyes", "window.json"), "utf8"));
   const cdp = await CDP.connect((await browserVersion(port))!.webSocketDebuggerUrl);
   const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
   const evaluate = async (expression: string, contextId?: number) =>
@@ -266,14 +266,19 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       await cli("open", fixture("files.html"));
       assert.match(await cli("click", refOf(await cli("snapshot"), "link Download notes")), /downloaded .*notes/);
       // Spaces work through the daemon too, each in its own window.
-      await Promise.all([cli("open", fixture("form.html")), cli("open", fixture("links.html"), "--space", "a")]);
+      await Promise.all([cli("open", fixture("form.html")), cli("open", fixture("links.html"), "--space", "a"), cli("open", fixture("search.html"), "--space", "b")]);
       assert.match(await cli("spaces"), /^a: file:.*links\.html$/m);
+      // Many clients at once through the one connection: each gets answers from its own window.
+      const titles = { default: "Test form", a: "Links", b: "Search" };
+      const asked = Object.keys(titles).flatMap((space) => Array.from({ length: 6 }, () => space as keyof typeof titles));
+      const answers = await Promise.all(asked.map((space) => cli("eval", "document.title", "--space", space)));
+      assert.deepEqual(answers, asked.map((space) => titles[space]));
     } finally {
       assert.match(await cli("disconnect"), /disconnected/);
     }
     assert.throws(() => process.kill(daemonPid, 0), "the daemon should have exited");
     const pages = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as { url: string }[];
-    assert.ok(!pages.some((p) => /fixtures\/(form|links)\.html$/.test(p.url)), "disconnect closes every space's window");
+    assert.ok(!pages.some((p) => /fixtures\/(form|links|search)\.html$/.test(p.url)), "disconnect closes every space's window");
     assert.doesNotMatch(await cli("spaces"), /^a:/m);
     assert.match(await cli("status"), new RegExp(`on port ${port}`));
   });
