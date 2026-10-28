@@ -112,8 +112,21 @@ export type Frame = { nodes: AXNode[]; url: string; frame?: string };
 export const nodeKey = (frame: string | undefined, backendNodeId: number) =>
   frame ? `${frame}:${backendNodeId}` : String(backendNodeId);
 
-/** Where a node lives: its tree, and for iframe content the frame, URL and <iframe> to place it by. */
-type Context = { byId: Map<string, AXNode>; frame?: string; url?: string; place?: number };
+/**
+ * Where a node lives: its tree, and for iframe content the frame, URL and <iframe> to place it by.
+ * `base` is the URL of the document the node is in.
+ */
+type Context = { byId: Map<string, AXNode>; frame?: string; url?: string; place?: number; base?: string };
+
+/** Where a link goes, as short as it can be said: the #fragment on the same page, the path on the same site, else host and path. */
+function linkHint(href: string, base: string | undefined): string {
+  const url = URL.parse(href, base);
+  if (!url || !url.protocol.startsWith("http")) return href;
+  const page = URL.parse(base ?? "");
+  const path = `${url.pathname}${url.search}`;
+  if (page?.origin !== url.origin) return `${url.host}${path === "/" ? "" : path}${url.hash}`;
+  return url.hash && path === `${page.pathname}${page.search}` ? url.hash : `${path}${url.hash}`;
+}
 
 /**
  * Turns Chromium's accessibility tree into compact, indented text the model can read,
@@ -189,6 +202,9 @@ export function formatSnapshot(
 
     let line = `${indent}${role}`;
     if (name) line += ` ${bare(truncate(name))}`;
+    // An unnamed link (a logo, an icon) says nothing else about itself (#166).
+    const href = role === "link" && !name ? property(node, "url") : undefined;
+    if (typeof href === "string" && href) line += ` url=${bare(truncate(linkHint(href, ctx.base)))}`;
     const value = node.value?.value;
     if (value !== undefined && value !== "" && String(value) !== name) {
       line += ` value=${bare(truncate(String(value)))}`;
@@ -209,7 +225,9 @@ export function formatSnapshot(
 
   // The root is the document itself; its title is printed separately (or on the iframe line).
   const visitTree = (tree: AXNode[], depth: number, where: Omit<Context, "byId">) => {
-    const ctx = { ...where, byId: new Map(tree.map((node) => [node.nodeId, node])) };
+    const root = tree[0] && property(tree[0], "url");
+    const base = typeof root === "string" ? root : where.url;
+    const ctx = { ...where, base, byId: new Map(tree.map((node) => [node.nodeId, node])) };
     for (const id of tree[0]?.childIds ?? []) {
       const child = ctx.byId.get(id);
       if (child) visit(child, depth, "", ctx);

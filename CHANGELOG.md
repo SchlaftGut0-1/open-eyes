@@ -54,6 +54,11 @@ All notable changes to open-eyes are documented here. The format follows
 
 - `snapshot --find` shows a match in a table with its whole row, so a found email or price
   comes with the name it belongs to. Other snapshots are unchanged in size.
+- A link with no name (a logo, an icon, a vote arrow) shows where it goes: `link url=/ @1`,
+  the path on the same site, the host for another site, and only `#fragment` on the same
+  page. Before, it was a bare `link @1`, and the local model clicked Hacker News' logo
+  instead of the first story. It costs about 1% more tokens on a Wikipedia article and
+  20% on Hacker News' front page, where every vote arrow is such a link.
 - The overlay shows only the agent's pointer while it acts, no longer a purple box around
   the element, which stayed on screen after the action.
 - `scroll` moves the page in small steps that speed up and slow down, as a person does,

@@ -143,6 +143,30 @@ describe("formatSnapshot", () => {
     assert.equal(text, ['"Item"', "image Company logo", "link @1"].join("\n"));
   });
 
+  test("says where an unnamed link goes", () => {
+    const url = (value: string) => ({ properties: [{ name: "url", value: { value } }] });
+    const nodes = page(
+      el("link", "", { backendDOMNodeId: 1, ...url("https://news.example/") }),
+      el("link", "", { backendDOMNodeId: 2, ...url("https://news.example/item?id=7#top") }),
+      el("link", "", { backendDOMNodeId: 3, ...url("https://other.example/") }),
+      el("link", "", { backendDOMNodeId: 4, ...url("mailto:a@b.example") }),
+      el("link", "Named", { backendDOMNodeId: 5, ...url("https://news.example/named") }),
+      el("link", "", { backendDOMNodeId: 6, ...url("https://news.example/news#cite-1") }),
+    );
+    Object.assign(nodes[0], url("https://news.example/news"));
+    assert.equal(
+      formatSnapshot(nodes).text,
+      [
+        "link url=/ @1",
+        'link url="/item?id=7#top" @2',
+        "link url=other.example @3",
+        "link url=mailto:a@b.example @4",
+        "link Named @5",
+        "link url=#cite-1 @6",
+      ].join("\n"),
+    );
+  });
+
   test("keeps citations as one clickable line", () => {
     const { text } = formatSnapshot(page(el("StaticText", "A claim."), el("superscript", "", {}, [el("link", "[1]", { backendDOMNodeId: 1 })])));
     assert.equal(text, ['"A claim."', 'link "[1]" @1'].join("\n"));
