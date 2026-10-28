@@ -46,15 +46,15 @@ button { font: inherit; color: inherit; }
 
 /* The spaces rail. */
 .rail { width: 44px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0; min-height: 0; }
-.logo { width: 24px; height: 24px; margin-bottom: 8px; border-radius: 6px; }
+.rail-head { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 6px; }
+.logo { width: 24px; height: 24px; border-radius: 6px; }
 .divider { width: 20px; margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
 .spaces { display: flex; flex-direction: column; gap: 2px; }
 /* A space is just its icon in its color; the name shows on hover. The current one is marked. */
 .space { position: relative; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--space); }
 .space .lucide { width: 16px; height: 16px; stroke-width: 2; }
 .space:hover { background: var(--hover); }
-.space[aria-current="true"] { background: var(--hover); }
-.space[aria-current="true"]::before { content: ""; position: absolute; left: -7px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--space); }
+
 
 /* Tabs: icons down the rail, the title on hover. Pinned ones stay on top. */
 .tabs { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; overflow-y: auto; scrollbar-width: none; }
@@ -143,3 +143,21 @@ button { font: inherit; color: inherit; }
 .danger { border: 0; background: transparent; color: #dc2626; padding: 0 8px !important; }
 .danger.solid { background: #b91c1c; color: #fff; padding: 0 16px !important; }
 .danger .lucide { width: 14px; height: 14px; }
+
+/* Labels and the space's chevron show only in the expanded rail. */
+.label, .space .chevron { display: none; }
+body.expanded .rail { width: 208px; align-items: stretch; padding: 8px; }
+body.expanded .rail-head { flex-direction: row; justify-content: space-between; padding: 0 4px; }
+body.expanded .tabs { align-items: stretch; }
+body.expanded .tab, body.expanded .rail-add:not(#expand), body.expanded .space { width: auto; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 8px; }
+body.expanded .tab { display: flex; align-items: center; }
+body.expanded .tab[aria-selected="true"]::before { left: -8px; }
+body.expanded .label { display: block; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; color: var(--text); font-size: 13px; }
+body.expanded .rail-add .label { color: var(--muted); }
+body.expanded .tab .close { position: static; display: none; width: 18px; height: 18px; border: 0; background: transparent; }
+body.expanded .tab:hover .close { display: grid; }
+body.expanded .tab .close .lucide { width: 11px; height: 11px; }
+body.expanded .tab.pinned::after { right: auto; left: 22px; }
+body.expanded .space { height: 34px; }
+body.expanded .space .chevron { display: block; width: 14px; height: 14px; color: var(--muted); }
+body.expanded .divider { width: auto; }

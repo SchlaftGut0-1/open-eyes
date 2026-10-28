@@ -64,26 +64,47 @@ function tabElement(tab, newTab) {
   close.append(icon("X"));
   close.addEventListener("mousedown", (event) => event.stopPropagation());
   close.addEventListener("click", () => send({ type: "closeTab", id: tab.id }));
-  element.append(favicon(tab, newTab), close);
+  const title = Object.assign(document.createElement("span"), { className: "label", textContent: tab.title });
+  element.append(favicon(tab, newTab), title, close);
   return element;
 }
 
-function spaceElement(space) {
-  const tabs = `${space.tabs} ${space.tabs === 1 ? "tab" : "tabs"}`;
-  const button = document.createElement("button");
-  button.className = "space";
+/** The rail shows only the current space; clicking it opens the menu to switch or add one. */
+function showCurrentSpace(space) {
+  const button = $("space-current");
   button.style.setProperty("--space", space.color);
-  button.append(icon(space.icon));
-  button.title = space.name;
-  button.setAttribute("aria-label", `${space.name}, ${tabs}`);
-  if (space.current) button.setAttribute("aria-current", "true");
-  button.addEventListener("click", () => send({ type: "switchSpace", id: space.id }));
-  button.addEventListener("contextmenu", (event) => {
-    event.preventDefault();
-    openSpaceDialog(space);
-  });
-  return button;
+  button.title = `${space.name} (click to switch spaces)`;
+  button.setAttribute("aria-label", `Space: ${space.name}. Switch or add a space`);
+  const name = Object.assign(document.createElement("span"), { className: "label", textContent: space.name });
+  const chevron = icon("chevrons-up-down");
+  chevron.classList.add("chevron");
+  button.replaceChildren(icon(space.icon), name, chevron);
 }
+$("space-current").addEventListener("click", () => {
+  const { right, top } = $("space-current").getBoundingClientRect();
+  send({ type: "spaceMenu", x: right + 6, y: top });
+});
+$("space-current").addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+  openSpaceDialog(state.spaces.find((s) => s.current));
+});
+window.browser.onSpaceDialog((id) => openSpaceDialog(id ? state.spaces.find((s) => s.id === id) : undefined));
+
+// Expanded, the rail shows tab titles and the space's name; the choice stays on this computer.
+function expand(open) {
+  document.body.classList.toggle("expanded", open);
+  $("expand").setAttribute("aria-expanded", String(open));
+  $("expand").setAttribute("aria-label", open ? "Collapse the sidebar" : "Expand the sidebar");
+  $("expand").title = $("expand").getAttribute("aria-label");
+  $("expand").replaceChildren(icon(open ? "panel-left-close" : "panel-left-open"));
+  try {
+    localStorage.setItem("expanded", String(open));
+  } catch {}
+}
+$("expand").addEventListener("click", () => expand(!document.body.classList.contains("expanded")));
+try {
+  if (localStorage.getItem("expanded") === "true") expand(true);
+} catch {}
 
 /** The address as the user reads it: the site, then the rest, quieter. Our new tab page has none. */
 function showAddress(url, newTab) {
@@ -101,7 +122,7 @@ function showAddress(url, newTab) {
 
 window.browser.onState((next) => {
   state = next;
-  $("spaces").replaceChildren(...state.spaces.map(spaceElement));
+  showCurrentSpace(state.spaces.find((s) => s.current));
   $("tabs").replaceChildren(...state.tabs.map((tab) => tabElement(tab, state.newTab)));
   $("back").disabled = !state.canGoBack;
   $("forward").disabled = !state.canGoForward;
@@ -173,7 +194,6 @@ function openSpaceDialog(space) {
   openDialog($("space-dialog"));
   $("space-name").focus();
 }
-$("new-space").addEventListener("click", () => openSpaceDialog());
 $("space-cancel").addEventListener("click", () => $("space-dialog").close());
 $("space-form").addEventListener("submit", (event) => {
   const name = $("space-name").value.trim().replace(/\s+/g, " ");

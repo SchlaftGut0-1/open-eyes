@@ -8,13 +8,15 @@
 </head>
 <body>
 <nav class="rail" aria-label="Spaces">
-  <img class="logo" src="icon.svg" alt="open-eyes" width="30" height="30">
+  <div class="rail-head">
+    <img class="logo" src="icon.svg" alt="open-eyes" width="30" height="30">
+    <button id="expand" class="rail-add" aria-label="Expand the sidebar" aria-expanded="false" title="Expand the sidebar"><i data-lucide="panel-left-open"></i></button>
+  </div>
   <div id="tabs" class="tabs" role="tablist" aria-label="Tabs" aria-orientation="vertical"></div>
-  <button id="new-tab" class="rail-add" aria-label="New tab" title="New tab (Ctrl+T)"><i data-lucide="plus"></i></button>
+  <button id="new-tab" class="rail-add" aria-label="New tab" title="New tab (Ctrl+T)"><i data-lucide="plus"></i><span class="label">New tab</span></button>
   <span class="spacer"></span>
   <hr class="divider">
-  <div id="spaces" class="spaces"></div>
-  <button id="new-space" class="rail-add" aria-label="New space" title="New space"><i data-lucide="folder-plus"></i></button>
+  <button id="space-current" class="space" aria-haspopup="menu"></button>
 </nav>
 <div class="chrome">
   <form id="toolbar" class="toolbar">

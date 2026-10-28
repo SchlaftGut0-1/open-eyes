@@ -44,6 +44,7 @@ type Request =
   | { type: "newSpace"; name: string; color: string; icon: string }
   | { type: "renameSpace"; id: string; name: string; color: string; icon: string }
   | { type: "switchSpace" | "deleteSpace"; id: string }
+  | { type: "spaceMenu"; x: number; y: number }
   | { type: "dialog"; open: boolean };
 
 let window: BaseWindow;
@@ -307,6 +308,15 @@ function handle(request: Request): void {
       break;
     case "deleteSpace":
       if (space) void deleteSpace(space);
+      break;
+    case "spaceMenu":
+      // A native menu: drawn above the page, which a menu in the UI page would be hidden under.
+      Menu.buildFromTemplate([
+        ...spaces.map((s) => ({ label: s.name, type: "radio" as const, checked: s === current, click: () => switchTo(s) })),
+        { type: "separator" },
+        { label: "New space…", click: () => ui.webContents.send("spaceDialog", null) },
+        { label: `Edit ${current.name}…`, click: () => ui.webContents.send("spaceDialog", current.id) },
+      ]).popup({ window, x: Math.round(request.x), y: Math.round(request.y) });
       break;
     case "dialog":
       dialogOpen = request.open === true;

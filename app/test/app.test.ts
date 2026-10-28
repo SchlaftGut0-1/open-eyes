@@ -104,7 +104,7 @@ describe("open-eyes Browser", () => {
     const firstTab = (await tabs()).find((t) => t.url === FIRST)!;
     await evaluate(firstTab, "localStorage.setItem('who', 'first space'); true");
     await evaluate(ui, "window.browser.send({ type: 'newSpace', name: 'Work', color: '#0d9488' })");
-    await until(async () => (await evaluate(ui, "document.querySelectorAll('.space:not(.add)').length")) === 2);
+    await until(async () => String(await evaluate(ui, "document.getElementById('space-current').title")).startsWith("Work"));
     assert.equal(await evaluate(ui, "document.querySelectorAll('.tab').length"), 1, "a new space starts with one tab");
     // The Work space's tab is the one that reaches the same page now.
     const before = new Set((await tabs()).filter((t) => t.url === FIRST).map((t) => t.targetId));
