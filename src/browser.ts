@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -22,6 +23,30 @@ const MAC_BROWSERS = [
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
   "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
 ];
+
+/** open-eyes Browser's profile, chosen the same way as the app does. */
+const appProfile =
+  process.env.OPEN_EYES_BROWSER_PROFILE ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "open-eyes", "browser");
+
+/** Where open-eyes Browser listens for agents; app/src/agent.ts computes the same path. */
+function appSocketPath(): string {
+  const id = createHash("sha256").update(appProfile).digest("hex").slice(0, 12);
+  if (process.platform === "win32") return `\\\\.\\pipe\\open-eyes-browser-${id}`;
+  return join(process.env.XDG_RUNTIME_DIR ?? appProfile, `open-eyes-browser-${id}.sock`);
+}
+
+export async function appEndpoint(): Promise<string | undefined> {
+  const endpoint = `unix:${appSocketPath()}`;
+  try {
+    (await CDP.connect(endpoint)).close();
+    return endpoint;
+  } catch {
+    return undefined;
+  }
+}
+
+export const APP_CLOSED = 'open-eyes Browser is closed; open it, or run "open-eyes launch" or "open-eyes connect"';
+export const appInstalled = () => existsSync(appProfile);
 
 const LAUNCH_TIMEOUT_MS = 30_000;
 /** How long `connect` waits for the user to approve the browser's permission prompt. */
@@ -156,7 +181,7 @@ export async function launch(
   throw new Error(`${binary} started but is not answering on port ${port} after ${LAUNCH_TIMEOUT_MS / 1000}s`);
 }
 
-/** The connection to use: the daemon while connected to the user's browser, else the launched one. */
+/** The connection to use: the daemon while connected to the user's browser, else the launched one, else open-eyes Browser. */
 async function browserEndpoint(state: State): Promise<string> {
   if (state.daemonPid) {
     if (isAlive(state.daemonPid)) return `unix:${socketPath}`;
@@ -164,8 +189,11 @@ async function browserEndpoint(state: State): Promise<string> {
     throw new Error('the connection to your browser was closed; run "open-eyes connect" again');
   }
   const version = await browserVersion(state.port);
-  if (!version) throw new Error(`no browser on port ${state.port}; run "open-eyes launch" or "open-eyes connect" first`);
-  return version.webSocketDebuggerUrl;
+  if (version) return version.webSocketDebuggerUrl;
+  const app = await appEndpoint();
+  if (app) return app;
+  if (appInstalled()) throw new Error(APP_CLOSED);
+  throw new Error(`no browser on port ${state.port}; run "open-eyes launch" or "open-eyes connect" first`);
 }
 
 /**

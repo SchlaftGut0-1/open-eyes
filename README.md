@@ -88,18 +88,23 @@ A desktop browser of our own (Electron, so Chromium inside), in `app/`, with its
 profile apart from your other browsers. Tabs are icons down a slim sidebar (expand it to
 see their titles). Spaces keep work apart: each has its own tabs, icon and color, and its
 own logins and cookies; switch or add one from the space at the bottom of the sidebar.
-It is in early work: for now it browses, and the CLI cannot drive it yet. On Linux, from
-the repository:
+It is in early work. On Linux, from the repository:
 
 ```bash
 cd app && npm install && npm start
 ```
 
-DevTools listens on `127.0.0.1` only, on a port the system picks, written to
-`DevToolsActivePort` in its profile (`~/.local/share/open-eyes/browser`). Pages in tabs are
-sandboxed, never see the app, open new windows as tabs, cannot open the browser's own
-pages (`chrome://`), and every permission (camera, location, notifications) is refused
-for now.
+While it runs, page commands use it with no flags, as long as no browser was started with
+`launch` and none is joined with `connect` (those still win). The agent gets its own tab in
+the space you are in, marked with a bot badge in the sidebar, and sees only the tabs it
+opened, not yours. `open-eyes status` says `browser: open-eyes Browser`.
+
+The app opens no DevTools port. The CLI talks to it through a socket only your user can
+open, in `$XDG_RUNTIME_DIR` (or the app's profile, `~/.local/share/open-eyes/browser`).
+Agent tabs tell sites they are automated (`navigator.webdriver` is true); your own tabs do
+not. Pages in tabs are sandboxed, never see the app, open new windows as tabs, cannot open
+the browser's own pages (`chrome://`), and every permission (camera, location,
+notifications) is refused for now.
 
 ## Local model (optional)
 

@@ -60,6 +60,8 @@ button { font: inherit; color: inherit; }
 .tab.pinned::after { content: ""; position: absolute; right: 2px; bottom: 2px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
 .favicon { width: 16px; height: 16px; flex: none; border-radius: 5px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; overflow: hidden; }
 .favicon img { width: 16px; height: 16px; }
+.tab .agent-badge { position: absolute; left: 0; bottom: 0; width: 12px; height: 12px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: #fff; }
+.tab .agent-badge .lucide { width: 8px; height: 8px; stroke-width: 2.5; }
 .tab .close { position: absolute; top: 1px; right: 1px; width: 12px; height: 12px; display: none; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--chrome); color: var(--muted); }
 .tab .close:hover { color: var(--text); border-color: var(--muted); }
 .tab:hover .close, .tab:focus-within .close { display: grid; }

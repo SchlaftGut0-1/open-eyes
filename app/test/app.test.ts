@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { networkInterfaces, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -35,7 +35,7 @@ describe("open-eyes Browser", () => {
   };
 
   const launch = async () => {
-    app = spawn(electron as unknown as string, [APP, "--ozone-platform=headless", FIRST], {
+    app = spawn(electron as unknown as string, [APP, "--ozone-platform=headless", "--remote-debugging-port=0", FIRST], {
       env: { ...process.env, OPEN_EYES_BROWSER_PROFILE: profile },
       stdio: "ignore",
     });
@@ -50,17 +50,17 @@ describe("open-eyes Browser", () => {
 
   before(launch);
 
-  after(() => {
+  after(async () => {
     cdp?.close();
-    app?.kill();
+    if (app && app.exitCode === null) {
+      const exited = new Promise((resolve) => app.once("exit", resolve));
+      app.kill();
+      await exited;
+    }
     rmSync(profile, { recursive: true, force: true });
   });
 
-  test("listens for DevTools on this machine only, and opens the first tab", async () => {
-    const port = new URL(endpoint).port;
-    assert.ok((await fetch(`http://127.0.0.1:${port}/json/version`)).ok);
-    const lan = Object.values(networkInterfaces()).flat().find((a) => a?.family === "IPv4" && !a.internal)?.address;
-    if (lan) await assert.rejects(fetch(`http://${lan}:${port}/json/version`));
+  test("opens the address it is started with", async () => {
     const [tab] = await tabs();
     assert.equal(tab.url, FIRST);
   });
@@ -129,7 +129,7 @@ describe("open-eyes Browser", () => {
   });
 
   test("opening the app again brings this one forward and opens the address as a tab", async () => {
-    const second = spawn(electron as unknown as string, [APP, "--ozone-platform=headless", fixture("links.html")], {
+    const second = spawn(electron as unknown as string, [APP, "--ozone-platform=headless", "--remote-debugging-port=0", fixture("links.html")], {
       env: { ...process.env, OPEN_EYES_BROWSER_PROFILE: profile },
       stdio: "ignore",
     });
