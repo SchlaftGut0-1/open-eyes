@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { after, before, describe, test } from "node:test";
 import electron from "electron";
+import { readDevToolsActivePort } from "../../src/browser.ts";
 import { CDP } from "../../src/cdp.ts";
 
 const profile = mkdtempSync(join(tmpdir(), "open-eyes-browser-"));
@@ -39,12 +40,8 @@ describe("open-eyes Browser", () => {
       stdio: "ignore",
     });
     for (let i = 0; i < 100 && !endpoint; i++) {
-      try {
-        const [port, path] = readFileSync(join(profile, "DevToolsActivePort"), "utf8").trim().split("\n");
-        endpoint = `ws://127.0.0.1:${port}${path}`;
-      } catch {
-        await sleep(100);
-      }
+      endpoint = readDevToolsActivePort(profile) ?? "";
+      if (!endpoint) await sleep(100);
     }
     cdp = await CDP.connect(endpoint);
     await until(async () => (await tabs()).length === 1);
@@ -80,7 +77,7 @@ describe("open-eyes Browser", () => {
     const tab = (await tabs())[0];
     await evaluate(tab, `location.href = ${JSON.stringify(FIRST)}`).catch(() => {});
     await until(async () => (await tabs())[0].url === FIRST);
-    await evaluate(tab, `window.open(${JSON.stringify(fixture("second.html"))}); true`);
+    await evaluate(tab, `window.open(new URL("second.html", location.href)); true`);
     await until(async () => (await tabs()).length === 2);
     assert.deepEqual((await tabs()).map((t) => t.url).sort(), [FIRST, fixture("second.html")].sort());
   });
@@ -124,7 +121,7 @@ describe("open-eyes Browser", () => {
     assert.doesNotMatch(String(await evaluate(tab, "navigator.userAgent")), /Electron|open-eyes/);
     // A sized window.open, as "Sign in with ..." buttons do, reports back to the page that opened it.
     const before = new Set((await pages()).map((t) => t.targetId));
-    await evaluate(tab, `window.addEventListener("message", (e) => (document.title = "signed in: " + e.data)); window.open(${JSON.stringify(fixture("second.html"))}, "signin", "popup,width=420,height=560"); true`);
+    await evaluate(tab, `window.addEventListener("message", (e) => (document.title = "signed in: " + e.data)); window.open(new URL("second.html", location.href), "signin", "popup,width=420,height=560"); true`);
     let popup: Target | undefined;
     await until(async () => (popup = (await pages()).find((t) => t.url === fixture("second.html") && !before.has(t.targetId))) !== undefined);
     await evaluate(popup!, "window.opener.postMessage('ok', '*'); true");
