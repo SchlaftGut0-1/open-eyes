@@ -38,3 +38,25 @@ jobs:
           OPEN_EYES_BROWSER: google-chrome-stable
       - name: Smoke test the build
         run: node dist/cli.js help
+
+  app:
+    name: app (open-eyes Browser)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      # Ubuntu 24.04 limits unprivileged user namespaces, which Chromium's sandbox needs.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Test (unit, and end-to-end with the app headless)
+        run: npm test

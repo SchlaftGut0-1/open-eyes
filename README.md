@@ -82,6 +82,23 @@ connection in a small background daemon and routes commands through a private lo
 socket (readable only by your user). The agent works in its own window; your tabs are
 left alone. `open-eyes disconnect` closes that window and stops the daemon.
 
+## open-eyes Browser (preview)
+
+A desktop browser of our own (Electron, so Chromium inside), in `app/`: your tabs, a
+sidebar for the spaces agents work in, and its own profile apart from your other browsers.
+It is in early work: for now it browses, and the CLI cannot drive it yet. On Linux, from
+the repository:
+
+```bash
+cd app && npm install && npm start
+```
+
+DevTools listens on `127.0.0.1` only, on a port the system picks, written to
+`DevToolsActivePort` in its profile (`~/.local/share/open-eyes/browser`). Pages in tabs are
+sandboxed, never see the app, open new windows as tabs, cannot open the browser's own
+pages (`chrome://`), and every permission (camera, location, notifications) is refused
+for now.
+
 ## Local model (optional)
 
 `open-eyes do "<goal>"` hands a routine task to a small model running on your computer.

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+<title>open-eyes Browser</title>
+<link rel="stylesheet" href="ui.css">
+</head>
+<body>
+<header class="titlebar">
+  <div class="brand">
+    <img src="icon.svg" alt="" width="26" height="26">
+    <span>open-eyes</span>
+  </div>
+  <nav class="tabs" aria-label="Tabs in your space">
+    <div id="tabs" class="tablist"></div>
+    <button id="new-tab" class="icon" aria-label="New tab" title="New tab (Ctrl+T)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+  </nav>
+</header>
+<div class="body">
+  <aside class="sidebar" aria-label="Spaces">
+    <section>
+      <h2>Your space</h2>
+      <div class="space current">
+        <span class="avatar" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+        </span>
+        <span class="space-text"><span class="space-name">You</span><span id="tab-count" class="muted">1 tab</span></span>
+      </div>
+    </section>
+    <section>
+      <h2>Agent spaces</h2>
+      <p class="empty">Agents you start with <code>open-eyes</code> will work here, each in its own space.</p>
+    </section>
+  </aside>
+  <main class="content">
+    <form id="toolbar" class="toolbar">
+      <button type="button" id="back" class="icon" aria-label="Back" title="Back (Alt+Left)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <button type="button" id="forward" class="icon" aria-label="Forward" title="Forward (Alt+Right)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+      <button type="button" id="reload" class="icon" aria-label="Reload" title="Reload (Ctrl+R)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
+      </button>
+      <label class="address">
+        <span class="visually-hidden">Address</span>
+        <input id="address" type="text" spellcheck="false" autocomplete="off" placeholder="Search or type an address">
+      </label>
+    </form>
+    <div id="page" class="page" aria-hidden="true"></div>
+  </main>
+</div>
+<script src="ui.js"></script>
+</body>
+</html>

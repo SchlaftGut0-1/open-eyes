@@ -11,6 +11,17 @@ updates:
       # Types must match the oldest supported Node (engines: >=22), not the newest.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+  # open-eyes Browser: Electron ships Chromium, so its security fixes must reach the app fast.
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: daily
+    cooldown:
+      # New versions wait two weeks; security updates are proposed at once.
+      default-days: 14
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
