@@ -41,6 +41,7 @@ let ui: WebContentsView;
 let spaces: Space[] = [];
 let current: Space;
 let nextId = 1;
+let uiRaised = false;
 let page: Bounds = { x: 0, y: 0, width: 0, height: 0 };
 
 const sandboxed = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true };
@@ -58,28 +59,31 @@ function sessionFor(space: { id: string }): Session {
 }
 
 let saveTimer: NodeJS.Timeout | undefined;
+function writeSpaces(): void {
+  clearTimeout(saveTimer);
+  const saved: Saved = {
+    current: current.id,
+    spaces: spaces.map((space) => {
+      if (space.unopened) return { id: space.id, name: space.name, color: space.color, icon: space.icon, ...space.unopened };
+      const open = space.tabs.filter((tab) => tab.view.webContents.getURL() !== NEW_TAB);
+      return {
+        id: space.id,
+        name: space.name,
+        color: space.color,
+        icon: space.icon,
+        tabs: open.map((tab) => ({ url: tab.view.webContents.getURL(), ...(tab.pinned ? { pinned: true } : {}) })),
+        active: Math.max(0, open.indexOf(space.active!)),
+      };
+    }),
+  };
+  const temporary = `${SPACES_FILE}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(saved, null, 2), { mode: 0o600 });
+  renameSync(temporary, SPACES_FILE);
+}
+
 function save(): void {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    const saved: Saved = {
-      current: current.id,
-      spaces: spaces.map((space) => {
-        if (space.unopened) return { id: space.id, name: space.name, color: space.color, icon: space.icon, ...space.unopened };
-        const open = space.tabs.filter((tab) => tab.view.webContents.getURL() !== NEW_TAB);
-        return {
-          id: space.id,
-          name: space.name,
-          color: space.color,
-          icon: space.icon,
-          tabs: open.map((tab) => ({ url: tab.view.webContents.getURL(), ...(tab.pinned ? { pinned: true } : {}) })),
-          active: Math.max(0, open.indexOf(space.active!)),
-        };
-      }),
-    };
-    const temporary = `${SPACES_FILE}.${process.pid}.tmp`;
-    writeFileSync(temporary, JSON.stringify(saved, null, 2), { mode: 0o600 });
-    renameSync(temporary, SPACES_FILE);
-  }, 500);
+  saveTimer = setTimeout(writeSpaces, 500);
 }
 
 function publish(): void {
@@ -143,6 +147,7 @@ function openTab(space: Space, url = NEW_TAB, pinned = false): Tab {
   view.webContents.on("before-input-event", (event, input) => shortcut(event, input));
   view.setVisible(false);
   window.contentView.addChildView(view);
+  if (uiRaised) window.contentView.addChildView(ui);
   space.tabs.push(tab);
   void view.webContents.loadURL(allowedInTab(url) ? url : NEW_TAB);
   space.active = tab;
@@ -222,16 +227,17 @@ const nameTaken = (name: string, except?: Space) => spaces.some((s) => s !== exc
 
 async function deleteSpace(space: Space): Promise<void> {
   if (spaces.length === 1) return;
-  for (const tab of [...space.tabs]) {
+  for (const tab of space.tabs) {
     window.contentView.removeChildView(tab.view);
     tab.view.webContents.close();
   }
-  spaces = spaces.filter((s) => s !== space);
-  if (current === space) switchTo(spaces[0]);
-  else publish();
+  space.tabs = [];
   const ses = sessionFor(space);
   await ses.clearStorageData();
   await ses.clearCache();
+  spaces = spaces.filter((s) => s !== space);
+  if (current === space) switchTo(spaces[0]);
+  else publish();
 }
 
 function coverPixels({ x, y, width, height }: Bounds): Bounds {
@@ -294,7 +300,8 @@ function handle(request: Request): void {
       if (space) void deleteSpace(space);
       break;
     case "raiseUi":
-      if (request.raised === true) window.contentView.addChildView(ui);
+      uiRaised = request.raised === true;
+      if (uiRaised) window.contentView.addChildView(ui);
       else for (const space of spaces) for (const { view } of space.tabs) window.contentView.addChildView(view);
       break;
   }
@@ -351,5 +358,6 @@ app.whenReady().then(() => {
     switchTo(current);
   });
   void ui.webContents.loadFile(UI);
+  window.on("close", writeSpaces);
   window.on("closed", () => app.quit());
 });

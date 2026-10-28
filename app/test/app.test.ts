@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,18 +34,21 @@ describe("open-eyes Browser", () => {
     for (let i = 0; i < 50 && !(await check()); i++) await sleep(100);
   };
 
-  before(async () => {
+  const launch = async () => {
     app = spawn(electron as unknown as string, [APP, "--ozone-platform=headless", FIRST], {
       env: { ...process.env, OPEN_EYES_BROWSER_PROFILE: profile },
       stdio: "ignore",
     });
+    endpoint = "";
     for (let i = 0; i < 100 && !endpoint; i++) {
       endpoint = readDevToolsActivePort(profile) ?? "";
       if (!endpoint) await sleep(100);
     }
     cdp = await CDP.connect(endpoint);
-    await until(async () => (await tabs()).length === 1);
-  });
+    await until(async () => (await tabs()).length >= 1);
+  };
+
+  before(launch);
 
   after(() => {
     cdp?.close();
@@ -134,5 +137,36 @@ describe("open-eyes Browser", () => {
     assert.equal(code, 0, "the second instance hands over and quits");
     await until(async () => (await tabs()).some((t) => t.url === fixture("links.html")));
     assert.ok((await tabs()).some((t) => t.url === fixture("links.html")));
+  });
+
+  test("deleting a space erases its site data, and quitting keeps the last change", async () => {
+    const ui = (await pages()).find((t) => t.url.endsWith("/ui/index.html"))!;
+    const saved = () => JSON.parse(readFileSync(join(profile, "spaces.json"), "utf8"));
+    const work = saved().spaces.find((s: { name: string }) => s.name === "Work");
+    await evaluate(ui, `window.browser.send({ type: 'switchSpace', id: ${JSON.stringify(work.id)} })`);
+    await until(async () => String(await evaluate(ui, "document.getElementById('space-current').title")).startsWith("Work"));
+    const workTab = (await tabs()).find((t) => t.url === FIRST)!;
+    await evaluate(workTab, "localStorage.setItem('who', 'work'); true");
+    await evaluate(ui, `window.browser.send({ type: 'deleteSpace', id: ${JSON.stringify(work.id)} })`);
+    await until(async () => saved().spaces.length === 1);
+    assert.equal(saved().spaces.length, 1, "the deleted space is gone from disk");
+    const last = `${fixture("links.html")}#last`;
+    await evaluate(ui, `window.browser.send({ type: 'navigate', input: ${JSON.stringify(last)} })`);
+    await until(async () => (await evaluate(ui, "document.getElementById('address').value")) === last);
+    const exited = new Promise((resolve) => app.once("exit", resolve));
+    cdp.close();
+    app.kill("SIGTERM");
+    await exited;
+    assert.ok(saved().spaces[0].tabs.some((t: { url: string }) => t.url === last), "the change made just before quitting is saved");
+
+    const restored = saved();
+    restored.spaces.push({ ...work, tabs: [{ url: FIRST }], active: 0 });
+    restored.current = work.id;
+    writeFileSync(join(profile, "spaces.json"), JSON.stringify(restored));
+    rmSync(join(profile, "DevToolsActivePort"), { force: true });
+    await launch();
+    let revived: Target | undefined;
+    await until(async () => (revived = (await tabs()).find((t) => t.url === FIRST)) !== undefined);
+    assert.equal(await evaluate(revived!, "localStorage.getItem('who')"), null, "nothing of the deleted space is left");
   });
 });
