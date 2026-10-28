@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -123,30 +123,48 @@ function readState(file: string): ReturnType<typeof parseState> {
   return parseState(raw);
 }
 
+/** Where a space keeps its agent window; only that space writes it. */
+const windowFile = (name: string) => join(spaceDir(name), "window.json");
+
+type Shared = { port?: number; daemonPid?: number; showTokens?: boolean };
+const SHARED = ["port", "daemonPid", "showTokens"] as const;
+
+/** The shared part as this command read it, so it writes back only what it changed itself. */
+let readShared: Shared | undefined;
+
 /** The state of space `name`: the browser connection is shared, the agent window its own. */
 export function loadState(name = space()): State {
   const saved = readState(stateFile);
-  if (name !== "default") {
-    const { targetId, refs, refsLoaderId, nextRef, owner } = readState(join(spaceDir(name), "state.json"));
-    Object.assign(saved, { targetId, refs, refsLoaderId, nextRef, owner });
-  }
+  // Before 0.7.0 the default space kept its window in state.json.
+  const file = name === "default" && !existsSync(windowFile(name)) ? stateFile : windowFile(name);
+  const { targetId, refs, refsLoaderId, nextRef, owner } = readState(file);
   if (process.env.OPEN_EYES_PORT && !parsePort(process.env.OPEN_EYES_PORT)) {
     throw new Error(`OPEN_EYES_PORT must be a port number, got "${process.env.OPEN_EYES_PORT}"`);
   }
-  return { ...saved, port: parsePort(process.env.OPEN_EYES_PORT) ?? saved.port ?? 9222 };
+  if (name === space()) readShared = { port: saved.port, daemonPid: saved.daemonPid, showTokens: saved.showTokens };
+  const port = parsePort(process.env.OPEN_EYES_PORT) ?? saved.port ?? 9222;
+  return { port, daemonPid: saved.daemonPid, showTokens: saved.showTokens, targetId, refs, refsLoaderId, nextRef, owner };
 }
 
-const write = (file: string, data: object) => writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600 });
+/** Writes whole or not at all: a command reading at the same time never sees half a file. */
+function write(file: string, data: object): void {
+  const temporary = `${file}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(data, null, 2), { mode: 0o600 });
+  renameSync(temporary, file);
+}
 
+/**
+ * Saves the agent window to the space's own file, and the shared browser connection only
+ * when it changed, so commands in different spaces never overwrite each other.
+ */
 export function saveState(state: State): void {
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  if (space() === "default") return write(stateFile, state);
   const { port, daemonPid, showTokens, ...window } = state;
   mkdirSync(spaceDir(), { recursive: true, mode: 0o700 });
-  write(join(spaceDir(), "state.json"), window);
-  // The shared part is written only when it changed, so the default space's window is not overwritten.
-  const shared = readState(stateFile);
-  if (shared.port !== port || shared.daemonPid !== daemonPid || shared.showTokens !== showTokens) {
-    write(stateFile, { ...shared, port, daemonPid, showTokens });
-  }
+  write(windowFile(space()), window);
+  const mine: Shared = { port, daemonPid, showTokens };
+  const disk = readState(stateFile);
+  const changed = SHARED.filter((key) => mine[key] !== readShared?.[key] && mine[key] !== disk[key]);
+  if (!changed.length) return;
+  // Keeps the other fields as they are now (also a window from before 0.7.0).
+  write(stateFile, { ...disk, ...Object.fromEntries(changed.map((key) => [key, mine[key]])) });
 }
