@@ -117,4 +117,18 @@ describe("open-eyes Browser", () => {
     const saved = JSON.parse(readFileSync(join(profile, "spaces.json"), "utf8"));
     assert.deepEqual(saved.spaces.map((s: { name: string }) => s.name), ["Personal", "Work"]);
   });
+
+  test("sign-in works as in Chrome: no Electron in the user agent, and popups keep their opener", async () => {
+    await until(async () => (await tabs()).some((t) => t.url === FIRST));
+    const tab = (await tabs()).find((t) => t.url === FIRST)!;
+    assert.doesNotMatch(String(await evaluate(tab, "navigator.userAgent")), /Electron|open-eyes/);
+    // A sized window.open, as "Sign in with ..." buttons do, reports back to the page that opened it.
+    const before = new Set((await pages()).map((t) => t.targetId));
+    await evaluate(tab, `window.addEventListener("message", (e) => (document.title = "signed in: " + e.data)); window.open(${JSON.stringify(fixture("second.html"))}, "signin", "popup,width=420,height=560"); true`);
+    let popup: Target | undefined;
+    await until(async () => (popup = (await pages()).find((t) => t.url === fixture("second.html") && !before.has(t.targetId))) !== undefined);
+    await evaluate(popup!, "window.opener.postMessage('ok', '*'); true");
+    await until(async () => (await evaluate(tab, "document.title")) === "signed in: ok");
+    assert.equal(await evaluate(tab, "document.title"), "signed in: ok");
+  });
 });

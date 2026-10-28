@@ -3,12 +3,14 @@
 const $ = (id) => document.getElementById(id);
 const send = (request) => window.browser.send(request);
 const COLORS = ["#7c5cff", "#0d9488", "#d97706", "#e11d48", "#3b82f6", "#db2777"];
+// Same lists as app/src/spaces.ts, which checks what is saved.
+const ICONS = ["user", "briefcase", "house", "flask-conical", "graduation-cap", "shopping-cart", "code", "heart", "globe", "star"];
 const SITE_COLORS = ["#3b82f6", "#e11d48", "#0d9488", "#d97706", "#7c3aed", "#db2777"];
 let state = { spaces: [], tabs: [] };
 
-/** A Lucide icon by its name (as in lucide.dev), sized and colored by CSS. */
+/** A Lucide icon by its name ("Lock", or "flask-conical" as on lucide.dev), sized and colored by CSS. */
 const icon = (name) => {
-  const svg = lucide.createElement(lucide[name]);
+  const svg = lucide.createElement(lucide[name.replace(/(^|-)(\w)/g, (_, _dash, c) => c.toUpperCase())]);
   svg.classList.add("lucide"); // createIcons adds it to the static ones; the CSS sizes by it.
   return svg;
 };
@@ -44,7 +46,6 @@ function tabElement(tab, newTab) {
   element.setAttribute("aria-selected", String(tab.active));
   element.tabIndex = tab.active ? 0 : -1;
   element.title = tab.title;
-  if (tab.pinned) element.setAttribute("aria-label", `${tab.title} (pinned)`);
   element.addEventListener("mousedown", (event) => {
     if (event.button === 1) send({ type: "closeTab", id: tab.id }); // Middle click closes.
     else if (event.button === 0) send({ type: "activate", id: tab.id });
@@ -52,18 +53,18 @@ function tabElement(tab, newTab) {
   element.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") send({ type: "activate", id: tab.id });
   });
-  // Right click pins the tab: it moves to the front and shows only its icon.
+  // Right click pins the tab: it moves to the top and keeps a dot.
   element.addEventListener("contextmenu", (event) => {
     event.preventDefault();
     send({ type: "pin", id: tab.id });
   });
-  const title = Object.assign(document.createElement("span"), { className: "title", textContent: tab.title });
+  element.setAttribute("aria-label", tab.pinned ? `${tab.title} (pinned)` : tab.title);
   const close = Object.assign(document.createElement("button"), { className: "close" });
   close.setAttribute("aria-label", `Close ${tab.title}`);
   close.append(icon("X"));
   close.addEventListener("mousedown", (event) => event.stopPropagation());
   close.addEventListener("click", () => send({ type: "closeTab", id: tab.id }));
-  element.append(favicon(tab, newTab), title, close);
+  element.append(favicon(tab, newTab), close);
   return element;
 }
 
@@ -72,8 +73,8 @@ function spaceElement(space) {
   const button = document.createElement("button");
   button.className = "space";
   button.style.setProperty("--space", space.color);
-  button.textContent = space.name.charAt(0).toUpperCase();
-  button.title = `${space.name} · ${tabs} (right click to edit)`;
+  button.append(icon(space.icon));
+  button.title = space.name;
   button.setAttribute("aria-label", `${space.name}, ${tabs}`);
   if (space.current) button.setAttribute("aria-current", "true");
   button.addEventListener("click", () => send({ type: "switchSpace", id: space.id }));
@@ -131,6 +132,21 @@ for (const dialog of document.querySelectorAll("dialog")) {
 /** The space a dialog is editing; none while creating one. */
 let editing;
 let chosenColor = COLORS[0];
+let chosenIcon = ICONS[0];
+function pickIcon(name) {
+  chosenIcon = name;
+  for (const choice of $("space-icons").children) choice.setAttribute("aria-pressed", String(choice.dataset.icon === name));
+}
+$("space-icons").replaceChildren(
+  ...ICONS.map((name) => {
+    const choice = Object.assign(document.createElement("button"), { type: "button", className: "icon-choice" });
+    choice.dataset.icon = name;
+    choice.setAttribute("aria-label", `Icon ${name.replace(/-/g, " ")}`);
+    choice.append(icon(name));
+    choice.addEventListener("click", () => pickIcon(name));
+    return choice;
+  }),
+);
 function pickColor(color) {
   chosenColor = color;
   for (const swatch of $("space-colors").children) swatch.setAttribute("aria-pressed", String(swatch.dataset.color === color));
@@ -153,6 +169,7 @@ function openSpaceDialog(space) {
   $("space-error").textContent = "";
   $("space-delete").hidden = !space || state.spaces.length === 1;
   pickColor(space?.color ?? COLORS[state.spaces.length % COLORS.length]);
+  pickIcon(space?.icon ?? ICONS[state.spaces.length % ICONS.length]);
   openDialog($("space-dialog"));
   $("space-name").focus();
 }
@@ -166,8 +183,8 @@ $("space-form").addEventListener("submit", (event) => {
     $("space-error").textContent = name ? `There is already a space called ${name}.` : "Give the space a name.";
     return;
   }
-  if (editing) send({ type: "renameSpace", id: editing.id, name, color: chosenColor });
-  else send({ type: "newSpace", name, color: chosenColor });
+  if (editing) send({ type: "renameSpace", id: editing.id, name, color: chosenColor, icon: chosenIcon });
+  else send({ type: "newSpace", name, color: chosenColor, icon: chosenIcon });
 });
 $("space-delete").addEventListener("click", () => {
   $("space-dialog").close();

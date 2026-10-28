@@ -9,16 +9,14 @@
 <body>
 <nav class="rail" aria-label="Spaces">
   <img class="logo" src="icon.svg" alt="open-eyes" width="30" height="30">
+  <div id="tabs" class="tabs" role="tablist" aria-label="Tabs" aria-orientation="vertical"></div>
+  <button id="new-tab" class="rail-add" aria-label="New tab" title="New tab (Ctrl+T)"><i data-lucide="plus"></i></button>
+  <span class="spacer"></span>
+  <hr class="divider">
   <div id="spaces" class="spaces"></div>
-  <button id="new-space" class="space add" aria-label="New space" title="New space">
-    <i data-lucide="plus"></i>
-  </button>
+  <button id="new-space" class="rail-add" aria-label="New space" title="New space"><i data-lucide="folder-plus"></i></button>
 </nav>
 <div class="chrome">
-  <div class="tabstrip">
-    <div id="tabs" class="tabs" role="tablist" aria-label="Tabs"></div>
-    <button id="new-tab" class="icon" aria-label="New tab" title="New tab (Ctrl+T)"><i data-lucide="plus"></i></button>
-  </div>
   <form id="toolbar" class="toolbar">
     <button type="button" id="back" class="icon" aria-label="Back" title="Back (Alt+Left)"><i data-lucide="arrow-left"></i></button>
     <button type="button" id="forward" class="icon" aria-label="Forward" title="Forward (Alt+Right)"><i data-lucide="arrow-right"></i></button>
@@ -56,6 +54,10 @@
       <span>Name</span>
       <input id="space-name" type="text" maxlength="32" required autocomplete="off" placeholder="Work, Personal, Research…">
     </label>
+    <fieldset class="colors">
+      <legend>Icon</legend>
+      <div id="space-icons" class="swatches icons"></div>
+    </fieldset>
     <fieldset class="colors">
       <legend>Color</legend>
       <div id="space-colors" class="swatches"></div>

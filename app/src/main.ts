@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BaseWindow, ipcMain, Menu, nativeTheme, session, WebContentsView, type Input, type Session, type WebContents } from "electron";
 import { allowedInTab, toAddress } from "./address.ts";
-import { parseSaved, spaceColor, spaceName, type Saved, type SavedTab } from "./spaces.ts";
+import { parseSaved, spaceColor, spaceIcon, spaceName, type Saved, type SavedTab } from "./spaces.ts";
 
 /**
  * open-eyes Browser: our own window around Chromium's pages. The window's UI (spaces rail,
@@ -22,6 +22,8 @@ app.commandLine.appendSwitch("remote-debugging-port", "0");
 // Thin scrollbars over the page, so a page that does not declare its colors keeps no light track.
 app.commandLine.appendSwitch("enable-features", "OverlayScrollbar");
 app.setName("open-eyes Browser");
+// Say "Chrome", as the Chromium inside is: sites such as Google refuse to sign in browsers that say "Electron".
+app.userAgentFallback = app.userAgentFallback.replace(/ (Electron|open-eyes\S*)\/\S+/g, "");
 
 const UI = join(import.meta.dirname, "ui", "index.html");
 const PRELOAD = join(import.meta.dirname, "preload.cjs");
@@ -30,7 +32,7 @@ const SPACES_FILE = join(app.getPath("userData"), "spaces.json");
 
 type Tab = { id: number; view: WebContentsView; favicon?: string; pinned?: boolean };
 /** A space: its own tabs and its own sessions. Saved tabs open the first time it is shown. */
-type Space = { id: string; name: string; color: string; tabs: Tab[]; active?: Tab; saved?: { tabs: SavedTab[]; active: number } };
+type Space = { id: string; name: string; color: string; icon: string; tabs: Tab[]; active?: Tab; saved?: { tabs: SavedTab[]; active: number } };
 type Bounds = { x: number; y: number; width: number; height: number };
 /** What the UI asks for; anything else is ignored. */
 type Request =
@@ -39,8 +41,8 @@ type Request =
   | { type: "navigate"; input: string }
   | { type: "back" | "forward" | "reload" }
   | { type: "bounds"; bounds: Bounds }
-  | { type: "newSpace"; name: string; color: string }
-  | { type: "renameSpace"; id: string; name: string; color: string }
+  | { type: "newSpace"; name: string; color: string; icon: string }
+  | { type: "renameSpace"; id: string; name: string; color: string; icon: string }
   | { type: "switchSpace" | "deleteSpace"; id: string }
   | { type: "dialog"; open: boolean };
 
@@ -76,12 +78,13 @@ function save(): void {
     const saved: Saved = {
       current: current.id,
       spaces: spaces.map((space) => {
-        if (space.saved) return { id: space.id, name: space.name, color: space.color, ...space.saved };
+        if (space.saved) return { id: space.id, name: space.name, color: space.color, icon: space.icon, ...space.saved };
         const open = space.tabs.filter((tab) => tab.view.webContents.getURL() !== NEW_TAB);
         return {
           id: space.id,
           name: space.name,
           color: space.color,
+          icon: space.icon,
           tabs: open.map((tab) => ({ url: tab.view.webContents.getURL(), ...(tab.pinned ? { pinned: true } : {}) })),
           active: Math.max(0, open.indexOf(space.active!)),
         };
@@ -98,7 +101,7 @@ function publish(): void {
   const history = current.active?.view.webContents.navigationHistory;
   ui.webContents.send("state", {
     newTab: NEW_TAB,
-    spaces: spaces.map(({ id, name, color, tabs, saved }) => ({ id, name, color, current: id === current.id, tabs: saved?.tabs.length ?? tabs.length })),
+    spaces: spaces.map(({ id, name, color, icon, tabs, saved }) => ({ id, name, color, icon, current: id === current.id, tabs: saved?.tabs.length ?? tabs.length })),
     tabs: current.tabs.map(({ id, view, favicon, pinned }) => ({
       id,
       favicon,
@@ -198,10 +201,17 @@ function guardTab(space: Space, contents: WebContents): void {
   };
   contents.on("will-navigate", refuse);
   contents.on("will-redirect", refuse);
-  contents.setWindowOpenHandler(({ url }) => {
-    if (allowedInTab(url)) openTab(space, url);
+  contents.setWindowOpenHandler(({ url, disposition }) => {
+    if (!allowedInTab(url)) return { action: "deny" };
+    // A sized popup ("Sign in with Google") must stay a window tied to its opener, or the sign-in
+    // cannot report back; it shares the space's sessions. Links that open a new tab become tabs.
+    if (disposition === "new-window") {
+      return { action: "allow", overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: "#13111d", webPreferences: { ...sandboxed, session: sessionFor(space) } } };
+    }
+    openTab(space, url);
     return { action: "deny" };
   });
+  contents.on("did-create-window", (popup) => guardTab(space, popup.webContents));
 }
 
 /** Browser shortcuts, wherever the focus is. */
@@ -281,14 +291,14 @@ function handle(request: Request): void {
     case "newSpace": {
       const name = spaceName(request.name);
       if (!name || nameTaken(name)) break;
-      const created: Space = { id: randomUUID().replace(/-/g, "").slice(0, 12), name, color: spaceColor(request.color), tabs: [] };
+      const created: Space = { id: randomUUID().replace(/-/g, "").slice(0, 12), name, color: spaceColor(request.color), icon: spaceIcon(request.icon), tabs: [] };
       spaces.push(created);
       switchTo(created);
       break;
     }
     case "renameSpace": {
       const name = spaceName(request.name);
-      if (space && name && !nameTaken(name, space)) Object.assign(space, { name, color: spaceColor(request.color) });
+      if (space && name && !nameTaken(name, space)) Object.assign(space, { name, color: spaceColor(request.color), icon: spaceIcon(request.icon) });
       publish();
       break;
     }
@@ -313,7 +323,7 @@ function loadSpaces(): void {
     // First run, or an unreadable file: start with one space.
   }
   const saved = parseSaved(raw);
-  spaces = saved.spaces.map(({ id, name, color, tabs, active }) => ({ id, name, color, tabs: [], saved: { tabs, active } }));
+  spaces = saved.spaces.map(({ id, name, color, icon, tabs, active }) => ({ id, name, color, icon, tabs: [], saved: { tabs, active } }));
   current = spaces.find((s) => s.id === saved.current)!;
 }
 

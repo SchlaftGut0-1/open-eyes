@@ -36,57 +36,61 @@ html, body { height: 100%; }
 body { margin: 0; display: flex; background: var(--rail); color: var(--text); overflow: hidden; user-select: none; }
 button { font: inherit; color: inherit; }
 /* Lucide icons. */
-.lucide { width: 18px; height: 18px; flex: none; }
+.lucide { width: 16px; height: 16px; flex: none; stroke-width: 1.75; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 [hidden] { display: none !important; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-.icon { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
+.icon { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
 .icon:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .icon:disabled { color: var(--faint); opacity: 0.5; }
 
 /* The spaces rail. */
-.rail { width: 56px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; }
-.logo { margin-bottom: 6px; border-radius: 8px; }
-.spaces { display: flex; flex-direction: column; gap: 10px; }
-/* A space is a circle in its own color; the current one gets a ring and a bar at the edge. */
-.space { position: relative; width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--space, var(--hover)); color: #fff; font-weight: 700; font-size: 14px; }
-.space:hover { filter: brightness(1.12); }
-.space[aria-current="true"] { box-shadow: 0 0 0 2px var(--rail), 0 0 0 4px var(--space); }
-.space[aria-current="true"]::before { content: ""; position: absolute; left: -9px; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--space); }
-.space.add { background: transparent; color: var(--muted); border: 1px dashed var(--line); }
-.space.add:hover { color: var(--text); border-color: var(--muted); filter: none; }
+.rail { width: 44px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0; min-height: 0; }
+.logo { width: 24px; height: 24px; margin-bottom: 8px; border-radius: 6px; }
+.divider { width: 20px; margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
+.spaces { display: flex; flex-direction: column; gap: 2px; }
+/* A space is just its icon in its color; the name shows on hover. The current one is marked. */
+.space { position: relative; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--space); }
+.space .lucide { width: 16px; height: 16px; stroke-width: 2; }
+.space:hover { background: var(--hover); }
+.space[aria-current="true"] { background: var(--hover); }
+.space[aria-current="true"]::before { content: ""; position: absolute; left: -7px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--space); }
 
-/* Tabs and toolbar, one surface. */
-.chrome { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--chrome); border-radius: 12px 0 0 0; border-left: 1px solid var(--line); }
-.tabstrip { height: 42px; flex: none; display: flex; align-items: flex-end; gap: 4px; padding: 0 8px; }
-.tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; overflow: hidden; }
-.tab { position: relative; display: flex; align-items: center; gap: 8px; height: 34px; width: 220px; min-width: 64px; padding: 0 6px 0 12px; border-radius: 10px 10px 0 0; color: var(--muted); }
+/* Tabs: icons down the rail, the title on hover. Pinned ones stay on top. */
+.tabs { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; overflow-y: auto; scrollbar-width: none; }
+.tab { position: relative; flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); }
 .tab:hover { background: var(--hover); }
-.tab.pinned { width: 44px; min-width: 44px; padding: 0; justify-content: center; }
-.tab.pinned .title, .tab.pinned .close { display: none; }
-.tab[aria-selected="true"] { background: var(--tab); color: var(--text); box-shadow: var(--shadow); }
-.tab[aria-selected="true"]::after { content: ""; position: absolute; left: 12px; right: 12px; top: 0; height: 2px; border-radius: 0 0 2px 2px; background: var(--accent); }
-.favicon { width: 16px; height: 16px; flex: none; border-radius: 4px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; overflow: hidden; }
+.tab[aria-selected="true"] { background: var(--tab); box-shadow: var(--shadow); }
+.tab[aria-selected="true"]::before { content: ""; position: absolute; left: -7px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.tab.pinned::after { content: ""; position: absolute; right: 2px; bottom: 2px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
+.favicon { width: 16px; height: 16px; flex: none; border-radius: 5px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; overflow: hidden; }
 .favicon img { width: 16px; height: 16px; }
-.tab .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tab .close { width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: inherit; flex: none; opacity: 0.7; }
-.tab .close .lucide { width: 13px; height: 13px; }
-.tab .close:hover { background: var(--hover); opacity: 1; }
-.tab .spinner { width: 14px; height: 14px; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-#new-tab { margin-bottom: 1px; }
+/* Close shows on hover, as a small badge on the corner. */
+/* Inside the tab's corner, never past its edge. */
+.tab .close { position: absolute; top: 1px; right: 1px; width: 12px; height: 12px; display: none; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--chrome); color: var(--muted); }
+.tab .close:hover { color: var(--text); border-color: var(--muted); }
+.tab:hover .close, .tab:focus-within .close { display: grid; }
+.tab .close .lucide { width: 7px; height: 7px; stroke-width: 3; }
+.tab .spinner { width: 16px; height: 16px; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.rail-add { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
+.rail-add:hover { background: var(--hover); color: var(--text); }
+.rail-add .lucide { width: 14px; height: 14px; }
 
-.toolbar { height: 48px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 10px; background: var(--tab); }
+/* The toolbar and the page, one surface. */
+.chrome { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--chrome); border-radius: 12px 0 0 0; border-left: 1px solid var(--line); overflow: hidden; }
+
+.toolbar { height: 48px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 10px; background: var(--chrome); }
 .toolbar > .icon { border-radius: 10px; }
 .address { position: relative; flex: 1; display: flex; align-items: center; gap: 8px; height: 34px; margin-left: 6px; padding: 0 14px; border-radius: 17px; background: var(--chrome); border: 1px solid transparent; }
 .address:hover { border-color: var(--line); }
 .address:focus-within { border-color: var(--accent); background: var(--field); }
 .security { display: grid; place-items: center; color: var(--faint); }
-.security .lucide { width: 14px; height: 14px; }
+.security .lucide { width: 13px; height: 13px; }
 .security.insecure { color: #c2410c; }
 .address input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; outline: none; user-select: text; }
 .address input::placeholder { color: var(--faint); }
 /* Not editing: the site stands out and the rest of the address steps back. */
-.pretty { position: absolute; left: 36px; right: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.pretty { position: absolute; left: 35px; right: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .address:focus-within .pretty, .pretty:empty { display: none; }
 .address:not(:focus-within):has(.pretty .host:not(:empty)) input { color: transparent; }
 .host { color: var(--text); font-weight: 500; }
@@ -106,7 +110,7 @@ button { font: inherit; color: inherit; }
 .panel-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
 .panel-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 24px; text-align: center; }
 .panel-eye { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 14px; background: var(--accent-soft); color: var(--accent); }
-.panel-eye .lucide { width: 24px; height: 24px; }
+.panel-eye .lucide { width: 22px; height: 22px; }
 .panel-title { margin: 6px 0 0; font-weight: 600; }
 .panel-text { margin: 0; color: var(--muted); }
 
@@ -127,6 +131,9 @@ button { font: inherit; color: inherit; }
 .swatches { display: flex; gap: 10px; }
 .swatch { width: 30px; height: 30px; border: 0; border-radius: 50%; background: var(--swatch); }
 .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--tab), 0 0 0 4px var(--swatch); }
+.icons { flex-wrap: wrap; gap: 6px; }
+.icon-choice { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--muted); }
+.icon-choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .error { min-height: 18px; margin: 10px 0 0; color: #dc2626; font-size: 12px; }
 .dialog-actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 .spacer { flex: 1; }
@@ -135,4 +142,4 @@ button { font: inherit; color: inherit; }
 .secondary { border: 1px solid var(--line); background: transparent; }
 .danger { border: 0; background: transparent; color: #dc2626; padding: 0 8px !important; }
 .danger.solid { background: #b91c1c; color: #fff; padding: 0 16px !important; }
-.danger .lucide { width: 16px; height: 16px; }
+.danger .lucide { width: 14px; height: 14px; }
