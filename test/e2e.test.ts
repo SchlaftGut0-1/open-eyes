@@ -265,10 +265,16 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       // Download events are browser-wide: the daemon must pass them on.
       await cli("open", fixture("files.html"));
       assert.match(await cli("click", refOf(await cli("snapshot"), "link Download notes")), /downloaded .*notes/);
+      // Spaces work through the daemon too, each in its own window.
+      await Promise.all([cli("open", fixture("form.html")), cli("open", fixture("links.html"), "--space", "a")]);
+      assert.match(await cli("spaces"), /^a: file:.*links\.html$/m);
     } finally {
       assert.match(await cli("disconnect"), /disconnected/);
     }
     assert.throws(() => process.kill(daemonPid, 0), "the daemon should have exited");
+    const pages = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as { url: string }[];
+    assert.ok(!pages.some((p) => /fixtures\/(form|links)\.html$/.test(p.url)), "disconnect closes every space's window");
+    assert.doesNotMatch(await cli("spaces"), /^a:/m);
     assert.match(await cli("status"), new RegExp(`on port ${port}`));
   });
 

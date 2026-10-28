@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CDP } from "./cdp.ts";
 import { ensureWatcher } from "./dialogs.ts";
 import { Page } from "./page.ts";
-import { isAlive, profileDir, socketPath, stateDir, type State } from "./state.ts";
+import { isAlive, loadState, profileDir, socketPath, space, spaceDir, spaces, stateDir, type State } from "./state.ts";
 
 const BROWSER_NAMES = [
   "chromium",
@@ -210,12 +210,17 @@ export async function connectBrowser(state: State, endpoint: string): Promise<st
   throw new Error(`the connection was not approved within ${CONNECT_TIMEOUT_MS / 1000}s`);
 }
 
-/** Closes the agent window in the user's browser and stops the daemon. */
+/** Closes every space's agent window in the user's browser and stops the daemon. */
 export async function disconnectBrowser(state: State): Promise<boolean> {
   const pid = state.daemonPid;
   if (!pid || !isAlive(pid)) {
     state.daemonPid = undefined;
     return false;
+  }
+  // No space may leave a window behind in the user's browser; the other spaces are forgotten.
+  for (const name of spaces().filter((name) => name !== space())) {
+    await closeAgentWindow(loadState(name));
+    if (name !== "default") rmSync(spaceDir(name), { recursive: true, force: true });
   }
   await closeAgentWindow(state);
   process.kill(pid, "SIGTERM");
