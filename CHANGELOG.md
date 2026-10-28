@@ -6,6 +6,8 @@ All notable changes to open-eyes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-28
+
 ### Security
 
 - A password in a URL (`https://user:password@host/`) is never stored: the audit log drops
@@ -328,7 +330,8 @@ cost 11,423 tokens now costs 5,121.
   `eval`, multi-step `run` scripts, a live overlay showing each action, and an agent
   skill.
 
-[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/SchlaftGut0-1/open-eyes/compare/v0.4.0...v0.4.1
