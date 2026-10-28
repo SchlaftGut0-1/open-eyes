@@ -1,11 +1,34 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 export const stateDir = join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "open-eyes");
 export const profileDir = join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "open-eyes", "profile");
 const stateFile = join(stateDir, "state.json");
+
+const SPACE_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/i;
+
+/** The space (agent window) commands work in: `--space <name>` or OPEN_EYES_SPACE, else "default". */
+export function space(): string {
+  const name = process.env.OPEN_EYES_SPACE || "default";
+  if (!SPACE_NAME.test(name)) throw new Error(`a space name is up to 32 letters, digits, "-" or "_", got "${name}"`);
+  return name;
+}
+
+/** Where a space keeps its own files; the default space keeps them where they were before spaces. */
+export const spaceDir = (name = space()) => (name === "default" ? stateDir : join(stateDir, "spaces", name));
+
+/** Every space that has kept state, the default one first. */
+export function spaces(): string[] {
+  let names: string[] = [];
+  try {
+    names = readdirSync(join(stateDir, "spaces")).filter((name) => SPACE_NAME.test(name) && name !== "default");
+  } catch {
+    // No other space yet.
+  }
+  return ["default", ...names.sort()];
+}
 
 /**
  * Where a background process named `name` listens. Runtime dirs are private and short
@@ -90,21 +113,40 @@ export function parseState(raw: unknown): Omit<State, "port"> & { port?: number 
   };
 }
 
-export function loadState(): State {
+function readState(file: string): ReturnType<typeof parseState> {
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(stateFile, "utf8"));
+    raw = JSON.parse(readFileSync(file, "utf8"));
   } catch {
     // First run, or unreadable state: start fresh.
   }
-  const saved = parseState(raw);
+  return parseState(raw);
+}
+
+/** The state of space `name`: the browser connection is shared, the agent window its own. */
+export function loadState(name = space()): State {
+  const saved = readState(stateFile);
+  if (name !== "default") {
+    const { targetId, refs, refsLoaderId, nextRef, owner } = readState(join(spaceDir(name), "state.json"));
+    Object.assign(saved, { targetId, refs, refsLoaderId, nextRef, owner });
+  }
   if (process.env.OPEN_EYES_PORT && !parsePort(process.env.OPEN_EYES_PORT)) {
     throw new Error(`OPEN_EYES_PORT must be a port number, got "${process.env.OPEN_EYES_PORT}"`);
   }
   return { ...saved, port: parsePort(process.env.OPEN_EYES_PORT) ?? saved.port ?? 9222 };
 }
 
+const write = (file: string, data: object) => writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600 });
+
 export function saveState(state: State): void {
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  writeFileSync(stateFile, JSON.stringify(state, null, 2), { mode: 0o600 });
+  if (space() === "default") return write(stateFile, state);
+  const { port, daemonPid, showTokens, ...window } = state;
+  mkdirSync(spaceDir(), { recursive: true, mode: 0o700 });
+  write(join(spaceDir(), "state.json"), window);
+  // The shared part is written only when it changed, so the default space's window is not overwritten.
+  const shared = readState(stateFile);
+  if (shared.port !== port || shared.daemonPid !== daemonPid || shared.showTokens !== showTokens) {
+    write(stateFile, { ...shared, port, daemonPid, showTokens });
+  }
 }

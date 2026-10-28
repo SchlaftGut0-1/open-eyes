@@ -265,10 +265,16 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
       // Download events are browser-wide: the daemon must pass them on.
       await cli("open", fixture("files.html"));
       assert.match(await cli("click", refOf(await cli("snapshot"), "link Download notes")), /downloaded .*notes/);
+      // Spaces work through the daemon too, each in its own window.
+      await Promise.all([cli("open", fixture("form.html")), cli("open", fixture("links.html"), "--space", "a")]);
+      assert.match(await cli("spaces"), /^a: file:.*links\.html$/m);
     } finally {
       assert.match(await cli("disconnect"), /disconnected/);
     }
     assert.throws(() => process.kill(daemonPid, 0), "the daemon should have exited");
+    const pages = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as { url: string }[];
+    assert.ok(!pages.some((p) => /fixtures\/(form|links)\.html$/.test(p.url)), "disconnect closes every space's window");
+    assert.doesNotMatch(await cli("spaces"), /^a:/m);
     assert.match(await cli("status"), new RegExp(`on port ${port}`));
   });
 
@@ -391,6 +397,28 @@ describe("open-eyes against a real browser", { skip: findBrowser() ? false : "no
     assert.match(await cli("status"), /agent window: none/, "the first status must not have opened one");
     await cli("open", fixture("form.html"));
     assert.match(await cli("status"), /agent window: file:.*form\.html/);
+  });
+
+  test("spaces have their own windows and refs, and run at the same time", async () => {
+    const a = { OPEN_EYES_SPACE: "a" };
+    const b = { OPEN_EYES_SPACE: "b" };
+    await cli("open", fixture("form.html"));
+    await Promise.all([cliWith(a, "open", fixture("links.html")), cli("open", fixture("search.html"), "--space", "b")]);
+    const [linksPage, searchPage] = await Promise.all([cliWith(a, "snapshot"), cliWith(b, "snapshot")]);
+    assert.match(linksPage, /^title: "Links"$/m);
+    assert.doesNotMatch(searchPage, /^title: "Links"$/m);
+    await Promise.all([cliWith(a, "click", refOf(linksPage, "link About")), cli("fill", "--name", "Name", "Ana")]);
+    assert.match(await cliWith(a, "eval", "location.pathname"), /second\.html$/);
+    assert.equal(await cli("eval", "document.getElementById('name').value"), "Ana");
+    assert.match(await cliWith(b, "eval", "location.pathname"), /search\.html$/);
+
+    const listed = await cli("spaces");
+    assert.match(listed, /^default: file:.*form\.html$/m);
+    assert.match(listed, /^a: file:.*second\.html$/m);
+    assert.match(await cli("close", "--space", "a"), /closed the agent window/);
+    assert.doesNotMatch(await cli("spaces"), /^a:/m, "a closed space is forgotten");
+    await cliWith(b, "close");
+    await assert.rejects(cliWith({ OPEN_EYES_SPACE: "../x" }, "status"), /a space name is up to 32/);
   });
 
   test("token usage is recorded per command and shown in the window", async () => {

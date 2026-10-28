@@ -55,3 +55,4 @@ the result.
   user's Allow. After "the user denied", don't retry; ask what to do.
 - Never run `open-eyes policy ...` unless the user asks.
 - Stay in your window, ask before anything irreversible, `open-eyes close` when done.
+  If the user gives you a space (`--space <name>` or `OPEN_EYES_SPACE`), add it to every command.

@@ -4,7 +4,7 @@ import { createConnection, createServer } from "node:net";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CDP } from "./cdp.ts";
-import { isAlive, socketPathFor, stateDir } from "./state.ts";
+import { isAlive, socketPathFor, space, spaceDir } from "./state.ts";
 
 /**
  * A dialog (alert, confirm, prompt) stops the page until it is answered, and Chromium lets
@@ -14,11 +14,12 @@ import { isAlive, socketPathFor, stateDir } from "./state.ts";
  */
 export type Dialog = { targetId: string; type: string; message: string; defaultPrompt?: string };
 
-const dialogFile = join(stateDir, "dialog.json");
-const watcherFile = join(stateDir, "dialog-watcher.json");
+// Each space has its own window, so its own watcher.
+const dialogFile = () => join(spaceDir(), "dialog.json");
+const watcherFile = () => join(spaceDir(), "dialog-watcher.json");
 const WATCHER_READY_MS = 2000;
 
-const dialogSocketPath = socketPathFor("open-eyes-dialogs");
+const dialogSocketPath = () => socketPathFor(space() === "default" ? "open-eyes-dialogs" : `open-eyes-dialogs-${space()}`);
 
 function readJson<T>(file: string): T | undefined {
   try {
@@ -29,16 +30,16 @@ function readJson<T>(file: string): T | undefined {
 }
 
 function watcher(): { pid: number; targetId: string } | undefined {
-  const found = readJson<{ pid: number; targetId: string }>(watcherFile);
+  const found = readJson<{ pid: number; targetId: string }>(watcherFile());
   return found && Number.isInteger(found.pid) && isAlive(found.pid) ? found : undefined;
 }
 
 /** The dialog open in the agent window `targetId`, if a live watcher saw one. */
 export function openDialog(targetId?: string): Dialog | undefined {
-  const dialog = readJson<Dialog>(dialogFile);
+  const dialog = readJson<Dialog>(dialogFile());
   if (!dialog || (targetId && dialog.targetId !== targetId)) return undefined;
   if (!watcher()) {
-    rmSync(dialogFile, { force: true }); // Its watcher is gone: nobody can answer it any more.
+    rmSync(dialogFile(), { force: true }); // Its watcher is gone: nobody can answer it any more.
     return undefined;
   }
   return dialog;
@@ -60,9 +61,9 @@ export async function ensureWatcher(endpoint: string, targetId: string): Promise
   const running = watcher();
   if (running?.targetId === targetId) return;
   if (running) process.kill(running.pid, "SIGTERM"); // It watched a window the agent left.
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  rmSync(watcherFile, { force: true });
-  const log = openSync(join(stateDir, "dialogs.log"), "a");
+  mkdirSync(spaceDir(), { recursive: true, mode: 0o700 });
+  rmSync(watcherFile(), { force: true });
+  const log = openSync(join(spaceDir(), "dialogs.log"), "a");
   const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "__dialogs", endpoint, targetId], {
     detached: true,
     stdio: ["ignore", log, log],
@@ -80,7 +81,7 @@ export function answerDialog(accept: boolean, text?: string): Promise<Dialog> {
   const dialog = openDialog();
   if (!dialog) return Promise.reject(new Error("no dialog is open"));
   return new Promise((resolve, reject) => {
-    const socket = createConnection(dialogSocketPath);
+    const socket = createConnection(dialogSocketPath());
     socket.setEncoding("utf8");
     let reply = "";
     socket.on("data", (chunk: string) => (reply += chunk));
@@ -128,11 +129,11 @@ export async function runWatcher(endpoint: string, targetId: string): Promise<vo
 
   const shutdown = () => {
     server.close();
-    if (readJson<Dialog>(dialogFile)?.targetId === targetId) rmSync(dialogFile, { force: true });
+    if (readJson<Dialog>(dialogFile())?.targetId === targetId) rmSync(dialogFile(), { force: true });
     // The socket path is shared: once a newer watcher took over, it is that one's.
-    if (readJson<{ pid: number }>(watcherFile)?.pid === process.pid) {
-      rmSync(watcherFile, { force: true });
-      if (process.platform !== "win32") rmSync(dialogSocketPath, { force: true });
+    if (readJson<{ pid: number }>(watcherFile())?.pid === process.pid) {
+      rmSync(watcherFile(), { force: true });
+      if (process.platform !== "win32") rmSync(dialogSocketPath(), { force: true });
     }
     process.exit(0);
   };
@@ -152,18 +153,18 @@ export async function runWatcher(endpoint: string, targetId: string): Promise<vo
   cdp.on("Page.javascriptDialogOpening", ({ type, message, defaultPrompt }, session) => {
     if (session !== sessionId) return;
     current = { targetId, type, message, defaultPrompt };
-    writeFileSync(dialogFile, JSON.stringify(current), { mode: 0o600 });
+    writeFileSync(dialogFile(), JSON.stringify(current), { mode: 0o600 });
   });
   cdp.on("Page.javascriptDialogClosed", (_, session) => {
     if (session !== sessionId) return;
     current = undefined;
-    rmSync(dialogFile, { force: true });
+    rmSync(dialogFile(), { force: true });
   });
 
-  if (process.platform !== "win32" && existsSync(dialogSocketPath)) rmSync(dialogSocketPath, { force: true });
+  if (process.platform !== "win32" && existsSync(dialogSocketPath())) rmSync(dialogSocketPath(), { force: true });
   process.umask(0o077);
-  await new Promise<void>((resolve) => server.listen(dialogSocketPath, resolve));
-  if (process.platform !== "win32") chmodSync(dialogSocketPath, 0o600);
+  await new Promise<void>((resolve) => server.listen(dialogSocketPath(), resolve));
+  if (process.platform !== "win32") chmodSync(dialogSocketPath(), 0o600);
   await cdp.send("Page.enable", {}, sessionId);
-  writeFileSync(watcherFile, JSON.stringify({ pid: process.pid, targetId }), { mode: 0o600 });
+  writeFileSync(watcherFile(), JSON.stringify({ pid: process.pid, targetId }), { mode: 0o600 });
 }

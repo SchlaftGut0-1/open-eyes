@@ -30,7 +30,7 @@ export const OVERLAY_WORLD = "open-eyes";
 // ownership. A navigation starts a new world, so "the user is in control" is also kept in
 // sessionStorage and in open-eyes' own state (`remembered`): either one keeps the user in
 // control, so a page clearing sessionStorage cannot hand control back to the agent.
-const OVERLAY = String.raw`(cmd, remembered) => {
+const OVERLAY = String.raw`(cmd, remembered, space) => {
   const ID = "__open_eyes__";
   const AGENT = "#7c5cff";
   const USER = "#16a34a";
@@ -179,7 +179,7 @@ const OVERLAY = String.raw`(cmd, remembered) => {
     banner.style.background = user ? USER : AGENT;
     banner.textContent = user
       ? "\u{1F464} You are in control · the agent is paused"
-      : "\u{1F441} open-eyes · " + state.label;
+      : "\u{1F441} open-eyes · " + (space === "default" ? "" : space + " · ") + state.label;
     const asking = !user && state.confirm;
     get("take").style.display = user || asking ? "none" : "";
     get("panel").style.display = user ? "" : "none";
@@ -230,9 +230,12 @@ const OVERLAY = String.raw`(cmd, remembered) => {
   return state.owner;
 }`;
 
-/** `remembered`: who open-eyes last saw in control, used when a navigation reset the page. */
-export function overlayExpression(cmd: OverlayCommand, remembered?: Owner): string {
-  return `(${OVERLAY})(${JSON.stringify(cmd)}, ${JSON.stringify(remembered ?? null)})`;
+/**
+ * `remembered`: who open-eyes last saw in control, used when a navigation reset the page.
+ * `space`: shown on the banner unless it is the default one.
+ */
+export function overlayExpression(cmd: OverlayCommand, remembered?: Owner, space = "default"): string {
+  return `(${OVERLAY})(${JSON.stringify(cmd)}, ${JSON.stringify(remembered ?? null)}, ${JSON.stringify(space)})`;
 }
 
 /** The user's answer to confirmation `id`: "allow", "deny", or null while undecided. */
