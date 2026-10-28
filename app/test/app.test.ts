@@ -54,7 +54,6 @@ describe("open-eyes Browser", () => {
   });
 
   test("listens for DevTools on this machine only, and opens the first tab", async () => {
-    // Loopback answers; this machine's address on the network does not.
     const port = new URL(endpoint).port;
     assert.ok((await fetch(`http://127.0.0.1:${port}/json/version`)).ok);
     const lan = Object.values(networkInterfaces()).flat().find((a) => a?.family === "IPv4" && !a.internal)?.address;
@@ -68,7 +67,7 @@ describe("open-eyes Browser", () => {
     assert.equal(await evaluate(tab, "typeof window.browser + typeof require + typeof process"), "undefinedundefinedundefined");
     const ui = (await pages()).find((t) => t.url.endsWith("/ui/index.html"))!;
     assert.equal(await evaluate(ui, "typeof window.browser + typeof require"), "objectundefined", "the UI gets the bridge, never Node");
-    await evaluate(tab, "location.href = 'chrome://settings'").catch(() => {}); // The page goes away.
+    await evaluate(tab, "location.href = 'chrome://settings'").catch(() => {});
     await sleep(500);
     assert.doesNotMatch((await tabs())[0].url, /^chrome:/);
   });
@@ -103,13 +102,11 @@ describe("open-eyes Browser", () => {
     await evaluate(ui, "window.browser.send({ type: 'newSpace', name: 'Work', color: '#0d9488' })");
     await until(async () => String(await evaluate(ui, "document.getElementById('space-current').title")).startsWith("Work"));
     assert.equal(await evaluate(ui, "document.querySelectorAll('.tab').length"), 1, "a new space starts with one tab");
-    // The Work space's tab is the one that reaches the same page now.
     const before = new Set((await tabs()).filter((t) => t.url === FIRST).map((t) => t.targetId));
     await evaluate(ui, `window.browser.send({ type: 'navigate', input: ${JSON.stringify(FIRST)} })`);
     let workTab: Target | undefined;
     await until(async () => (workTab = (await tabs()).find((t) => t.url === FIRST && !before.has(t.targetId))) !== undefined);
     assert.equal(await evaluate(workTab!, "localStorage.getItem('who')"), null, "the Work space does not see the first space's data");
-    // Saved half a second after the last change.
     await until(async () => existsSync(join(profile, "spaces.json")) && readFileSync(join(profile, "spaces.json"), "utf8").includes('"Work"'));
     const saved = JSON.parse(readFileSync(join(profile, "spaces.json"), "utf8"));
     assert.deepEqual(saved.spaces.map((s: { name: string }) => s.name), ["Personal", "Work"]);
@@ -119,7 +116,6 @@ describe("open-eyes Browser", () => {
     await until(async () => (await tabs()).some((t) => t.url === FIRST));
     const tab = (await tabs()).find((t) => t.url === FIRST)!;
     assert.doesNotMatch(String(await evaluate(tab, "navigator.userAgent")), /Electron|open-eyes/);
-    // A sized window.open, as "Sign in with ..." buttons do, reports back to the page that opened it.
     const before = new Set((await pages()).map((t) => t.targetId));
     await evaluate(tab, `window.addEventListener("message", (e) => (document.title = "signed in: " + e.data)); window.open(new URL("second.html", location.href), "signin", "popup,width=420,height=560"); true`);
     let popup: Target | undefined;

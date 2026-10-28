@@ -8,7 +8,6 @@ test("a vault opens with the same passphrase on another computer, and hides its 
   const salt = newSalt();
   const sealed = seal(payload, await deriveKey("correct horse battery", salt), salt, "user-1");
   assert.ok(!Buffer.from(sealed.data, "base64").toString().includes("secret"), "nothing readable is stored");
-  // Another computer only has the passphrase and what the server keeps.
   const key = await deriveKey("correct horse battery", sealed.salt);
   assert.deepEqual(open(sealed, key, "user-1"), payload);
 });

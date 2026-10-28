@@ -5,21 +5,13 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BaseWindow, ipcMain, Menu, nativeTheme, session, WebContentsView, type Input, type Session, type WebContents } from "electron";
 import { allowedInTab, toAddress } from "./address.ts";
-import { parseSaved, spaceColor, spaceIcon, spaceName, type Saved, type SavedTab } from "./spaces.ts";
+import { COLORS, ICONS, parseSaved, spaceColor, spaceIcon, spaceName, type Saved, type SavedTab } from "./spaces.ts";
 
-/**
- * open-eyes Browser: our own window around Chromium's pages. The window's UI (spaces rail,
- * tabs, address bar) is a sandboxed page of ours; each tab is a separate sandboxed view with
- * no access to the app. The CLI drives the tabs over DevTools, which listens only on this machine.
- */
-
-// Its own profile, apart from the user's browsers and from the one `open-eyes launch` uses.
 const dataHome = process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
 app.setPath("userData", process.env.OPEN_EYES_BROWSER_PROFILE ?? join(dataHome, "open-eyes", "browser"));
 // A port the system picks, on loopback only; Chromium writes it to DevToolsActivePort in the profile.
 app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 app.commandLine.appendSwitch("remote-debugging-port", "0");
-// Thin scrollbars over the page, so a page that does not declare its colors keeps no light track.
 app.commandLine.appendSwitch("enable-features", "OverlayScrollbar");
 app.setName("open-eyes Browser");
 // Say "Chrome", as the Chromium inside is: sites such as Google refuse to sign in browsers that say "Electron".
@@ -31,10 +23,8 @@ const NEW_TAB = pathToFileURL(join(import.meta.dirname, "newtab", "index.html"))
 const SPACES_FILE = join(app.getPath("userData"), "spaces.json");
 
 type Tab = { id: number; view: WebContentsView; favicon?: string; pinned?: boolean };
-/** A space: its own tabs and its own sessions. Saved tabs open the first time it is shown. */
-type Space = { id: string; name: string; color: string; icon: string; tabs: Tab[]; active?: Tab; saved?: { tabs: SavedTab[]; active: number } };
+type Space = { id: string; name: string; color: string; icon: string; tabs: Tab[]; active?: Tab; unopened?: { tabs: SavedTab[]; active: number } };
 type Bounds = { x: number; y: number; width: number; height: number };
-/** What the UI asks for; anything else is ignored. */
 type Request =
   | { type: "newTab"; input?: string }
   | { type: "closeTab" | "activate" | "pin"; id: number }
@@ -44,7 +34,7 @@ type Request =
   | { type: "newSpace"; name: string; color: string; icon: string }
   | { type: "renameSpace"; id: string; name: string; color: string; icon: string }
   | { type: "switchSpace" | "deleteSpace"; id: string }
-  | { type: "dialog"; open: boolean };
+  | { type: "raiseUi"; raised: boolean };
 
 let window: BaseWindow;
 let ui: WebContentsView;
@@ -56,7 +46,6 @@ let page: Bounds = { x: 0, y: 0, width: 0, height: 0 };
 const sandboxed = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true };
 const guarded = new WeakSet<Session>();
 
-/** The space's own sessions, with the same rules as every other. */
 function sessionFor(space: { id: string }): Session {
   const ses = session.fromPartition(`persist:space-${space.id}`);
   if (!guarded.has(ses)) {
@@ -69,14 +58,13 @@ function sessionFor(space: { id: string }): Session {
 }
 
 let saveTimer: NodeJS.Timeout | undefined;
-/** Saves spaces and their tabs a moment after the last change, whole or not at all. */
 function save(): void {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     const saved: Saved = {
       current: current.id,
       spaces: spaces.map((space) => {
-        if (space.saved) return { id: space.id, name: space.name, color: space.color, icon: space.icon, ...space.saved };
+        if (space.unopened) return { id: space.id, name: space.name, color: space.color, icon: space.icon, ...space.unopened };
         const open = space.tabs.filter((tab) => tab.view.webContents.getURL() !== NEW_TAB);
         return {
           id: space.id,
@@ -94,12 +82,13 @@ function save(): void {
   }, 500);
 }
 
-/** Sends the spaces and the current space's tabs to the UI, which draws them. */
 function publish(): void {
   const history = current.active?.view.webContents.navigationHistory;
   ui.webContents.send("state", {
     newTab: NEW_TAB,
-    spaces: spaces.map(({ id, name, color, icon, tabs, saved }) => ({ id, name, color, icon, current: id === current.id, tabs: saved?.tabs.length ?? tabs.length })),
+    colors: COLORS,
+    icons: ICONS,
+    spaces: spaces.map(({ id, name, color, icon, tabs, unopened }) => ({ id, name, color, icon, current: id === current.id, tabs: unopened?.tabs.length ?? tabs.length })),
     tabs: current.tabs.map(({ id, view, favicon, pinned }) => ({
       id,
       favicon,
@@ -115,7 +104,6 @@ function publish(): void {
   save();
 }
 
-/** Shows the space's active tab and hides every other page. */
 function show(): void {
   for (const space of spaces) for (const { view } of space.tabs) view.setVisible(view === current.active?.view);
   current.active?.view.setBounds(page);
@@ -129,9 +117,9 @@ function activate(tab: Tab): void {
 
 function switchTo(space: Space): void {
   current = space;
-  if (space.saved) {
-    const { tabs, active } = space.saved;
-    space.saved = undefined;
+  if (space.unopened) {
+    const { tabs, active } = space.unopened;
+    space.unopened = undefined;
     for (const tab of tabs) openTab(space, tab.url, tab.pinned);
     if (space.tabs[active]) space.active = space.tabs[active];
   }
@@ -141,7 +129,6 @@ function switchTo(space: Space): void {
 
 function openTab(space: Space, url = NEW_TAB, pinned = false): Tab {
   const view = new WebContentsView({ webPreferences: { ...sandboxed, session: sessionFor(space) } });
-  // The color shown before a page paints: the UI's, not a white flash.
   view.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#13111d" : "#ffffff");
   const tab: Tab = { id: nextId++, view, ...(pinned ? { pinned } : {}) };
   guardTab(space, view.webContents);
@@ -179,7 +166,6 @@ function focusAddress(text = ""): void {
   ui.webContents.send("focusAddress", text);
 }
 
-/** Pinned tabs come first; pinning moves a tab to the end of them, unpinning to just after. */
 function pin(space: Space, tab: Tab): void {
   tab.pinned = !tab.pinned;
   space.tabs.splice(space.tabs.indexOf(tab), 1);
@@ -187,15 +173,17 @@ function pin(space: Space, tab: Tab): void {
   publish();
 }
 
-/** A page may only go where a tab is allowed to, and opens new windows as tabs of its own space. */
+const FOCUS_ADDRESS = "open-eyes://focus-address";
+
+function answerNewTabPage(url: string): void {
+  if (url.startsWith(FOCUS_ADDRESS)) focusAddress(URL.parse(url)?.searchParams.get("text") ?? "");
+}
+
 function guardTab(space: Space, contents: WebContents): void {
   const refuse = (event: { preventDefault(): void }, url: string) => {
     if (allowedInTab(url)) return;
     event.preventDefault();
-    // Our new tab page hands typing to the address bar; no other page may.
-    if (contents.getURL() === NEW_TAB && url.startsWith("open-eyes://focus-address")) {
-      focusAddress(URL.parse(url)?.searchParams.get("text") ?? "");
-    }
+    if (contents.getURL() === NEW_TAB) answerNewTabPage(url);
   };
   contents.on("will-navigate", refuse);
   contents.on("will-redirect", refuse);
@@ -212,7 +200,6 @@ function guardTab(space: Space, contents: WebContents): void {
   contents.on("did-create-window", (popup) => guardTab(space, popup.webContents));
 }
 
-/** Browser shortcuts, wherever the focus is. */
 function shortcut(event: { preventDefault(): void }, input: Input): void {
   if (input.type !== "keyDown") return;
   const ctrl = input.control || input.meta;
@@ -233,7 +220,6 @@ function shortcut(event: { preventDefault(): void }, input: Input): void {
 
 const nameTaken = (name: string, except?: Space) => spaces.some((s) => s !== except && s.name.toLowerCase() === name.toLowerCase());
 
-/** Closes a space's tabs and erases its sessions (cookies, logins, site data). */
 async function deleteSpace(space: Space): Promise<void> {
   if (spaces.length === 1) return;
   for (const tab of [...space.tabs]) {
@@ -246,6 +232,12 @@ async function deleteSpace(space: Space): Promise<void> {
   const ses = sessionFor(space);
   await ses.clearStorageData();
   await ses.clearCache();
+}
+
+function coverPixels({ x, y, width, height }: Bounds): Bounds {
+  const left = Math.floor(x);
+  const top = Math.floor(y);
+  return { x: left, y: top, width: Math.max(0, Math.ceil(x + width) - left), height: Math.max(0, Math.ceil(y + height) - top) };
 }
 
 function handle(request: Request): void {
@@ -277,15 +269,10 @@ function handle(request: Request): void {
     case "reload":
       contents?.reload();
       break;
-    case "bounds": {
-      const { x, y, width, height } = request.bounds;
-      // Whole pixels that cover the box, so no sliver of the UI shows around the page.
-      const left = Math.floor(x);
-      const top = Math.floor(y);
-      page = { x: left, y: top, width: Math.max(0, Math.ceil(x + width) - left), height: Math.max(0, Math.ceil(y + height) - top) };
+    case "bounds":
+      page = coverPixels(request.bounds);
       current.active?.view.setBounds(page);
       break;
-    }
     case "newSpace": {
       const name = spaceName(request.name);
       if (!name || nameTaken(name)) break;
@@ -306,10 +293,8 @@ function handle(request: Request): void {
     case "deleteSpace":
       if (space) void deleteSpace(space);
       break;
-    case "dialog":
-      // Pages are drawn over the UI. While the UI shows a menu or dialog it comes on top, and
-      // the page shows through it; afterwards the pages go back on top, in their order.
-      if (request.open === true) window.contentView.addChildView(ui);
+    case "raiseUi":
+      if (request.raised === true) window.contentView.addChildView(ui);
       else for (const space of spaces) for (const { view } of space.tabs) window.contentView.addChildView(view);
       break;
   }
@@ -320,14 +305,12 @@ function loadSpaces(): void {
   try {
     raw = JSON.parse(readFileSync(SPACES_FILE, "utf8"));
   } catch {
-    // First run, or an unreadable file: start with one space.
   }
   const saved = parseSaved(raw);
-  spaces = saved.spaces.map(({ id, name, color, icon, tabs, active }) => ({ id, name, color, icon, tabs: [], saved: { tabs, active } }));
+  spaces = saved.spaces.map(({ id, name, color, icon, tabs, active }) => ({ id, name, color, icon, tabs: [], unopened: { tabs, active } }));
   current = spaces.find((s) => s.id === saved.current)!;
 }
 
-// One app per profile: opening it again brings this window forward (with the address given, if any).
 if (!app.requestSingleInstanceLock()) app.exit(0);
 app.on("second-instance", (_event, argv) => {
   if (!window) return;
@@ -339,15 +322,13 @@ app.on("second-instance", (_event, argv) => {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
-  // Nothing should use the default session; refuse its permissions too.
-  sessionFor({ id: "default" });
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, answer) => answer(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   loadSpaces();
 
   window = new BaseWindow({ width: 1280, height: 820, minWidth: 720, minHeight: 480, title: "open-eyes Browser", backgroundColor: "#0b0a14" });
   ui = new WebContentsView({ webPreferences: { ...sandboxed, preload: PRELOAD } });
-  ui.setBackgroundColor("#00000000"); // Clear where the page is, so menus can be drawn over it.
+  ui.setBackgroundColor("#00000000");
   window.contentView.addChildView(ui);
   const fit = () => {
     const [width, height] = window.getContentSize();
@@ -355,7 +336,6 @@ app.whenReady().then(() => {
   };
   fit();
   window.on("resize", fit);
-  // The UI is ours alone: it never navigates or opens windows.
   ui.webContents.on("will-navigate", (event) => event.preventDefault());
   ui.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   ui.webContents.on("before-input-event", (event, input) => shortcut(event, input));
@@ -363,11 +343,10 @@ app.whenReady().then(() => {
     if (event.sender === ui.webContents) handle(request);
   });
   ui.webContents.once("did-finish-load", () => {
-    // An address given on the command line opens as the space's active tab.
     const url = process.argv.find((arg) => /^(https?|file):/.test(arg));
-    if (url && current.saved) {
-      current.saved.tabs.push({ url });
-      current.saved.active = current.saved.tabs.length - 1;
+    if (url && current.unopened) {
+      current.unopened.tabs.push({ url });
+      current.unopened.active = current.unopened.tabs.length - 1;
     }
     switchTo(current);
   });

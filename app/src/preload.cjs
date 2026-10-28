@@ -1,5 +1,3 @@
-// The only bridge between the UI page and the app: send a request, receive the tabs. Pages in
-// tabs get no preload, so they cannot reach it.
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("browser", {

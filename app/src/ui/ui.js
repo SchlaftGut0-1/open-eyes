@@ -1,21 +1,14 @@
-// Draws what the app sends (spaces, tabs) and passes the user's requests back. It holds no
-// state of its own beyond what a dialog is editing.
 const $ = (id) => document.getElementById(id);
 const send = (request) => window.browser.send(request);
-const COLORS = ["#7c5cff", "#0d9488", "#d97706", "#e11d48", "#3b82f6", "#db2777"];
-// Same lists as app/src/spaces.ts, which checks what is saved.
-const ICONS = ["user", "briefcase", "house", "flask-conical", "graduation-cap", "shopping-cart", "code", "heart", "globe", "star"];
 const SITE_COLORS = ["#3b82f6", "#e11d48", "#0d9488", "#d97706", "#7c3aed", "#db2777"];
 let state = { spaces: [], tabs: [] };
 
-/** A Lucide icon by its name ("Lock", or "flask-conical" as on lucide.dev), sized and colored by CSS. */
 const icon = (name) => {
   const svg = lucide.createElement(lucide[name.replace(/(^|-)(\w)/g, (_, _dash, c) => c.toUpperCase())]);
   svg.classList.add("lucide"); // createIcons adds it to the static ones; the CSS sizes by it.
   return svg;
 };
 
-/** The site's own icon, or its first letter on a color that stays the same for that site. */
 function favicon(tab, newTab) {
   const box = document.createElement("span");
   box.className = "favicon";
@@ -47,13 +40,12 @@ function tabElement(tab, newTab) {
   element.tabIndex = tab.active ? 0 : -1;
   element.title = tab.title;
   element.addEventListener("mousedown", (event) => {
-    if (event.button === 1) send({ type: "closeTab", id: tab.id }); // Middle click closes.
+    if (event.button === 1) send({ type: "closeTab", id: tab.id });
     else if (event.button === 0) send({ type: "activate", id: tab.id });
   });
   element.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") send({ type: "activate", id: tab.id });
   });
-  // Right click pins the tab: it moves to the top and keeps a dot.
   element.addEventListener("contextmenu", (event) => {
     event.preventDefault();
     send({ type: "pin", id: tab.id });
@@ -69,7 +61,6 @@ function tabElement(tab, newTab) {
   return element;
 }
 
-/** The rail shows only the current space; clicking it opens the menu to switch or add one. */
 function showCurrentSpace(space) {
   const button = $("space-current");
   button.style.setProperty("--space", space.color);
@@ -80,8 +71,7 @@ function showCurrentSpace(space) {
   chevron.classList.add("chevron");
   button.replaceChildren(icon(space.icon), name, chevron);
 }
-// The UI comes on top of the page while a menu or dialog is open (see "dialog" in main.ts).
-const syncOverlay = () => send({ type: "dialog", open: !!document.querySelector("dialog[open]") || !$("space-menu").hidden });
+const syncOverlay = () => send({ type: "raiseUi", raised: !!document.querySelector("dialog[open]") || !$("space-menu").hidden });
 
 function menuItem(label, iconName, onClick, extra = {}) {
   const item = Object.assign(document.createElement("button"), { className: `menu-item ${extra.className ?? ""}` });
@@ -143,7 +133,6 @@ $("space-current").addEventListener("contextmenu", (event) => {
   openSpaceDialog(state.spaces.find((s) => s.current));
 });
 
-// Expanded, the rail shows tab titles and the space's name; the choice stays on this computer.
 function expand(open) {
   document.body.classList.toggle("expanded", open);
   $("expand").setAttribute("aria-expanded", String(open));
@@ -159,7 +148,6 @@ try {
   if (localStorage.getItem("expanded") === "true") expand(true);
 } catch {}
 
-/** The address as the user reads it: the site, then the rest, quieter. Our new tab page has none. */
 function showAddress(url, newTab) {
   if (url === newTab) url = "about:blank";
   const parsed = URL.parse(url);
@@ -181,56 +169,54 @@ window.browser.onState((next) => {
   $("forward").disabled = !state.canGoForward;
   const active = state.tabs.find((tab) => tab.active);
   $("loading").hidden = !active?.loading;
-  // Leave the address alone while the user is typing in it.
   if (active && document.activeElement !== $("address")) showAddress(active.url, state.newTab);
 });
 
 window.browser.onFocusAddress((text) => {
   $("address").focus();
-  // Typing that started on the new tab page carries on here.
   if (text) $("address").value = text;
   else $("address").select();
 });
 
-// Dialogs: the page is a separate view drawn over the UI, so it steps aside while one is open.
 function openDialog(dialog) {
   dialog.showModal();
   syncOverlay();
 }
 for (const dialog of document.querySelectorAll("dialog")) dialog.addEventListener("close", syncOverlay);
 
-/** The space a dialog is editing; none while creating one. */
 let editing;
-let chosenColor = COLORS[0];
-let chosenIcon = ICONS[0];
+let chosenColor;
+let chosenIcon;
 function pickIcon(name) {
   chosenIcon = name;
   for (const choice of $("space-icons").children) choice.setAttribute("aria-pressed", String(choice.dataset.icon === name));
 }
-$("space-icons").replaceChildren(
-  ...ICONS.map((name) => {
-    const choice = Object.assign(document.createElement("button"), { type: "button", className: "icon-choice" });
-    choice.dataset.icon = name;
-    choice.setAttribute("aria-label", `Icon ${name.replace(/-/g, " ")}`);
-    choice.append(icon(name));
-    choice.addEventListener("click", () => pickIcon(name));
-    return choice;
-  }),
-);
 function pickColor(color) {
   chosenColor = color;
   for (const swatch of $("space-colors").children) swatch.setAttribute("aria-pressed", String(swatch.dataset.color === color));
 }
-$("space-colors").replaceChildren(
-  ...COLORS.map((color, i) => {
-    const swatch = Object.assign(document.createElement("button"), { type: "button", className: "swatch" });
-    swatch.dataset.color = color;
-    swatch.style.setProperty("--swatch", color);
-    swatch.setAttribute("aria-label", `Color ${i + 1}`);
-    swatch.addEventListener("click", () => pickColor(color));
-    return swatch;
-  }),
-);
+function buildChoices() {
+  $("space-icons").replaceChildren(
+    ...state.icons.map((name) => {
+      const choice = Object.assign(document.createElement("button"), { type: "button", className: "icon-choice" });
+      choice.dataset.icon = name;
+      choice.setAttribute("aria-label", `Icon ${name.replace(/-/g, " ")}`);
+      choice.append(icon(name));
+      choice.addEventListener("click", () => pickIcon(name));
+      return choice;
+    }),
+  );
+  $("space-colors").replaceChildren(
+    ...state.colors.map((color, i) => {
+      const swatch = Object.assign(document.createElement("button"), { type: "button", className: "swatch" });
+      swatch.dataset.color = color;
+      swatch.style.setProperty("--swatch", color);
+      swatch.setAttribute("aria-label", `Color ${i + 1}`);
+      swatch.addEventListener("click", () => pickColor(color));
+      return swatch;
+    }),
+  );
+}
 function openSpaceDialog(space) {
   editing = space;
   $("space-dialog-title").textContent = space ? `Edit ${space.name}` : "New space";
@@ -238,8 +224,9 @@ function openSpaceDialog(space) {
   $("space-name").value = space?.name ?? "";
   $("space-error").textContent = "";
   $("space-delete").hidden = !space || state.spaces.length === 1;
-  pickColor(space?.color ?? COLORS[state.spaces.length % COLORS.length]);
-  pickIcon(space?.icon ?? ICONS[state.spaces.length % ICONS.length]);
+  buildChoices();
+  pickColor(space?.color ?? state.colors[state.spaces.length % state.colors.length]);
+  pickIcon(space?.icon ?? state.icons[state.spaces.length % state.icons.length]);
   openDialog($("space-dialog"));
   $("space-name").focus();
 }
@@ -291,7 +278,6 @@ $("back").addEventListener("click", () => send({ type: "back" }));
 $("forward").addEventListener("click", () => send({ type: "forward" }));
 $("reload").addEventListener("click", () => send({ type: "reload" }));
 
-// The app draws the tab's page over this box, so it needs to know where the box is.
 new ResizeObserver(() => {
   const { x, y, width, height } = $("page").getBoundingClientRect();
   send({ type: "bounds", bounds: { x, y, width, height } });

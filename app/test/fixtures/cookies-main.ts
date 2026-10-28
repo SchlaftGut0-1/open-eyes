@@ -1,5 +1,3 @@
-// Run by test/cookies.test.ts inside Electron: a login cookie set in one space's session is
-// exported, imported into another space, and sent from there. Prints the result as JSON.
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { app, session } from "electron";
@@ -18,7 +16,7 @@ app.whenReady().then(async () => {
   await (await from.fetch(`${base}/login`)).text();
   const exported = await exportCookies(from);
   const before = await (await to.fetch(`${base}/`)).text();
-  const failed = await importCookies(to, [...exported, { name: "bad", domain: "evil example", path: "/" }]);
+  const { failed } = await importCookies(to, [...exported, { name: "bad", domain: "evil example", path: "/" }]);
   const after = await (await to.fetch(`${base}/`)).text();
   console.log(JSON.stringify({ exported, before, after, failed }));
   server.close();

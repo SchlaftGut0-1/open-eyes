@@ -1,5 +1,3 @@
-// The new tab page has no bridge to the app. Its box hands typing to the address bar by asking
-// for open-eyes://focus-address, which the app allows from this page only.
 const hour = new Date().getHours();
 document.getElementById("greeting").textContent = hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 19 ? "Good afternoon" : "Good evening";
 

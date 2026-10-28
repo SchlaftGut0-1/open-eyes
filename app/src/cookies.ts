@@ -1,6 +1,5 @@
 import type { Session } from "electron";
 
-/** A cookie as sync carries it: enough to set it again in another computer's space. */
 export type SyncedCookie = {
   name: string;
   value: string;
@@ -16,7 +15,6 @@ export type SyncedCookie = {
 
 const SAME_SITE = new Set(["unspecified", "no_restriction", "lax", "strict"]);
 
-/** The space's cookies that are still valid: its logins. */
 export async function exportCookies(ses: Session): Promise<SyncedCookie[]> {
   const now = Date.now() / 1000;
   return (await ses.cookies.get({}))
@@ -44,8 +42,7 @@ const isCookie = (c: Partial<SyncedCookie>): c is SyncedCookie =>
   SAME_SITE.has(c.sameSite as string) &&
   (c.expirationDate === undefined || Number.isFinite(c.expirationDate));
 
-/** Sets synced cookies in a space; returns how many could not be set (expired, malformed). */
-export async function importCookies(ses: Session, cookies: unknown): Promise<number> {
+export async function importCookies(ses: Session, cookies: unknown): Promise<{ failed: number }> {
   let failed = 0;
   for (const cookie of Array.isArray(cookies) ? cookies : []) {
     if (!isCookie(cookie) || (cookie.expirationDate !== undefined && cookie.expirationDate * 1000 < Date.now())) {
@@ -70,5 +67,5 @@ export async function importCookies(ses: Session, cookies: unknown): Promise<num
       failed++;
     }
   }
-  return failed;
+  return { failed };
 }

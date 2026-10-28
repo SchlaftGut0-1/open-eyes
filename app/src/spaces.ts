@@ -1,15 +1,10 @@
 import { allowedInTab } from "./address.ts";
 
-/**
- * The user's spaces as saved between runs. Each space keeps its own tabs and its own sessions
- * (cookies, logins), in the partition `persist:space-<id>`.
- */
 export type SavedTab = { url: string; pinned?: boolean };
 export type SavedSpace = { id: string; name: string; color: string; icon: string; tabs: SavedTab[]; active: number };
 export type Saved = { spaces: SavedSpace[]; current: string };
 
 export const COLORS = ["#7c5cff", "#0d9488", "#d97706", "#e11d48", "#3b82f6", "#db2777"];
-/** Lucide icon names a space can show in the rail. */
 export const ICONS = ["user", "briefcase", "house", "flask-conical", "graduation-cap", "shopping-cart", "code", "heart", "globe", "star"];
 const ID = /^[a-z0-9]{1,16}$/;
 const COLOR = /^#[0-9a-f]{6}$/i;
@@ -17,7 +12,6 @@ const MAX_NAME = 32;
 
 export const FIRST_SPACE: SavedSpace = { id: "personal", name: "Personal", color: COLORS[0], icon: ICONS[0], tabs: [], active: 0 };
 
-/** A name the user typed, trimmed, or undefined when it is empty, too long or has control characters. */
 export function spaceName(input: unknown): string | undefined {
   if (typeof input !== "string") return undefined;
   const name = input.trim().replace(/\s+/g, " ");
@@ -27,7 +21,6 @@ export function spaceName(input: unknown): string | undefined {
 export const spaceColor = (input: unknown): string => (typeof input === "string" && COLOR.test(input) ? input : COLORS[0]);
 export const spaceIcon = (input: unknown): string => (typeof input === "string" && ICONS.includes(input) ? input : ICONS[0]);
 
-/** Reads the saved spaces, keeping only well-formed ones; never returns an empty list. */
 export function parseSaved(raw: unknown): Saved {
   const saved = (raw && typeof raw === "object" ? raw : {}) as { spaces?: unknown; current?: unknown };
   const spaces: SavedSpace[] = [];
