@@ -1,0 +1,132 @@
+--- a/chrome/browser/ui/color/BUILD.gn
++++ b/chrome/browser/ui/color/BUILD.gn
+@@ -40,6 +40,8 @@
+     "new_tab_page_color_mixer.h",
+     "omnibox_color_mixer.cc",
+     "omnibox_color_mixer.h",
++    "open_eyes_color_mixer.cc",
++    "open_eyes_color_mixer.h",
+     "product_specifications_color_mixer.cc",
+     "product_specifications_color_mixer.h",
+     "tab_group_color_ids.h",
+--- a/chrome/browser/ui/color/chrome_color_mixers.cc
++++ b/chrome/browser/ui/color/chrome_color_mixers.cc
+@@ -21,6 +21,7 @@
+ #include "chrome/browser/ui/color/native_chrome_color_mixer.h"
+ #include "chrome/browser/ui/color/new_tab_page_color_mixer.h"
+ #include "chrome/browser/ui/color/omnibox_color_mixer.h"
++#include "chrome/browser/ui/color/open_eyes_color_mixer.h"
+ #include "chrome/browser/ui/color/product_specifications_color_mixer.h"
+ #include "chrome/browser/ui/color/tab_strip_color_mixer.h"
+ #include "ui/color/color_provider_utils.h"
+@@ -87,6 +88,7 @@
+ 
+   // Must be the last one in order to override other mixer colors.
+   AddNativeChromeColorMixer(provider, key);
++  AddOpenEyesColorMixer(provider, key);
+ 
+   if (key.custom_theme) {
+     key.custom_theme->AddColorMixers(provider, key);
+--- /dev/null
++++ b/chrome/browser/ui/color/open_eyes_color_mixer.cc
+@@ -0,0 +1,79 @@
++// Copyright 2026 The open-eyes Authors
++// Use of this source code is governed by the MIT license.
++
++#include "chrome/browser/ui/color/open_eyes_color_mixer.h"
++
++#include "chrome/browser/ui/color/chrome_color_id.h"
++#include "third_party/skia/include/core/SkColor.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_mixer.h"
++#include "ui/color/color_provider.h"
++#include "ui/color/color_recipe.h"
++
++namespace {
++
++struct Palette {
++  SkColor frame;
++  SkColor tab_active;
++  SkColor omnibox;
++  SkColor omnibox_hover;
++  SkColor line;
++  SkColor text;
++  SkColor muted;
++  SkColor disabled;
++};
++
++constexpr Palette kDark = {
++    SkColorSetRGB(0x0e, 0x0c, 0x18), SkColorSetRGB(0x22, 0x1d, 0x35),
++    SkColorSetRGB(0x1b, 0x17, 0x29), SkColorSetRGB(0x22, 0x1d, 0x35),
++    SkColorSetRGB(0x2a, 0x24, 0x40), SkColorSetRGB(0xec, 0xe9, 0xf6),
++    SkColorSetRGB(0x9a, 0x93, 0xb3), SkColorSetRGB(0x5c, 0x56, 0x74),
++};
++
++constexpr Palette kLight = {
++    SkColorSetRGB(0xef, 0xec, 0xf8), SkColorSetRGB(0xff, 0xff, 0xff),
++    SkColorSetRGB(0xff, 0xff, 0xff), SkColorSetRGB(0xf7, 0xf6, 0xfb),
++    SkColorSetRGB(0xe2, 0xdd, 0xf0), SkColorSetRGB(0x17, 0x14, 0x2a),
++    SkColorSetRGB(0x63, 0x5d, 0x7a), SkColorSetRGB(0xa8, 0xa2, 0xbd),
++};
++
++}  // namespace
++
++void AddOpenEyesColorMixer(ui::ColorProvider* provider,
++                           const ui::ColorProviderKey& key) {
++  if (key.custom_theme ||
++      key.forced_colors != ui::ColorProviderKey::ForcedColors::kNone ||
++      (key.user_color && *key.user_color != SkColorSetRGB(0x7c, 0x5c, 0xff))) {
++    return;
++  }
++  const Palette& p =
++      key.color_mode == ui::ColorProviderKey::ColorMode::kDark ? kDark : kLight;
++  ui::ColorMixer& mixer = provider->AddMixer();
++  mixer[ui::kColorFrameActive] = {p.frame};
++  mixer[ui::kColorFrameInactive] = {p.frame};
++  mixer[kColorToolbar] = {p.frame};
++  mixer[kColorTabBackgroundActiveFrameActive] = {p.tab_active};
++  mixer[kColorTabBackgroundActiveFrameInactive] = {p.tab_active};
++  mixer[kColorTabBackgroundInactiveFrameActive] = {p.frame};
++  mixer[kColorTabBackgroundInactiveFrameInactive] = {p.frame};
++  mixer[kColorTabForegroundActiveFrameActive] = {p.text};
++  mixer[kColorTabForegroundInactiveFrameActive] = {p.muted};
++  mixer[kColorLocationBarBackground] = {p.omnibox};
++  mixer[kColorLocationBarBackgroundHovered] = {p.omnibox_hover};
++  mixer[kColorOmniboxText] = {p.text};
++  mixer[kColorOmniboxResultsBackground] = {p.omnibox};
++  mixer[kColorToolbarButtonIcon] = {p.text};
++  mixer[kColorToolbarButtonIconDisabled] = {p.disabled};
++  mixer[kColorToolbarContentAreaSeparator] = {p.line};
++  mixer[kColorToolbarSeparator] = {p.line};
++  mixer[kColorToolbarTopSeparatorFrameActive] = {p.frame};
++  mixer[kColorToolbarTopSeparatorFrameInactive] = {p.frame};
++  mixer[kColorNewTabButtonBackgroundFrameActive] = {p.frame};
++  mixer[kColorNewTabButtonBackgroundFrameInactive] = {p.frame};
++  mixer[kColorNewTabButtonCRBackgroundFrameActive] = {p.frame};
++  mixer[kColorNewTabButtonCRBackgroundFrameInactive] = {p.frame};
++  mixer[kColorNewTabButtonForegroundFrameActive] = {p.muted};
++  mixer[kColorNewTabButtonForegroundFrameInactive] = {p.muted};
++  mixer[kColorNewTabButtonCRForegroundFrameActive] = {p.muted};
++  mixer[kColorNewTabButtonCRForegroundFrameInactive] = {p.muted};
++}
+--- /dev/null
++++ b/chrome/browser/ui/color/open_eyes_color_mixer.h
+@@ -0,0 +1,18 @@
++// Copyright 2026 The open-eyes Authors
++// Use of this source code is governed by the MIT license.
++
++#ifndef CHROME_BROWSER_UI_COLOR_OPEN_EYES_COLOR_MIXER_H_
++#define CHROME_BROWSER_UI_COLOR_OPEN_EYES_COLOR_MIXER_H_
++
++#include "ui/color/color_provider_key.h"
++
++namespace ui {
++class ColorProvider;
++}
++
++// open-eyes Browser's own palette for the frame, toolbar, tabs and omnibox,
++// used while the browser color is open-eyes purple and no theme is installed.
++void AddOpenEyesColorMixer(ui::ColorProvider* provider,
++                           const ui::ColorProviderKey& key);
++
++#endif  // CHROME_BROWSER_UI_COLOR_OPEN_EYES_COLOR_MIXER_H_

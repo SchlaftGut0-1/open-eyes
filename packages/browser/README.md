@@ -20,6 +20,11 @@ strips Google's services and keys out of Chromium. See #177.
   variant, the browser's color on a new profile, in light and dark; the user can still pick
   another in Customize. `hide-profile-button.patch` shows the profile button only in
   incognito and guest windows, through ungoogled-chromium's `--show-avatar-button` switch.
+  `vertical-tabs-by-default.patch` turns on Chromium's vertical tabs, collapsed to a slim
+  rail of icons, opening only from its button. `color-palette.patch` adds our own color
+  mixer, last in line, with the exact palette from the design (#191) for the frame,
+  toolbar, tabs and omnibox in light and dark; it steps aside when the user picks another
+  color, installs a theme or uses forced colors.
 - `resources/icon.svg`: the eye logo. The build turns it into every product icon Chromium
   needs (PNG and XPM, at each size), since patches cannot carry images.
 - `scripts/rename.py`: replaces "Chromium" with "open-eyes Browser" in the UI text, in

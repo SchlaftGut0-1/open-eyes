@@ -12,3 +12,5 @@ open-eyes/branding.patch
 open-eyes/use-typescript-7.patch
 open-eyes/purple-by-default.patch
 open-eyes/hide-profile-button.patch
+open-eyes/vertical-tabs-by-default.patch
+open-eyes/color-palette.patch
