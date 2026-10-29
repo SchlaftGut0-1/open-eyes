@@ -1,0 +1,527 @@
+--- a/chrome/browser/browser_process_impl.cc
++++ b/chrome/browser/browser_process_impl.cc
+@@ -54,6 +54,9 @@
+ #include "chrome/browser/controlled_frame/controlled_frame_extensions_browser_api_provider.h"
+ #include "chrome/browser/defaults.h"
+ #include "chrome/browser/devtools/remote_debugging_server.h"
++#if BUILDFLAG(IS_LINUX)
++#include "chrome/browser/devtools/open_eyes_agent_socket.h"
++#endif
+ #include "chrome/browser/download/download_request_limiter.h"
+ #include "chrome/browser/download/download_status_updater.h"
+ #include "chrome/browser/global_features.h"
+@@ -1086,6 +1089,11 @@
+ 
+ void BrowserProcessImpl::CreateDevToolsProtocolHandler() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++#if BUILDFLAG(IS_LINUX)
++  if (local_state_->GetBoolean(prefs::kDevToolsRemoteDebuggingAllowed)) {
++    open_eyes::StartAgentSocket();
++  }
++#endif
+ #if !BUILDFLAG(IS_ANDROID)
+   auto maybe_remote_debugging_server =
+       RemoteDebuggingServer::GetInstance(local_state_.get());
+--- a/chrome/browser/devtools/BUILD.gn
++++ b/chrome/browser/devtools/BUILD.gn
+@@ -428,6 +428,13 @@
+   } else {
+     sources += [ "devtools_dock_tile.cc" ]
+   }
++  if (is_linux) {
++    sources += [
++      "open_eyes_agent_socket.cc",
++      "open_eyes_agent_socket.h",
++    ]
++    deps += [ "//crypto" ]
++  }
+   if (!is_android) {
+     deps += [
+       "//chrome/app:command_ids",
+--- /dev/null
++++ b/chrome/browser/devtools/open_eyes_agent_socket.cc
+@@ -0,0 +1,463 @@
++// Copyright 2026 The open-eyes Authors
++// Use of this source code is governed by the MIT license.
++
++#ifdef UNSAFE_BUFFERS_BUILD
++#pragma allow_unsafe_buffers
++#endif
++
++#include "chrome/browser/devtools/open_eyes_agent_socket.h"
++
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++#include <algorithm>
++#include <array>
++#include <map>
++#include <memory>
++#include <optional>
++#include <set>
++#include <string>
++#include <string_view>
++#include <utility>
++
++#include "base/containers/span.h"
++#include "base/environment.h"
++#include "base/files/file_path.h"
++#include "base/files/scoped_file.h"
++#include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/memory/ref_counted.h"
++#include "base/memory/weak_ptr.h"
++#include "base/no_destructor.h"
++#include "base/path_service.h"
++#include "base/posix/eintr_wrapper.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/thread_pool.h"
++#include "base/threading/thread.h"
++#include "base/values.h"
++#include "chrome/common/chrome_paths.h"
++#include "content/public/browser/browser_thread.h"
++#include "content/public/browser/devtools_agent_host.h"
++#include "content/public/browser/devtools_agent_host_client.h"
++#include "crypto/hash.h"
++
++namespace open_eyes {
++namespace {
++
++using content::DevToolsAgentHost;
++using content::DevToolsAgentHostClient;
++
++using SharedFd = base::RefCountedData<base::ScopedFD>;
++
++// Tabs the agent opened, and the tabs those opened. Ids are never reused, so
++// closed tabs are not removed.
++std::set<std::string>& AgentTargets() {
++  static base::NoDestructor<std::set<std::string>> targets;
++  return *targets;
++}
++
++bool IsAgentTarget(const std::string* target_id) {
++  return target_id && AgentTargets().contains(*target_id);
++}
++
++scoped_refptr<DevToolsAgentHost> NewBrowserSession() {
++  return DevToolsAgentHost::CreateForBrowser(
++      nullptr, DevToolsAgentHost::CreateServerSocketCallback());
++}
++
++std::optional<base::DictValue> Parse(std::string_view json) {
++  return base::JSONReader::ReadDict(json, base::JSON_PARSE_RFC);
++}
++
++std::string Command(int id,
++                    std::string_view method,
++                    base::DictValue params,
++                    const std::string* session_id = nullptr) {
++  base::DictValue command;
++  command.Set("id", id);
++  command.Set("method", method);
++  command.Set("params", std::move(params));
++  if (session_id) {
++    command.Set("sessionId", *session_id);
++  }
++  return base::WriteJson(command).value_or("{}");
++}
++
++// Keeps a session on every agent tab that tells its pages they are automated.
++class Automation : public DevToolsAgentHostClient {
++ public:
++  static Automation& Get() {
++    static base::NoDestructor<Automation> automation;
++    return *automation;
++  }
++
++  Automation() : host_(NewBrowserSession()) {
++    host_->AttachClient(this);
++    base::DictValue params;
++    params.Set("discover", true);
++    Send(Command(next_id_++, "Target.setDiscoverTargets", std::move(params)));
++  }
++
++  void Adopt(const std::string& target_id) {
++    if (!AgentTargets().insert(target_id).second) {
++      return;
++    }
++    int id = next_id_++;
++    attaching_.insert(id);
++    base::DictValue params;
++    params.Set("targetId", target_id);
++    params.Set("flatten", true);
++    Send(Command(id, "Target.attachToTarget", std::move(params)));
++  }
++
++  void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
++                               base::span<const uint8_t> message) override {
++    std::optional<base::DictValue> parsed =
++        Parse(base::as_string_view(message));
++    if (!parsed) {
++      return;
++    }
++    if (std::optional<int> id = parsed->FindInt("id")) {
++      const std::string* session = parsed->FindStringByDottedPath("result.sessionId");
++      if (attaching_.erase(*id) && session) {
++        base::DictValue params;
++        params.Set("enabled", true);
++        Send(Command(next_id_++, "Emulation.setAutomationOverride",
++                     std::move(params), session));
++      }
++      return;
++    }
++    const std::string* method = parsed->FindString("method");
++    const base::DictValue* info =
++        parsed->FindDictByDottedPath("params.targetInfo");
++    if (method && *method == "Target.targetCreated" && info &&
++        !parsed->FindString("sessionId") &&
++        IsAgentTarget(info->FindString("openerId"))) {
++      if (const std::string* target_id = info->FindString("targetId")) {
++        Adopt(*target_id);
++      }
++    }
++  }
++
++  void AgentHostClosed(DevToolsAgentHost* agent_host) override {}
++
++ private:
++  void Send(const std::string& message) {
++    host_->DispatchProtocolMessage(this, base::as_byte_span(message));
++  }
++
++  scoped_refptr<DevToolsAgentHost> host_;
++  int next_id_ = 1;
++  std::set<int> attaching_;
++};
++
++bool Visible(const base::DictValue& target_info) {
++  const std::string* target_id = target_info.FindString("targetId");
++  if (IsAgentTarget(target_id)) {
++    return true;
++  }
++  if (target_id && IsAgentTarget(target_info.FindString("openerId"))) {
++    Automation::Get().Adopt(*target_id);
++    return true;
++  }
++  return false;
++}
++
++std::optional<std::string> Refusal(const std::string& method,
++                                   const base::DictValue& command) {
++  if (command.FindString("sessionId")) {
++    bool browser_wide = method.starts_with("Target.") || method.starts_with("Browser.");
++    if (browser_wide && method != "Target.setAutoAttach" &&
++        method != "Target.detachFromTarget") {
++      return method + " is not available in a page session";
++    }
++    return std::nullopt;
++  }
++  static constexpr std::string_view kAllowed[] = {
++      "Browser.getVersion",      "Browser.setDownloadBehavior",
++      "Target.setDiscoverTargets", "Target.getTargets",
++      "Target.createTarget",     "Target.detachFromTarget",
++  };
++  static constexpr std::string_view kOnAgentTabs[] = {
++      "Target.getTargetInfo", "Target.attachToTarget", "Target.closeTarget",
++      "Target.activateTarget",
++  };
++  if (std::ranges::contains(kAllowed, method)) {
++    return std::nullopt;
++  }
++  if (std::ranges::contains(kOnAgentTabs, method)) {
++    if (IsAgentTarget(command.FindStringByDottedPath("params.targetId"))) {
++      return std::nullopt;
++    }
++    return "No target with given id found";
++  }
++  return method + " is not available in open-eyes Browser";
++}
++
++void WriteLine(scoped_refptr<SharedFd> fd, std::string line) {
++  line.push_back('\n');
++  size_t written = 0;
++  while (written < line.size()) {
++    ssize_t sent = HANDLE_EINTR(send(fd->data.get(), line.data() + written,
++                                     line.size() - written, MSG_NOSIGNAL));
++    if (sent <= 0) {
++      return;
++    }
++    written += static_cast<size_t>(sent);
++  }
++}
++
++class Connection;
++void ReadLines(scoped_refptr<SharedFd> fd,
++               base::WeakPtr<Connection> connection);
++
++// One CLI connection: its own browser-level DevTools session, filtered to the
++// agent's tabs.
++class Connection : public DevToolsAgentHostClient {
++ public:
++  using OnClose = base::OnceCallback<void(Connection*)>;
++
++  Connection(base::ScopedFD fd, OnClose on_close)
++      : fd_(base::MakeRefCounted<SharedFd>(std::move(fd))),
++        writer_(base::ThreadPool::CreateSequencedTaskRunner(
++            {base::MayBlock(),
++             base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})),
++        reader_(std::make_unique<base::Thread>("OpenEyesAgentReader")),
++        host_(NewBrowserSession()),
++        on_close_(std::move(on_close)) {
++    host_->AttachClient(this);
++    if (reader_->Start()) {
++      reader_->task_runner()->PostTask(
++          FROM_HERE,
++          base::BindOnce(&ReadLines, fd_, weak_factory_.GetWeakPtr()));
++    }
++  }
++
++  ~Connection() override {
++    host_->DetachClient(this);
++    shutdown(fd_->data.get(), SHUT_RDWR);
++    // Joining the reader thread blocks, which the UI thread must not do.
++    base::ThreadPool::PostTask(
++        FROM_HERE,
++        {base::MayBlock(), base::WithBaseSyncPrimitives(),
++         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
++        base::DoNothingWithBoundArgs(std::move(reader_)));
++  }
++
++  void HandleLine(std::string line) {
++    std::optional<base::DictValue> command = Parse(line);
++    if (!command) {
++      return;
++    }
++    std::optional<int> id = command->FindInt("id");
++    const std::string* method = command->FindString("method");
++    if (!id || !method) {
++      return;
++    }
++    if (std::optional<std::string> refusal = Refusal(*method, *command)) {
++      base::DictValue error;
++      error.Set("code", -32000);
++      error.Set("message", *refusal);
++      base::DictValue reply;
++      reply.Set("id", *id);
++      reply.Set("error", std::move(error));
++      if (const std::string* session = command->FindString("sessionId")) {
++        reply.Set("sessionId", *session);
++      }
++      Write(base::WriteJson(reply).value_or("{}"));
++      return;
++    }
++    if (!command->FindString("sessionId")) {
++      pending_[*id] = *method;
++    }
++    host_->DispatchProtocolMessage(this, base::as_byte_span(line));
++  }
++
++  void Close() {
++    if (on_close_) {
++      std::move(on_close_).Run(this);
++    }
++  }
++
++  void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
++                               base::span<const uint8_t> message) override {
++    std::string_view text = base::as_string_view(message);
++    std::optional<base::DictValue> parsed = Parse(text);
++    if (!parsed) {
++      return;
++    }
++    if (parsed->FindString("sessionId")) {
++      Write(std::string(text));
++      return;
++    }
++    if (std::optional<int> id = parsed->FindInt("id")) {
++      auto it = pending_.find(*id);
++      std::string method = it == pending_.end() ? "" : it->second;
++      if (it != pending_.end()) {
++        pending_.erase(it);
++      }
++      if (method == "Target.createTarget") {
++        if (const std::string* target_id =
++                parsed->FindStringByDottedPath("result.targetId")) {
++          Automation::Get().Adopt(*target_id);
++        }
++      } else if (method == "Target.getTargets") {
++        if (base::ListValue* infos =
++                parsed->FindListByDottedPath("result.targetInfos")) {
++          infos->EraseIf([](const base::Value& info) {
++            return !info.is_dict() || !Visible(info.GetDict());
++          });
++          Write(base::WriteJson(*parsed).value_or("{}"));
++          return;
++        }
++      }
++      Write(std::string(text));
++      return;
++    }
++    const std::string* method = parsed->FindString("method");
++    if (method && method->starts_with("Target.") &&
++        *method != "Target.attachedToTarget" &&
++        *method != "Target.detachedFromTarget") {
++      const base::DictValue* info =
++          parsed->FindDictByDottedPath("params.targetInfo");
++      bool visible = info ? Visible(*info)
++                          : IsAgentTarget(parsed->FindStringByDottedPath(
++                                "params.targetId"));
++      if (!visible) {
++        return;
++      }
++    }
++    Write(std::string(text));
++  }
++
++  void AgentHostClosed(DevToolsAgentHost* agent_host) override {
++    content::GetUIThreadTaskRunner({})->PostTask(
++        FROM_HERE,
++        base::BindOnce(&Connection::Close, weak_factory_.GetWeakPtr()));
++  }
++
++  bool AllowUnsafeOperations() override { return true; }
++
++  std::string GetTypeForMetrics() override { return "RemoteDebugger"; }
++
++ private:
++  void Write(std::string line) {
++    writer_->PostTask(FROM_HERE,
++                      base::BindOnce(&WriteLine, fd_, std::move(line)));
++  }
++
++  scoped_refptr<SharedFd> fd_;
++  scoped_refptr<base::SequencedTaskRunner> writer_;
++  std::unique_ptr<base::Thread> reader_;
++  scoped_refptr<DevToolsAgentHost> host_;
++  OnClose on_close_;
++  std::map<int, std::string> pending_;
++  base::WeakPtrFactory<Connection> weak_factory_{this};
++};
++
++void ReadLines(scoped_refptr<SharedFd> fd,
++               base::WeakPtr<Connection> connection) {
++  scoped_refptr<base::SequencedTaskRunner> ui =
++      content::GetUIThreadTaskRunner({});
++  std::string buffer;
++  std::array<char, 65536> chunk;
++  while (true) {
++    ssize_t read_bytes =
++        HANDLE_EINTR(read(fd->data.get(), chunk.data(), chunk.size()));
++    if (read_bytes <= 0) {
++      break;
++    }
++    buffer.append(chunk.data(), static_cast<size_t>(read_bytes));
++    size_t start = 0;
++    for (size_t newline; (newline = buffer.find('\n', start)) != std::string::npos;
++         start = newline + 1) {
++      ui->PostTask(FROM_HERE,
++                   base::BindOnce(&Connection::HandleLine, connection,
++                                  buffer.substr(start, newline - start)));
++    }
++    buffer.erase(0, start);
++  }
++  ui->PostTask(FROM_HERE, base::BindOnce(&Connection::Close, connection));
++}
++
++class Listener {
++ public:
++  static Listener& Get() {
++    static base::NoDestructor<Listener> listener;
++    return *listener;
++  }
++
++  void Start(const base::FilePath& path) {
++    base::ScopedFD fd(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
++    sockaddr_un address = {};
++    address.sun_family = AF_UNIX;
++    if (!fd.is_valid() || path.value().size() >= sizeof(address.sun_path)) {
++      return;
++    }
++    path.value().copy(address.sun_path, sizeof(address.sun_path) - 1);
++    unlink(path.value().c_str());
++    // Nothing can connect before listen(), so the socket is private by then.
++    if (bind(fd.get(), reinterpret_cast<const sockaddr*>(&address),
++             sizeof(address)) != 0 ||
++        chmod(path.value().c_str(), 0600) != 0 || listen(fd.get(), 8) != 0) {
++      return;
++    }
++    thread_ = std::make_unique<base::Thread>("OpenEyesAgentSocket");
++    if (thread_->Start()) {
++      thread_->task_runner()->PostTask(
++          FROM_HERE, base::BindOnce(&Listener::Accept, std::move(fd)));
++    }
++  }
++
++ private:
++  static void Accept(base::ScopedFD listener) {
++    while (true) {
++      int fd = HANDLE_EINTR(accept4(listener.get(), nullptr, nullptr, SOCK_CLOEXEC));
++      if (fd < 0) {
++        return;
++      }
++      content::GetUIThreadTaskRunner({})->PostTask(
++          FROM_HERE, base::BindOnce(&Listener::OnAccepted,
++                                    base::Unretained(&Get()), base::ScopedFD(fd)));
++    }
++  }
++
++  void OnAccepted(base::ScopedFD fd) {
++    auto connection = std::make_unique<Connection>(
++        std::move(fd),
++        base::BindOnce(&Listener::Remove, base::Unretained(this)));
++    Connection* key = connection.get();
++    connections_[key] = std::move(connection);
++  }
++
++  void Remove(Connection* connection) { connections_.erase(connection); }
++
++  std::unique_ptr<base::Thread> thread_;
++  std::map<Connection*, std::unique_ptr<Connection>> connections_;
++};
++
++base::FilePath SocketPath() {
++  base::FilePath user_data;
++  base::PathService::Get(chrome::DIR_USER_DATA, &user_data);
++  std::string id =
++      base::HexEncodeLower(crypto::hash::Sha256(user_data.value())).substr(0, 12);
++  std::optional<std::string> runtime =
++      base::Environment::Create()->GetVar("XDG_RUNTIME_DIR");
++  base::FilePath dir =
++      runtime && !runtime->empty() ? base::FilePath(*runtime) : user_data;
++  return dir.Append("open-eyes-browser-" + id + ".sock");
++}
++
++}  // namespace
++
++void StartAgentSocket() {
++  Automation::Get();
++  Listener::Get().Start(SocketPath());
++}
++
++}  // namespace open_eyes
+--- /dev/null
++++ b/chrome/browser/devtools/open_eyes_agent_socket.h
+@@ -0,0 +1,18 @@
++// Copyright 2026 The open-eyes Authors
++// Use of this source code is governed by the MIT license.
++
++#ifndef CHROME_BROWSER_DEVTOOLS_OPEN_EYES_AGENT_SOCKET_H_
++#define CHROME_BROWSER_DEVTOOLS_OPEN_EYES_AGENT_SOCKET_H_
++
++namespace open_eyes {
++
++// Lets the open-eyes CLI drive this browser with the DevTools protocol, one
++// JSON message per line, over a socket only the user can open:
++// $XDG_RUNTIME_DIR/open-eyes-browser-<first 12 hex of sha256(user data dir)>.sock.
++// Each connection sees and controls only the tabs the agent opened, and only
++// those tabs report automation; no remote debugging switch is set.
++void StartAgentSocket();
++
++}  // namespace open_eyes
++
++#endif  // CHROME_BROWSER_DEVTOOLS_OPEN_EYES_AGENT_SOCKET_H_
