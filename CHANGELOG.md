@@ -12,22 +12,7 @@ All notable changes to open-eyes are documented here. The format follows
   ungoogled-chromium's patches and our own on top, the way Helium is made, built on Linux
   with `packages/browser/scripts/build.sh`. It is named open-eyes Browser, with the eye
   icon, in its window, pages and text in every language, and keeps its profile, policies
-  and native messaging hosts apart from Chromium's. Google sign-in works in it, which the
-  Electron app could not do (#177).
-- open-eyes Browser, a first preview in `app/`: a desktop browser of our own (Electron
-  44, Chromium 152), in its own profile. Tabs are icons down a slim sidebar that expands to
-  show their titles; the address bar opens addresses or searches; new tabs open our own
-  page. Spaces (Work, Personal...) each have their own tabs, icon and color, and their own
-  logins, cookies and site data, kept apart from the others and restored when the app
-  opens again. Sign-in popups ("Sign in with GitHub") stay tied to their page. It runs
-  once per profile. Pages are sandboxed and cannot reach the app or
-  `chrome://` pages. Run it with `cd app && npm install && npm start`.
-- The CLI uses open-eyes Browser when it runs and no browser was started with `launch` or
-  joined with `connect`: page commands need no flags, and `status` names it. The agent
-  works in its own tab in the current space, marked with a bot badge, and sees only the
-  tabs it opened. The app opens no DevTools port; the CLI reaches it through a socket only
-  your user can open. Agent tabs tell sites they are automated, your own tabs do not. When
-  the app is installed but closed, commands say so (#82).
+  and native messaging hosts apart from Chromium's. Google sign-in works in it (#177).
 - Spaces: several agents can work in the same browser at once, each in its own window.
   Add `--space <name>` to any command (or set `OPEN_EYES_SPACE`) and that agent gets its
   own window, refs, snapshot baseline, take-control state and dialog watcher; the banner
