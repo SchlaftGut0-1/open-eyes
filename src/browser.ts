@@ -24,11 +24,10 @@ const MAC_BROWSERS = [
   "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
 ];
 
-/** open-eyes Browser's profile, chosen the same way as the app does. */
-const appProfile =
-  process.env.OPEN_EYES_BROWSER_PROFILE ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "open-eyes", "browser");
+/** open-eyes Browser's profile, where the Chromium build in packages/browser keeps it. */
+const appProfile = process.env.OPEN_EYES_BROWSER_PROFILE ?? join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "open-eyes-browser");
 
-/** Where open-eyes Browser listens for agents; app/src/agent.ts computes the same path. */
+/** Where open-eyes Browser listens for agents (#179). */
 function appSocketPath(): string {
   const id = createHash("sha256").update(appProfile).digest("hex").slice(0, 12);
   if (process.platform === "win32") return `\\\\.\\pipe\\open-eyes-browser-${id}`;
