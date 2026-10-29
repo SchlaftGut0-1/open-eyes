@@ -8,6 +8,12 @@ All notable changes to open-eyes are documented here. The format follows
 
 ### Added
 
+- open-eyes Browser built on Chromium, in `packages/browser`: Chromium 156 with
+  ungoogled-chromium's patches and our own on top, the way Helium is made, built on Linux
+  with `packages/browser/scripts/build.sh`. It is named open-eyes Browser, with the eye
+  icon, in its window, pages and text in every language, and keeps its profile, policies
+  and native messaging hosts apart from Chromium's. Google sign-in works in it, which the
+  Electron app could not do (#177).
 - open-eyes Browser, a first preview in `app/`: a desktop browser of our own (Electron
   44, Chromium 152), in its own profile. Tabs are icons down a slim sidebar that expands to
   show their titles; the address bar opens addresses or searches; new tabs open our own
