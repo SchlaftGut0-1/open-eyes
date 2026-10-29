@@ -9,10 +9,13 @@ All notable changes to open-eyes are documented here. The format follows
 ### Added
 
 - open-eyes Browser built on Chromium, in `packages/browser`: Chromium 156 with
-  ungoogled-chromium's patches and our own on top, the way Helium is made, built on Linux
+  ungoogled-chromium's patches and our own on top, built on Linux
   with `packages/browser/scripts/build.sh`. It is named open-eyes Browser, with the eye
   icon, in its window, pages and text in every language, and keeps its profile, policies
-  and native messaging hosts apart from Chromium's. Google sign-in works in it (#177).
+  and native messaging hosts apart from Chromium's. Google sign-in works in it (#177). It
+  is open-eyes purple by default, with our own palette for the frame, toolbar, tabs and
+  address bar in light and dark; tabs run down a slim rail of icons on the left; and the
+  profile button shows only in incognito and guest windows (#184, #181).
 - Spaces: several agents can work in the same browser at once, each in its own window.
   Add `--space <name>` to any command (or set `OPEN_EYES_SPACE`) and that agent gets its
   own window, refs, snapshot baseline, take-control state and dialog watcher; the banner

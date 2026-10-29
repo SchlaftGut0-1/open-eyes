@@ -84,7 +84,7 @@ left alone. `open-eyes disconnect` closes that window and stops the daemon.
 
 ## open-eyes Browser (in progress)
 
-Our own browser, built on Chromium in `packages/browser` the way Helium is: Chromium with
+Our own browser, built on Chromium in `packages/browser`: Chromium with
 ungoogled-chromium's patches and our own on top. It is named open-eyes Browser, keeps its
 profile in `~/.config/open-eyes-browser` apart from Chromium's, and Google sign-in works in
 it. For now it is built from source on Linux; see `packages/browser/README.md`.
