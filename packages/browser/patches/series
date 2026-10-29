@@ -10,3 +10,5 @@ ungoogled-chromium/portablelinux/chromium-156-revert-use-typescript-go.patch
 
 open-eyes/branding.patch
 open-eyes/use-typescript-7.patch
+open-eyes/purple-by-default.patch
+open-eyes/hide-profile-button.patch

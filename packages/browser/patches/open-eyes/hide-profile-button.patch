@@ -1,0 +1,15 @@
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -614,8 +614,10 @@
+     bool show_avatar_toolbar_button =
+         AvatarToolbarButtonInterface::CanShowForProfile(browser_->GetProfile());
+ 
+-    const std::string sab_value = base::CommandLine::ForCurrentProcess()->
+-                                  GetSwitchValueASCII("show-avatar-button");
++    std::string sab_value = base::CommandLine::ForCurrentProcess()->
++                            GetSwitchValueASCII("show-avatar-button");
++    if (sab_value.empty())
++      sab_value = "incognito-and-guest";
+     if (sab_value == "always")
+       show_avatar_toolbar_button = true;
+     else if (sab_value == "incognito-and-guest")

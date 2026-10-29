@@ -1,6 +1,6 @@
 # open-eyes Browser on Chromium
 
-open-eyes Browser built on Chromium, the way Helium does it: a layer of patches on top of
+open-eyes Browser built on Chromium: our own patches on top of
 [ungoogled-chromium](https://github.com/ungoogled-software/ungoogled-chromium), which
 strips Google's services and keys out of Chromium. See #177.
 
@@ -16,6 +16,10 @@ strips Google's services and keys out of Chromium. See #177.
   `/etc/open-eyes-browser`, not from `/etc/chromium`. `use-typescript-7.patch`
   builds DevTools with TypeScript 7.0.2, which the build installs in its own folder:
   TypeScript 6, the version Arch ships, rejects some of DevTools' declarations.
+  `purple-by-default.patch` makes open-eyes purple (`#7c5cff`), in Chromium's vibrant
+  variant, the browser's color on a new profile, in light and dark; the user can still pick
+  another in Customize. `hide-profile-button.patch` shows the profile button only in
+  incognito and guest windows, through ungoogled-chromium's `--show-avatar-button` switch.
 - `resources/icon.svg`: the eye logo. The build turns it into every product icon Chromium
   needs (PNG and XPM, at each size), since patches cannot carry images.
 - `scripts/rename.py`: replaces "Chromium" with "open-eyes Browser" in the UI text, in
@@ -48,4 +52,6 @@ stopped build picks up where it left off. The browser ends up in
    ungoogled-chromium-portablelinux.
 3. Refresh our patches until `scripts/build.sh` applies them all cleanly.
 
-The scripts and the portable patches are BSD-3-Clause; see `LICENSE.ungoogled-chromium`.
+Our patches and scripts are MIT, like the rest of open-eyes. The parts taken from
+ungoogled-chromium (the build steps and the portable patches) are BSD-3-Clause; see
+`LICENSE.ungoogled-chromium`.
