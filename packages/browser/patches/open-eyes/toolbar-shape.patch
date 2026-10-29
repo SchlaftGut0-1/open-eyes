@@ -1,0 +1,83 @@
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -54,7 +54,7 @@
+     case LayoutConstant::kLocationBarChildInternalSpacing:
+       return touch_ui ? 10 : 4;
+     case LayoutConstant::kLocationBarChildCornerRadius:
+-      return 12;
++      return 8;
+     case LayoutConstant::kLocationBarChipIconSize:
+       return 16;
+     case LayoutConstant::kLocationBarChipPadding:
+@@ -74,7 +74,7 @@
+     case LayoutConstant::kLocationBarTrailingDecorationInnerPadding:
+       return touch_ui ? 3 : 8;
+     case LayoutConstant::kLocationBarHeight:
+-      return touch_ui ? 36 : 34;
++      return 36;
+     // LINT.IfChange(LocationBarIconSize)
+     case LayoutConstant::kLocationBarIconSize:
+       return touch_ui ? 20 : 16;
+@@ -147,14 +147,15 @@
+       return 20;
+     case LayoutConstant::kMainBackgroundRegionCornerRadius:
+     case LayoutConstant::kToolbarCornerRadius:
++      return 0;
+     case LayoutConstant::kVerticalTabCornerRadius:
+       return 8;
+     case LayoutConstant::kVerticalTabHeight:
+-      return 30;
++      return 26;
+     case LayoutConstant::kVerticalTabPinnedHeight:
+       return 32;
+     case LayoutConstant::kVerticalTabMinWidth:
+-      return 32;
++      return 28;
+     case LayoutConstant::kVerticalTabStripHorizontalPadding:
+       return 12;
+     case LayoutConstant::kVerticalTabStripUncollapsedVerticalPadding:
+@@ -162,9 +163,8 @@
+     case LayoutConstant::kVerticalTabStripCollapsedVerticalPadding:
+       return 8;
+     case LayoutConstant::kVerticalTabStripComboButtonIconSize:
+-      return 18;
+     case LayoutConstant::kVerticalTabStripButtonIconSize:
+-      return 20;
++      return 16;
+     case LayoutConstant::kVerticalTabStripTopButtonPadding:
+       return 4;
+     case LayoutConstant::kVerticalTabStripFlatEdgeButtonPadding:
+@@ -172,9 +172,8 @@
+     case LayoutConstant::kVerticalTabStripTopButtonContainerHeight:
+       return 28;
+     case LayoutConstant::kVerticalTabStripNewTabButtonSize:
+-      return 32;
+     case LayoutConstant::kVerticalTabStripCollapseButtonSize:
+-      return 32;
++      return 28;
+     case LayoutConstant::kVerticalTabStripTopContainerButtonSize:
+       return 28;
+     case LayoutConstant::kVerticalTabPinnedBorderThickness:
+--- a/chrome/browser/ui/views/frame/custom_floating_corner.cc
++++ b/chrome/browser/ui/views/frame/custom_floating_corner.cc
+@@ -155,7 +155,7 @@
+ }
+ 
+ int CustomFloatingCorner::GetCornerRadius() const {
+-  return GetLayoutProvider()->GetCornerRadiusMetric(corner_radius_token_);
++  return 0;
+ }
+ 
+ gfx::Size CustomFloatingCorner::CalculatePreferredSize(
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+@@ -530,8 +530,7 @@
+ 
+ // static
+ int LocationBarView::ComputeBorderRadius(gfx::Size size) {
+-  return ChromeLayoutProvider::Get()->GetCornerRadiusMetric(
+-      views::Emphasis::kMaximum, size);
++  return std::min(10, size.height() / 2);
+ }
+ 
+ // static
