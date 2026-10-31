@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { audit, type AuditEntry } from "./audit.ts";
 import { describeDialog, openDialog, type Dialog } from "./dialogs.ts";
 import type { CDP } from "./cdp.ts";
+import { browserControl, overlayControl, TAKEN_BY_USER, type Control } from "./control.ts";
 import { decisionExpression, OVERLAY_WORLD, OWNER_EXPRESSION, overlayExpression, type OverlayAction, type OverlayCommand, type Owner } from "./overlay.ts";
 import { blockedReason, isRiskyClick, loadPolicy, PolicyError, type Policy } from "./policy.ts";
 import { formatSnapshot, nodeKey, type AXNode, type Frame, type LineNode } from "./snapshot.ts";
@@ -261,16 +262,27 @@ export class Page {
   #sessionId: string;
   #state: State;
   #policy: Policy;
+  /** open-eyes Browser, which keeps who is in control itself and has its own Take control button. */
+  #app: boolean;
+  #control: Control;
   /** Cross-origin iframes, by frame id: their session, the frame holding them, and their <iframe>. */
   #frames = new Map<string, { session: string; parent?: string; owner?: number }>();
   /** Sessions already told to attach to their cross-origin iframes. */
   #autoAttached = new Set<string>();
 
-  constructor(cdp: CDP, sessionId: string, state: State) {
+  constructor(cdp: CDP, sessionId: string, state: State, app = false) {
     this.#cdp = cdp;
     this.#sessionId = sessionId;
     this.#state = state;
     this.#policy = loadPolicy();
+    this.#app = app;
+    const draw = (cmd: OverlayCommand, owner?: Owner) => this.#overlay(cmd, owner);
+    this.#control = app
+      ? browserControl((method, params) => cdp.send(method, params), () => this.#state.targetId, draw)
+      : overlayControl(draw, async () => {
+          const owner = ((await this.#evaluateInOverlayWorld(OWNER_EXPRESSION).catch(() => null)) as Owner) ?? null;
+          return owner ?? (this.#state.owner === "user" ? "user" : null);
+        });
     cdp.on("Target.attachedToTarget", ({ sessionId: session, targetInfo }, parentSession) => {
       if (targetInfo.type !== "iframe") return;
       const parent = [...this.#frames].find(([, info]) => info.session === parentSession)?.[0];
@@ -865,13 +877,12 @@ export class Page {
    * (log in, solve a captcha...); without one, waits only if the user took control.
    */
   async handoff(message: string | undefined, timeoutMs = 600_000): Promise<string> {
-    const owner = await this.#overlay(message === undefined ? { type: "show" } : { type: "handoff", message });
+    const owner = await this.#control.handoff(message);
     if (owner !== "user") return "the agent is in control; the user has not taken over";
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       await sleep(500);
-      // A navigation wipes the page's memory of who is in control: claim it again for the user.
-      if ((await this.#overlay({ type: "claim", message })) === "agent") {
+      if ((await this.#control.poll(message)) === "agent") {
         return `the user handed control back; now on ${await this.url()}. Take a new snapshot before acting.`;
       }
     }
@@ -884,9 +895,8 @@ export class Page {
     await this.#overlay({ type: "usage", text });
   }
 
-  async owner(): Promise<Owner> {
-    const owner = ((await this.#evaluateInOverlayWorld(OWNER_EXPRESSION).catch(() => null)) as Owner) ?? null;
-    return owner ?? (this.#state.owner === "user" ? "user" : null);
+  owner(): Promise<Owner> {
+    return this.#control.owner();
   }
 
   async url(): Promise<string> {
@@ -899,7 +909,9 @@ export class Page {
   }
 
   #send<T = any>(method: string, params: object = {}): Promise<T> {
-    return this.#cdp.send<T>(method, params, this.#sessionId);
+    return this.#cdp.send<T>(method, params, this.#sessionId).catch((error: Error) => {
+      throw error.message.endsWith(TAKEN_BY_USER) ? new Error(USER_IN_CONTROL) : error;
+    });
   }
 
   /** Sends to the session holding `frame`'s nodes: a cross-origin iframe's own, or the page's. */
@@ -1259,15 +1271,16 @@ export class Page {
   }
 
   /** Updates the overlay and returns who is in control; never fails over drawing. */
-  async #overlay(cmd: OverlayCommand): Promise<Owner> {
-    const owner = ((await this.#evaluateInOverlayWorld(overlayExpression(cmd, this.#state.owner, space())).catch(() => null)) as Owner) ?? null;
-    if (owner) this.#state.owner = owner;
-    return owner;
+  async #overlay(cmd: OverlayCommand, owner?: Owner): Promise<Owner> {
+    const remembered = this.#app ? (owner ?? null) : this.#state.owner;
+    const drawn = ((await this.#evaluateInOverlayWorld(overlayExpression(cmd, remembered, space(), !this.#app)).catch(() => null)) as Owner) ?? null;
+    if (drawn && !this.#app) this.#state.owner = drawn;
+    return drawn;
   }
 
   /** Shows the next action to the human, or refuses it if the human is in control. */
   async #announce(action: OverlayAction & { busy?: boolean }, pause = true): Promise<void> {
-    if ((await this.#overlay({ type: "action", ...action })) === "user") throw new Error(USER_IN_CONTROL);
+    if ((await this.#control.step(action)) === "user") throw new Error(USER_IN_CONTROL);
     if (pause && SLOWMO_MS > 0) await sleep(SLOWMO_MS);
   }
 

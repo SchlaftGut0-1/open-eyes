@@ -1,0 +1,267 @@
+--- a/chrome/browser/devtools/BUILD.gn
++++ b/chrome/browser/devtools/BUILD.gn
+@@ -430,6 +430,8 @@
+   }
+   if (is_linux) {
+     sources += [
++      "open_eyes_agent_hub.cc",
++      "open_eyes_agent_hub.h",
+       "open_eyes_agent_socket.cc",
+       "open_eyes_agent_socket.h",
+     ]
+--- a/chrome/browser/devtools/open_eyes_agent_socket.cc
++++ b/chrome/browser/devtools/open_eyes_agent_socket.cc
+@@ -39,7 +39,9 @@
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/thread_pool.h"
+ #include "base/threading/thread.h"
++#include "base/types/expected.h"
+ #include "base/values.h"
++#include "chrome/browser/devtools/open_eyes_agent_hub.h"
+ #include "chrome/common/chrome_paths.h"
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/devtools_agent_host.h"
+@@ -199,6 +201,42 @@
+   return method + " is not available in open-eyes Browser";
+ }
+ 
++// What the agent cannot do while the user is in control. Runtime.* stays
++// allowed, because the overlay draws through it.
++bool Steers(const std::string& method) {
++  return method.starts_with("Input.") || method == "Page.navigate" ||
++         method == "Page.reload" || method == "Page.navigateToHistoryEntry";
++}
++
++// The agent can report steps and give control to the user, but not take it
++// back: only the browser's own UI does that.
++base::expected<AgentHub::Owner, std::string> RunOpenEyesCommand(
++    const std::string& method,
++    const base::DictValue& command) {
++  const std::string* target_id =
++      command.FindStringByDottedPath("params.targetId");
++  if (!IsAgentTarget(target_id)) {
++    return base::unexpected("No target with given id found");
++  }
++  AgentHub& hub = AgentHub::Get();
++  if (method == "OpenEyes.step") {
++    const std::string* label = command.FindStringByDottedPath("params.label");
++    if (!label) {
++      return base::unexpected("OpenEyes.step needs a label");
++    }
++    return hub.AddStep(*target_id, *label);
++  }
++  if (method == "OpenEyes.handoff") {
++    const std::string* message =
++        command.FindStringByDottedPath("params.message");
++    return hub.Handoff(*target_id, message ? *message : "");
++  }
++  if (method == "OpenEyes.owner") {
++    return hub.OwnerOf(*target_id);
++  }
++  return base::unexpected(method + " is not available in open-eyes Browser");
++}
++
+ void WriteLine(scoped_refptr<SharedFd> fd, std::string line) {
+   line.push_back('\n');
+   size_t written = 0;
+@@ -259,20 +297,35 @@
+     if (!id || !method) {
+       return;
+     }
+-    if (std::optional<std::string> refusal = Refusal(*method, *command)) {
+-      base::DictValue error;
+-      error.Set("code", -32000);
+-      error.Set("message", *refusal);
++    const std::string* session = command->FindString("sessionId");
++    if (!session && method->starts_with("OpenEyes.")) {
++      base::expected<AgentHub::Owner, std::string> owner =
++          RunOpenEyesCommand(*method, *command);
++      if (!owner.has_value()) {
++        WriteError(*id, owner.error(), nullptr);
++        return;
++      }
++      base::DictValue result;
++      result.Set("owner", *owner == AgentHub::Owner::kUser ? "user" : "agent");
+       base::DictValue reply;
+       reply.Set("id", *id);
+-      reply.Set("error", std::move(error));
+-      if (const std::string* session = command->FindString("sessionId")) {
+-        reply.Set("sessionId", *session);
+-      }
++      reply.Set("result", std::move(result));
+       Write(base::WriteJson(reply).value_or("{}"));
+       return;
+     }
+-    if (!command->FindString("sessionId")) {
++    std::optional<std::string> refusal = Refusal(*method, *command);
++    if (!refusal && session && Steers(*method)) {
++      auto it = session_targets_.find(*session);
++      if (it != session_targets_.end() &&
++          AgentHub::Get().OwnerOf(it->second) == AgentHub::Owner::kUser) {
++        refusal = "the user has taken control";
++      }
++    }
++    if (refusal) {
++      WriteError(*id, *refusal, session);
++      return;
++    }
++    if (!session) {
+       pending_[*id] = *method;
+     }
+     host_->DispatchProtocolMessage(this, base::as_byte_span(line));
+@@ -320,6 +373,15 @@
+       return;
+     }
+     const std::string* method = parsed->FindString("method");
++    if (method && *method == "Target.attachedToTarget") {
++      const std::string* session =
++          parsed->FindStringByDottedPath("params.sessionId");
++      const std::string* target_id =
++          parsed->FindStringByDottedPath("params.targetInfo.targetId");
++      if (session && target_id) {
++        session_targets_[*session] = *target_id;
++      }
++    }
+     if (method && method->starts_with("Target.") &&
+         *method != "Target.attachedToTarget" &&
+         *method != "Target.detachedFromTarget") {
+@@ -351,12 +413,29 @@
+                       base::BindOnce(&WriteLine, fd_, std::move(line)));
+   }
+ 
++  void WriteError(int id,
++                  const std::string& message,
++                  const std::string* session) {
++    base::DictValue error;
++    error.Set("code", -32000);
++    error.Set("message", message);
++    base::DictValue reply;
++    reply.Set("id", id);
++    reply.Set("error", std::move(error));
++    if (session) {
++      reply.Set("sessionId", *session);
++    }
++    Write(base::WriteJson(reply).value_or("{}"));
++  }
++
+   scoped_refptr<SharedFd> fd_;
+   scoped_refptr<base::SequencedTaskRunner> writer_;
+   std::unique_ptr<base::Thread> reader_;
+   scoped_refptr<DevToolsAgentHost> host_;
+   OnClose on_close_;
+   std::map<int, std::string> pending_;
++  // Page sessions, by the tab they drive.
++  std::map<std::string, std::string> session_targets_;
+   base::WeakPtrFactory<Connection> weak_factory_{this};
+ };
+ 
+--- /dev/null
++++ b/chrome/browser/devtools/open_eyes_agent_hub.h
+@@ -0,0 +1,52 @@
++// Copyright 2026 The open-eyes Authors
++// Use of this source code is governed by the MIT license.
++
++#ifndef CHROME_BROWSER_DEVTOOLS_OPEN_EYES_AGENT_HUB_H_
++#define CHROME_BROWSER_DEVTOOLS_OPEN_EYES_AGENT_HUB_H_
++
++#include <map>
++#include <string>
++
++#include "base/containers/circular_deque.h"
++#include "base/time/time.h"
++
++namespace open_eyes {
++
++// Who drives each agent tab, by DevTools target id, and what the agent is
++// doing there. The agent socket can only add steps and give control to the
++// user; only the browser's own UI gives it back. UI thread only.
++class AgentHub {
++ public:
++  enum class Owner { kAgent, kUser };
++
++  struct Step {
++    base::Time at;
++    std::string label;
++  };
++
++  struct Tab {
++    Owner owner = Owner::kAgent;
++    std::string handoff_message;
++    base::circular_deque<Step> steps;
++  };
++
++  static AgentHub& Get();
++
++  AgentHub();
++  AgentHub(const AgentHub&) = delete;
++  AgentHub& operator=(const AgentHub&) = delete;
++  ~AgentHub();
++
++  // Records the step the agent is about to take, unless the user is in
++  // control.
++  Owner AddStep(const std::string& target_id, std::string label);
++  Owner Handoff(const std::string& target_id, std::string message);
++  Owner OwnerOf(const std::string& target_id) const;
++
++ private:
++  std::map<std::string, Tab> tabs_;
++};
++
++}  // namespace open_eyes
++
++#endif  // CHROME_BROWSER_DEVTOOLS_OPEN_EYES_AGENT_HUB_H_
+--- /dev/null
++++ b/chrome/browser/devtools/open_eyes_agent_hub.cc
+@@ -0,0 +1,52 @@
++// Copyright 2026 The open-eyes Authors
++// Use of this source code is governed by the MIT license.
++
++#include "chrome/browser/devtools/open_eyes_agent_hub.h"
++
++#include <utility>
++
++#include "base/no_destructor.h"
++
++namespace open_eyes {
++namespace {
++
++constexpr size_t kMaxSteps = 200;
++
++}  // namespace
++
++// static
++AgentHub& AgentHub::Get() {
++  static base::NoDestructor<AgentHub> hub;
++  return *hub;
++}
++
++AgentHub::AgentHub() = default;
++AgentHub::~AgentHub() = default;
++
++AgentHub::Owner AgentHub::AddStep(const std::string& target_id,
++                                  std::string label) {
++  Tab& tab = tabs_[target_id];
++  if (tab.owner == Owner::kUser) {
++    return tab.owner;
++  }
++  if (tab.steps.size() == kMaxSteps) {
++    tab.steps.pop_front();
++  }
++  tab.steps.push_back({base::Time::Now(), std::move(label)});
++  return tab.owner;
++}
++
++AgentHub::Owner AgentHub::Handoff(const std::string& target_id,
++                                  std::string message) {
++  Tab& tab = tabs_[target_id];
++  tab.owner = Owner::kUser;
++  tab.handoff_message = std::move(message);
++  return tab.owner;
++}
++
++AgentHub::Owner AgentHub::OwnerOf(const std::string& target_id) const {
++  auto it = tabs_.find(target_id);
++  return it == tabs_.end() ? Owner::kAgent : it->second.owner;
++}
++
++}  // namespace open_eyes
