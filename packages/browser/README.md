@@ -68,3 +68,8 @@ Some toolbar and tab rail icons in `patches/open-eyes/toolbar-icons.patch` are
 [Lucide](https://lucide.dev) icons redrawn in Chromium's `.icon` format: back,
 forward, reload, star, x, plus, ellipsis-vertical, panel-left-close, panel-left-open,
 layout-grid, search and puzzle. Lucide is ISC; see `LICENSE.lucide`.
+
+The browser UI font is [Geist](https://github.com/vercel/geist-font) v1.7.2.
+`scripts/build.sh` downloads it, checks its SHA-256 and puts four weights in
+`out/Default/fonts/`, which `geist-font.patch` adds to fontconfig. Geist is under
+the SIL Open Font License 1.1; see `LICENSE.geist`.

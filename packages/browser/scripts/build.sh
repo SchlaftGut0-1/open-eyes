@@ -66,6 +66,12 @@ for scale in 1:default_100_percent 2:default_200_percent; do
 done
 
 mkdir -p "${out}"
+geist="${cache}/geist-font-v1.7.2.zip"
+if [ ! -f "${out}/fonts/OFL.txt" ]; then
+    [ -f "${geist}" ] || curl -fsSL -o "${geist}" https://github.com/vercel/geist-font/releases/download/v1.7.2/geist-font-v1.7.2.zip
+    echo "7fc800d2ac6b92844895196e5041aca55d814c15db70c44f79b3b83ab82b04e2  ${geist}" | sha256sum -c --quiet
+    unzip -oj "${geist}" geist-font/OFL.txt geist-font/Geist/ttf/Geist-{Regular,Medium,SemiBold,Bold}.ttf -d "${out}/fonts"
+fi
 cat "${ungoogled}/flags.gn" "${root}/flags.gn" > "${out}/args.gn"
 printf 'target_cpu = "x64"\nv8_target_cpu = "x64"\n' >> "${out}/args.gn"
 
