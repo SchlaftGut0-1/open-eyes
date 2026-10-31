@@ -22,6 +22,9 @@ enable `chrome://inspect/#remote-debugging` and approve once); `open-eyes discon
    `upload @7 file.pdf`, `press Enter`. Each prints what changed. After "the page
    changed to ...", old refs are rejected.
    No ref? `click --name "Save"`.
+4. Search like a person: open the site, find its search box (`snapshot --find "Search"`),
+   `fill @N "query"`, `press Enter`. Never build a search URL (`?q=...`) or put the query
+   in `open`; the user watches the normal flow, and sites treat made-up URLs as bots.
 
 Cheaper than reading everything:
 
