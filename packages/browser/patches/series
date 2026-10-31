@@ -22,3 +22,5 @@ open-eyes/agent-panel.patch
 open-eyes/agent-colors.patch
 open-eyes/toolbar-icons.patch
 open-eyes/geist-font.patch
+open-eyes/no-ripples.patch
+open-eyes/no-install-chip.patch
