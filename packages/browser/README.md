@@ -63,3 +63,8 @@ stopped build picks up where it left off. The browser ends up in
 Our patches and scripts are MIT, like the rest of open-eyes. The parts taken from
 ungoogled-chromium (the build steps and the portable patches) are BSD-3-Clause; see
 `LICENSE.ungoogled-chromium`.
+
+Some toolbar and tab rail icons in `patches/open-eyes/toolbar-icons.patch` are
+[Lucide](https://lucide.dev) icons redrawn in Chromium's `.icon` format: back,
+forward, reload, star, x, plus, ellipsis-vertical, panel-left-close, panel-left-open,
+layout-grid, search and puzzle. Lucide is ISC; see `LICENSE.lucide`.
