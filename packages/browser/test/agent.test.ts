@@ -20,7 +20,7 @@ const BROWSER = join(
 const root = mkdtempSync(join(tmpdir(), "open-eyes-chromium-"));
 const profile = join(root, "browser");
 const CLI = join(import.meta.dirname, "..", "..", "..", "src", "cli.ts");
-const PAGE = pathToFileURL(join(import.meta.dirname, "..", "..", "..", "app", "test", "fixtures", "webdriver.html")).href;
+const PAGE = pathToFileURL(join(import.meta.dirname, "fixtures", "webdriver.html")).href;
 const env = {
   ...process.env,
   OPEN_EYES_BROWSER_PROFILE: profile,
