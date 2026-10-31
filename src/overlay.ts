@@ -30,7 +30,7 @@ export const OVERLAY_WORLD = "open-eyes";
 // ownership. A navigation starts a new world, so "the user is in control" is also kept in
 // sessionStorage and in open-eyes' own state (`remembered`): either one keeps the user in
 // control, so a page clearing sessionStorage cannot hand control back to the agent.
-const OVERLAY = String.raw`(cmd, remembered, space, chrome) => {
+const OVERLAY = String.raw`(cmd, remembered, space, buttons) => {
   const ID = "__open_eyes__";
   const AGENT = "#7c5cff";
   const USER = "#16a34a";
@@ -49,8 +49,7 @@ const OVERLAY = String.raw`(cmd, remembered, space, chrome) => {
     decisions: {},
     usage: null,
   });
-  // In open-eyes Browser the browser keeps who is in control and has the buttons.
-  if (!chrome && remembered) state.owner = remembered;
+  if (!buttons && remembered) state.owner = remembered;
   const setOwner = (owner, message) => {
     state.owner = owner;
     state.message = message ?? null;
@@ -183,8 +182,8 @@ const OVERLAY = String.raw`(cmd, remembered, space, chrome) => {
       ? "\u{1F464} You are in control · the agent is paused"
       : "\u{1F441} open-eyes · " + (space === "default" ? "" : space + " · ") + state.label;
     const asking = !user && state.confirm;
-    get("take").style.display = user || asking || !chrome ? "none" : "";
-    get("panel").style.display = user && chrome ? "" : "none";
+    get("take").style.display = user || asking || !buttons ? "none" : "";
+    get("panel").style.display = user && buttons ? "" : "none";
     get("ask").style.display = asking ? "" : "none";
     // Panels come first: the counter must never cover Allow, Deny or Hand back.
     get("usage").style.display = state.usage && !asking && !user ? "" : "none";
@@ -235,10 +234,9 @@ const OVERLAY = String.raw`(cmd, remembered, space, chrome) => {
 /**
  * `remembered`: who open-eyes last saw in control, used when a navigation reset the page.
  * `space`: shown on the banner unless it is the default one.
- * `chrome`: draw the Take control and Hand back buttons; false in open-eyes Browser, which has its own.
  */
-export function overlayExpression(cmd: OverlayCommand, remembered?: Owner, space = "default", chrome = true): string {
-  return `(${OVERLAY})(${JSON.stringify(cmd)}, ${JSON.stringify(remembered ?? null)}, ${JSON.stringify(space)}, ${chrome})`;
+export function overlayExpression(cmd: OverlayCommand, remembered?: Owner, space = "default", buttons = true): string {
+  return `(${OVERLAY})(${JSON.stringify(cmd)}, ${JSON.stringify(remembered ?? null)}, ${JSON.stringify(space)}, ${buttons})`;
 }
 
 /** The user's answer to confirmation `id`: "allow", "deny", or null while undecided. */

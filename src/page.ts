@@ -262,22 +262,21 @@ export class Page {
   #sessionId: string;
   #state: State;
   #policy: Policy;
-  /** open-eyes Browser, which keeps who is in control itself and has its own Take control button. */
-  #app: boolean;
+  #browserDecides: boolean;
   #control: Control;
   /** Cross-origin iframes, by frame id: their session, the frame holding them, and their <iframe>. */
   #frames = new Map<string, { session: string; parent?: string; owner?: number }>();
   /** Sessions already told to attach to their cross-origin iframes. */
   #autoAttached = new Set<string>();
 
-  constructor(cdp: CDP, sessionId: string, state: State, app = false) {
+  constructor(cdp: CDP, sessionId: string, state: State, browserDecides = false) {
     this.#cdp = cdp;
     this.#sessionId = sessionId;
     this.#state = state;
     this.#policy = loadPolicy();
-    this.#app = app;
+    this.#browserDecides = browserDecides;
     const draw = (cmd: OverlayCommand, owner?: Owner) => this.#overlay(cmd, owner);
-    this.#control = app
+    this.#control = browserDecides
       ? browserControl((method, params) => cdp.send(method, params), () => this.#state.targetId, draw)
       : overlayControl(draw, async () => {
           const owner = ((await this.#evaluateInOverlayWorld(OWNER_EXPRESSION).catch(() => null)) as Owner) ?? null;
@@ -1272,9 +1271,9 @@ export class Page {
 
   /** Updates the overlay and returns who is in control; never fails over drawing. */
   async #overlay(cmd: OverlayCommand, owner?: Owner): Promise<Owner> {
-    const remembered = this.#app ? (owner ?? null) : this.#state.owner;
-    const drawn = ((await this.#evaluateInOverlayWorld(overlayExpression(cmd, remembered, space(), !this.#app)).catch(() => null)) as Owner) ?? null;
-    if (drawn && !this.#app) this.#state.owner = drawn;
+    const remembered = this.#browserDecides ? (owner ?? null) : this.#state.owner;
+    const drawn = ((await this.#evaluateInOverlayWorld(overlayExpression(cmd, remembered, space(), !this.#browserDecides)).catch(() => null)) as Owner) ?? null;
+    if (drawn && !this.#browserDecides) this.#state.owner = drawn;
     return drawn;
   }
 

@@ -21,19 +21,15 @@
  #include "chrome/common/chrome_paths.h"
  #include "content/public/browser/browser_thread.h"
  #include "content/public/browser/devtools_agent_host.h"
-@@ -199,6 +201,42 @@
+@@ -199,6 +201,38 @@
    return method + " is not available in open-eyes Browser";
  }
  
-+// What the agent cannot do while the user is in control. Runtime.* stays
-+// allowed, because the overlay draws through it.
-+bool Steers(const std::string& method) {
++bool BlockedWhileUserInControl(const std::string& method) {
 +  return method.starts_with("Input.") || method == "Page.navigate" ||
 +         method == "Page.reload" || method == "Page.navigateToHistoryEntry";
 +}
 +
-+// The agent can report steps and give control to the user, but not take it
-+// back: only the browser's own UI does that.
 +base::expected<AgentHub::Owner, std::string> RunOpenEyesCommand(
 +    const std::string& method,
 +    const base::DictValue& command) {
@@ -64,7 +60,7 @@
  void WriteLine(scoped_refptr<SharedFd> fd, std::string line) {
    line.push_back('\n');
    size_t written = 0;
-@@ -259,20 +297,35 @@
+@@ -259,20 +293,35 @@
      if (!id || !method) {
        return;
      }
@@ -94,9 +90,9 @@
      }
 -    if (!command->FindString("sessionId")) {
 +    std::optional<std::string> refusal = Refusal(*method, *command);
-+    if (!refusal && session && Steers(*method)) {
-+      auto it = session_targets_.find(*session);
-+      if (it != session_targets_.end() &&
++    if (!refusal && session && BlockedWhileUserInControl(*method)) {
++      auto it = target_by_session_.find(*session);
++      if (it != target_by_session_.end() &&
 +          AgentHub::Get().OwnerOf(it->second) == AgentHub::Owner::kUser) {
 +        refusal = "the user has taken control";
 +      }
@@ -109,7 +105,7 @@
        pending_[*id] = *method;
      }
      host_->DispatchProtocolMessage(this, base::as_byte_span(line));
-@@ -320,6 +373,15 @@
+@@ -320,6 +369,15 @@
        return;
      }
      const std::string* method = parsed->FindString("method");
@@ -119,13 +115,13 @@
 +      const std::string* target_id =
 +          parsed->FindStringByDottedPath("params.targetInfo.targetId");
 +      if (session && target_id) {
-+        session_targets_[*session] = *target_id;
++        target_by_session_[*session] = *target_id;
 +      }
 +    }
      if (method && method->starts_with("Target.") &&
          *method != "Target.attachedToTarget" &&
          *method != "Target.detachedFromTarget") {
-@@ -351,12 +413,29 @@
+@@ -351,12 +409,28 @@
                        base::BindOnce(&WriteLine, fd_, std::move(line)));
    }
  
@@ -150,14 +146,13 @@
    scoped_refptr<DevToolsAgentHost> host_;
    OnClose on_close_;
    std::map<int, std::string> pending_;
-+  // Page sessions, by the tab they drive.
-+  std::map<std::string, std::string> session_targets_;
++  std::map<std::string, std::string> target_by_session_;
    base::WeakPtrFactory<Connection> weak_factory_{this};
  };
  
 --- /dev/null
 +++ b/chrome/browser/devtools/open_eyes_agent_hub.h
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,65 @@
 +// Copyright 2026 The open-eyes Authors
 +// Use of this source code is governed by the MIT license.
 +
@@ -174,9 +169,6 @@
 +
 +namespace open_eyes {
 +
-+// Who drives each agent tab, by DevTools target id, and what the agent is
-+// doing there. The agent socket can only add steps and give control to the
-+// user; only the browser's own UI gives it back. UI thread only.
 +class AgentHub {
 + public:
 +  enum class Owner { kAgent, kUser };
@@ -204,18 +196,13 @@
 +  AgentHub& operator=(const AgentHub&) = delete;
 +  ~AgentHub();
 +
-+  // Records the step the agent is about to take, unless the user is in
-+  // control.
 +  Owner AddStep(const std::string& target_id, std::string label);
 +  Owner Handoff(const std::string& target_id, std::string message);
 +  Owner OwnerOf(const std::string& target_id) const;
 +
-+  // For the browser's own UI only: neither the agent nor a page may reach
-+  // these.
 +  void TakeControl(const std::string& target_id);
 +  void HandBack(const std::string& target_id);
 +
-+  // Null until the agent reports a step or a handoff for `target_id`.
 +  const Tab* Find(const std::string& target_id) const;
 +
 +  void AddObserver(Observer* observer);
@@ -233,7 +220,7 @@
 +#endif  // CHROME_BROWSER_DEVTOOLS_OPEN_EYES_AGENT_HUB_H_
 --- /dev/null
 +++ b/chrome/browser/devtools/open_eyes_agent_hub.cc
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,94 @@
 +// Copyright 2026 The open-eyes Authors
 +// Use of this source code is governed by the MIT license.
 +
@@ -242,6 +229,7 @@
 +#include <utility>
 +
 +#include "base/no_destructor.h"
++#include "content/public/browser/browser_thread.h"
 +
 +namespace open_eyes {
 +namespace {
@@ -252,6 +240,7 @@
 +
 +// static
 +AgentHub& AgentHub::Get() {
++  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 +  static base::NoDestructor<AgentHub> hub;
 +  return *hub;
 +}
@@ -418,7 +407,7 @@
      "reading_list/reading_list_side_panel_coordinator.cc",
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/open_eyes_agent/open_eyes_agent_side_panel.h
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,13 @@
 +// Copyright 2026 The open-eyes Authors
 +// Use of this source code is governed by the MIT license.
 +
@@ -428,16 +417,13 @@
 +class BrowserWindowInterface;
 +class SidePanelRegistry;
 +
-+// The Agent side panel follows the active tab: on an agent tab it shows the
-+// agent's steps, newest first, and lets the user take control or hand it back.
-+// Agent tabs are also marked in the tab strip.
 +void RegisterOpenEyesAgentSidePanel(BrowserWindowInterface* browser,
 +                                    SidePanelRegistry* registry);
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_SIDE_PANEL_OPEN_EYES_AGENT_OPEN_EYES_AGENT_SIDE_PANEL_H_
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/open_eyes_agent/open_eyes_agent_side_panel.cc
-@@ -0,0 +1,184 @@
+@@ -0,0 +1,183 @@
 +// Copyright 2026 The open-eyes Authors
 +// Use of this source code is governed by the MIT license.
 +
@@ -579,7 +565,6 @@
 +  base::CallbackListSubscription active_tab_subscription_;
 +};
 +
-+// Marks agent tabs in the tab strip with Chromium's own actor alerts.
 +class TabMarker : public AgentHub::Observer {
 + public:
 +  TabMarker() { AgentHub::Get().AddObserver(this); }
