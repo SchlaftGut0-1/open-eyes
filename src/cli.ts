@@ -51,7 +51,8 @@ Browser
   version, --version     Print the open-eyes version
 
 Page (works in the agent's own window)
-  open <url|file>        Open a URL, or a local file by its path
+  open <url|file>        Open a URL, or a local file by its path; to search a site,
+                         use its search box, not a search URL
   snapshot               Print what is on screen as text, plus an outline of the rest;
                          actionable elements get @N refs, which stay the same for an
                          element while the page is loaded
