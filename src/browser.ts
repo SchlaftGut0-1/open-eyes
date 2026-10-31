@@ -34,8 +34,10 @@ function appSocketPath(): string {
   return join(process.env.XDG_RUNTIME_DIR ?? appProfile, `open-eyes-browser-${id}.sock`);
 }
 
+const appEndpointUrl = () => `unix:${appSocketPath()}`;
+
 export async function appEndpoint(): Promise<string | undefined> {
-  const endpoint = `unix:${appSocketPath()}`;
+  const endpoint = appEndpointUrl();
   try {
     (await CDP.connect(endpoint)).close();
     return endpoint;
@@ -48,6 +50,27 @@ export const APP_CLOSED = 'open-eyes Browser is closed; open it, or run "open-ey
 export const appInstalled = () => existsSync(appProfile);
 
 const LAUNCH_TIMEOUT_MS = 30_000;
+
+// shortcut: only finds a local packages/browser build, until installable builds ship (#187).
+function appBinary(): string | undefined {
+  const build = process.env.OPEN_EYES_CHROMIUM_BUILD ?? join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "open-eyes-browser");
+  const binary = join(build, "src", "out", "Default", "chrome");
+  return existsSync(binary) ? binary : undefined;
+}
+
+export async function launchApp(): Promise<"running" | "launched" | "not-installed"> {
+  if (await appEndpoint()) return "running";
+  const binary = appBinary();
+  if (!binary) return "not-installed";
+  spawn(binary, [`--user-data-dir=${appProfile}`], { detached: true, stdio: "ignore" }).unref();
+  const deadline = Date.now() + LAUNCH_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await appEndpoint()) return "launched";
+    await sleep(200);
+  }
+  throw new Error(`open-eyes Browser started but is not taking agents after ${LAUNCH_TIMEOUT_MS / 1000}s`);
+}
+
 /** How long `connect` waits for the user to approve the browser's permission prompt. */
 const CONNECT_TIMEOUT_MS = 120_000;
 
@@ -267,16 +290,16 @@ export async function openPages(state: State): Promise<Map<string, string>> {
   }
 }
 
-/** Connects to the browser and attaches to the agent's window, opening one if needed. */
 export async function connectPage(state: State): Promise<{ cdp: CDP; page: Page }> {
   const { cdp, page } = await connectExistingPage(state);
   if (page) return { cdp, page };
+  const endpoint = await browserEndpoint(state);
   const { targetId } = await cdp.send<{ targetId: string }>("Target.createTarget", {
     url: "about:blank",
-    newWindow: true,
+    newWindow: endpoint !== appEndpointUrl(),
   });
   Object.assign(state, { targetId, refs: {} });
-  return { cdp, page: await attach(cdp, await browserEndpoint(state), targetId, state) };
+  return { cdp, page: await attach(cdp, endpoint, targetId, state) };
 }
 
 /** Like connectPage, but never opens a window: `page` is undefined when there is none. */

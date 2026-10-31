@@ -14,6 +14,7 @@ import {
   disconnectBrowser,
   findEverydayBrowser,
   launch,
+  launchApp,
   openPages,
 } from "./browser.ts";
 import { need, takeFlag, takeNumber, takeOption, takeTarget, takeTimeout } from "./args.ts";
@@ -38,11 +39,13 @@ Usage: open-eyes <command> [args] [--space <name>]
                          each space has its own window and refs (default: default)
 
 Browser
-  launch [--headless]    Start a visible browser with the open-eyes profile
+  launch [--headless]    Open open-eyes Browser, or another browser with the open-eyes
+                         profile when it is not installed
                          (--headless: no window, for CI or background work)
   connect                Use your everyday browser, with your logins, instead
                          (enable it first at chrome://inspect/#remote-debugging)
-    --browser <name>     chrome, chromium, brave or edge (default: first found)
+    --browser <name>     chrome, chromium, brave or edge (default: first found;
+                         needed while open-eyes Browser is open)
     --endpoint <ws-url>  A local DevTools WebSocket URL to connect to directly
   disconnect             Stop using your everyday browser
   status                 Show the browser and the agent window
@@ -234,7 +237,13 @@ async function main(argv: string[]): Promise<void> {
   switch (command) {
     case "launch": {
       const state = loadState();
-      const { binary, alreadyRunning } = await launch(state.port, { headless: args.includes("--headless") });
+      const headless = args.includes("--headless");
+      if (!headless && !process.env.OPEN_EYES_BROWSER) {
+        const app = await launchApp();
+        if (app === "running") return print("open-eyes Browser is already running");
+        if (app === "launched") return print("launched open-eyes Browser");
+      }
+      const { binary, alreadyRunning } = await launch(state.port, { headless });
       saveState(state);
       print(
         alreadyRunning
@@ -273,6 +282,11 @@ async function main(argv: string[]): Promise<void> {
       let endpoint = takeOption(args, "--endpoint");
       let name = endpoint ?? "";
       if (!endpoint) {
+        if (!browser && (await appEndpoint())) {
+          throw new Error(
+            'agent commands already use open-eyes Browser, where you can log in too; to use your everyday browser instead, run "open-eyes connect --browser <name>"',
+          );
+        }
         const found = findEverydayBrowser(browser);
         if (!found) throw new Error(CONNECT_HELP);
         ({ url: endpoint, name } = found);

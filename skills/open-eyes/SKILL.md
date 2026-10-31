@@ -9,9 +9,10 @@ You work in your own visible browser window; the user watches live and can take 
 
 ## Start
 
-`open-eyes status`; if no browser runs, `open-eyes launch` (visible; `--headless` only if
-the user asks). For the user's everyday browser and logins: `open-eyes connect` (they
-enable `chrome://inspect/#remote-debugging` and approve once); `open-eyes disconnect` after.
+`open-eyes status`; if no browser runs, `open-eyes launch` (opens open-eyes Browser when
+installed; `--headless` only if the user asks). Logins work in open-eyes Browser. Only if
+the user asks for their everyday browser: `open-eyes connect --browser <name>` (they enable
+`chrome://inspect/#remote-debugging` and approve once); `open-eyes disconnect` after.
 
 ## Loop
 
