@@ -418,7 +418,7 @@
      "reading_list/reading_list_side_panel_coordinator.cc",
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/open_eyes_agent/open_eyes_agent_side_panel.h
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,16 @@
 +// Copyright 2026 The open-eyes Authors
 +// Use of this source code is governed by the MIT license.
 +
@@ -430,13 +430,14 @@
 +
 +// The Agent side panel follows the active tab: on an agent tab it shows the
 +// agent's steps, newest first, and lets the user take control or hand it back.
++// Agent tabs are also marked in the tab strip.
 +void RegisterOpenEyesAgentSidePanel(BrowserWindowInterface* browser,
 +                                    SidePanelRegistry* registry);
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_SIDE_PANEL_OPEN_EYES_AGENT_OPEN_EYES_AGENT_SIDE_PANEL_H_
 --- /dev/null
 +++ b/chrome/browser/ui/views/side_panel/open_eyes_agent/open_eyes_agent_side_panel.cc
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,184 @@
 +// Copyright 2026 The open-eyes Authors
 +// Use of this source code is governed by the MIT license.
 +
@@ -450,13 +451,16 @@
 +#include "base/functional/callback_helpers.h"
 +#include "base/i18n/time_formatting.h"
 +#include "base/memory/raw_ptr.h"
++#include "base/no_destructor.h"
 +#include "base/scoped_observation.h"
 +#include "base/strings/strcat.h"
 +#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/actor/ui/states/tab_indicator_state.h"
 +#include "chrome/browser/devtools/open_eyes_agent_hub.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/side_panel/side_panel_entry.h"
 +#include "chrome/browser/ui/side_panel/side_panel_registry.h"
++#include "chrome/browser/ui/tabs/alert/tab_alert_controller.h"
 +#include "components/tabs/public/tab_interface.h"
 +#include "content/public/browser/devtools_agent_host.h"
 +#include "content/public/browser/web_contents.h"
@@ -575,6 +579,29 @@
 +  base::CallbackListSubscription active_tab_subscription_;
 +};
 +
++// Marks agent tabs in the tab strip with Chromium's own actor alerts.
++class TabMarker : public AgentHub::Observer {
++ public:
++  TabMarker() { AgentHub::Get().AddObserver(this); }
++
++  void OnAgentTabChanged(const std::string& target_id) override {
++    scoped_refptr<content::DevToolsAgentHost> host =
++        content::DevToolsAgentHost::GetForId(target_id);
++    content::WebContents* contents = host ? host->GetWebContents() : nullptr;
++    tabs::TabInterface* tab =
++        contents ? tabs::TabInterface::MaybeGetFromContents(contents) : nullptr;
++    tabs::TabAlertController* alerts =
++        tab ? tabs::TabAlertController::From(tab) : nullptr;
++    if (!alerts) {
++      return;
++    }
++    alerts->OnActorTabIndicatorStateChanged(
++        AgentHub::Get().OwnerOf(target_id) == AgentHub::Owner::kUser
++            ? actor::ui::TabIndicatorStatus::kStatic
++            : actor::ui::TabIndicatorStatus::kDynamic);
++  }
++};
++
 +std::unique_ptr<views::View> CreateAgentPanel(BrowserWindowInterface* browser,
 +                                              SidePanelEntryScope& scope) {
 +  auto scroll = std::make_unique<views::ScrollView>();
@@ -589,8 +616,49 @@
 +
 +void RegisterOpenEyesAgentSidePanel(BrowserWindowInterface* browser,
 +                                    SidePanelRegistry* registry) {
++  static base::NoDestructor<TabMarker> tab_marker;
 +  registry->Register(std::make_unique<SidePanelEntry>(
 +      SidePanelEntry::Key(SidePanelEntry::Id::kOpenEyesAgent),
 +      base::BindRepeating(&CreateAgentPanel, browser),
 +      /*default_content_width_callback=*/base::NullCallback()));
 +}
+--- a/chrome/browser/ui/tabs/alert/tab_alert_controller.h
++++ b/chrome/browser/ui/tabs/alert/tab_alert_controller.h
+@@ -104,14 +104,15 @@
+   // VrTabHelper::Observer:
+   void OnIsContentDisplayedInHeadsetChanged(bool state) override;
+ 
++  void OnActorTabIndicatorStateChanged(
++      actor::ui::TabIndicatorStatus tab_indicator_state);
++
+  private:
+   class ScopedAlertNotifier;
+ 
+   void OnGlicSharingStateChange(bool is_sharing);
+   void OnGlicAccessingStateChange(bool is_accessing);
+ 
+-  void OnActorTabIndicatorStateChanged(
+-      actor::ui::TabIndicatorStatus tab_indicator_state);
+   void OnRecentlyAudibleStateChanged(bool was_audible);
+ 
+   // Adds `alert` to the set of already active alerts for this tab if it isn't
+--- a/chrome/app/actor_strings.grdp
++++ b/chrome/app/actor_strings.grdp
+@@ -54,7 +54,7 @@
+    Something went wrong
+   </message>
+   <message name="IDS_TOOLTIP_TAB_ALERT_STATE_ACTOR_ACCESSING" desc="Extra tool tip text, when the tab's context is being shared with Gemini" formatter_data="android_java">
+-    Gemini is working on your task...
++    The agent works in this tab
+   </message>
+   <if expr="is_android">
+     <message name="IDS_TAB_AX_LABEL_ACTOR_ACCESSING" is_accessibility_with_no_ui="true" desc="Accessibility label text, when the Gemini is working on tab" formatter_data="android_java">
+@@ -67,7 +67,7 @@
+     <message name="IDS_TAB_AX_LABEL_ACTOR_ACCESSING" is_accessibility_with_no_ui="true" desc="Accessibility label text, when the Gemini is working on tab">
+       <ph name="WINDOW_TITLE">
+         $1<ex>Wikipedia</ex>
+-      </ph> - Gemini is working on your task...
++      </ph> - The agent works in this tab
+     </message>
+   </if>
+   <message name="IDS_ACTOR_PIP_WORKING_STATUS" desc="Status text shown in Picture-in-Picture when the actor is actively performing a task." formatter_data="android_java">

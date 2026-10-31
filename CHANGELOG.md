@@ -27,7 +27,8 @@ All notable changes to open-eyes are documented here. The format follows
 - An **Agent** side panel in open-eyes Browser, pinned to the toolbar. It shows the
   agent's steps live in the active tab, and its **Take control** and **Hand back**
   buttons replace the overlay's in that browser. While the user is in control the
-  browser itself refuses the agent's clicks, keys and navigations (#185).
+  browser itself refuses the agent's clicks, keys and navigations. Agent tabs are marked
+  in the tab rail (#185).
 
 ## [0.6.0] - 2026-10-28
 
