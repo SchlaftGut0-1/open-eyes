@@ -26,7 +26,7 @@ import type { Page } from "./page.ts";
 import { CONFIRM_MODES, hasRiskyWords, loadPolicy, normalizeSite, PolicyError, policyFile, savePolicy, type ConfirmMode } from "./policy.ts";
 import { runScript } from "./run.ts";
 import { formatUsage, readUsage, recordUsage, resetUsage, usageSummary } from "./usage.ts";
-import { loadState, profileDir, saveState, socketPath, space, spaceDir, spaces } from "./state.ts";
+import { forgetSpace, loadState, profileDir, saveState, socketPath, space, spaces } from "./state.ts";
 import { activeTrace, deleteTraces, formatCommand, listTraces, readTrace, recordStep, startTrace, stopTrace, toExample, tracesDir } from "./trace.ts";
 
 const HELP = `open-eyes: give your AI agent eyes on a real browser, while you watch.
@@ -378,7 +378,7 @@ async function main(argv: string[]): Promise<void> {
       const state = loadState();
       const closed = await closeAgentWindow(state);
       saveState(state);
-      if (space() !== "default") rmSync(spaceDir(), { recursive: true, force: true });
+      if (space() !== "default") forgetSpace(space());
       return print(closed ? "closed the agent window" : "no agent window to close");
     }
     case "spaces": {

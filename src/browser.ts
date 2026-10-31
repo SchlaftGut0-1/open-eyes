@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CDP } from "./cdp.ts";
 import { ensureWatcher } from "./dialogs.ts";
 import { Page } from "./page.ts";
-import { isAlive, loadState, profileDir, socketPath, space, spaceDir, spaces, stateDir, type State } from "./state.ts";
+import { forgetSpace, isAlive, loadState, profileDir, socketPath, space, spaces, stateDir, type State } from "./state.ts";
 
 const BROWSER_NAMES = [
   "chromium",
@@ -247,7 +247,7 @@ export async function disconnectBrowser(state: State): Promise<boolean> {
   // No space may leave a window behind in the user's browser; the other spaces are forgotten.
   for (const name of spaces().filter((name) => name !== space())) {
     await closeAgentWindow(loadState(name));
-    if (name !== "default") rmSync(spaceDir(name), { recursive: true, force: true });
+    if (name !== "default") forgetSpace(name);
   }
   await closeAgentWindow(state);
   process.kill(pid, "SIGTERM");
