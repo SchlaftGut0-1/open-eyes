@@ -24,7 +24,10 @@ strips Google's services and keys out of Chromium. See #177.
   rail of icons, opening only from its button. `color-palette.patch` adds our own color
   mixer, last in line, with the exact palette from the design (#191) for the frame,
   toolbar, tabs and omnibox in light and dark; it steps aside when the user picks another
-  color, installs a theme or uses forced colors.
+  color, installs a theme or uses forced colors. `agent-panel.patch` makes the browser
+  the one place that knows who drives each agent tab: the agent reports its steps and
+  can give control to the user over its socket, and only the **Agent** side panel, pinned
+  to the toolbar, gives it back. Agent tabs carry Chromium's actor mark in the tab rail.
 - `resources/icon.svg`: the eye logo. The build turns it into every product icon Chromium
   needs (PNG and XPM, at each size), since patches cannot carry images.
 - `scripts/rename.py`: replaces "Chromium" with "open-eyes Browser" in the UI text, in

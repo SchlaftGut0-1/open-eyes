@@ -1,0 +1,649 @@
+--- a/chrome/browser/devtools/BUILD.gn
++++ b/chrome/browser/devtools/BUILD.gn
+@@ -430,6 +430,8 @@
+   }
+   if (is_linux) {
+     sources += [
++      "open_eyes_agent_hub.cc",
++      "open_eyes_agent_hub.h",
+       "open_eyes_agent_socket.cc",
+       "open_eyes_agent_socket.h",
+     ]
+--- a/chrome/browser/devtools/open_eyes_agent_socket.cc
++++ b/chrome/browser/devtools/open_eyes_agent_socket.cc
+@@ -39,7 +39,9 @@
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/thread_pool.h"
+ #include "base/threading/thread.h"
++#include "base/types/expected.h"
+ #include "base/values.h"
++#include "chrome/browser/devtools/open_eyes_agent_hub.h"
+ #include "chrome/common/chrome_paths.h"
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/devtools_agent_host.h"
+@@ -199,6 +201,38 @@
+   return method + " is not available in open-eyes Browser";
+ }
+ 
++bool BlockedWhileUserInControl(const std::string& method) {
++  return method.starts_with("Input.") || method == "Page.navigate" ||
++         method == "Page.reload" || method == "Page.navigateToHistoryEntry";
++}
++
++base::expected<AgentHub::Owner, std::string> RunOpenEyesCommand(
++    const std::string& method,
++    const base::DictValue& command) {
++  const std::string* target_id =
++      command.FindStringByDottedPath("params.targetId");
++  if (!IsAgentTarget(target_id)) {
++    return base::unexpected("No target with given id found");
++  }
++  AgentHub& hub = AgentHub::Get();
++  if (method == "OpenEyes.step") {
++    const std::string* label = command.FindStringByDottedPath("params.label");
++    if (!label) {
++      return base::unexpected("OpenEyes.step needs a label");
++    }
++    return hub.AddStep(*target_id, *label);
++  }
++  if (method == "OpenEyes.handoff") {
++    const std::string* message =
++        command.FindStringByDottedPath("params.message");
++    return hub.Handoff(*target_id, message ? *message : "");
++  }
++  if (method == "OpenEyes.owner") {
++    return hub.OwnerOf(*target_id);
++  }
++  return base::unexpected(method + " is not available in open-eyes Browser");
++}
++
+ void WriteLine(scoped_refptr<SharedFd> fd, std::string line) {
+   line.push_back('\n');
+   size_t written = 0;
+@@ -259,20 +293,35 @@
+     if (!id || !method) {
+       return;
+     }
+-    if (std::optional<std::string> refusal = Refusal(*method, *command)) {
+-      base::DictValue error;
+-      error.Set("code", -32000);
+-      error.Set("message", *refusal);
++    const std::string* session = command->FindString("sessionId");
++    if (!session && method->starts_with("OpenEyes.")) {
++      base::expected<AgentHub::Owner, std::string> owner =
++          RunOpenEyesCommand(*method, *command);
++      if (!owner.has_value()) {
++        WriteError(*id, owner.error(), nullptr);
++        return;
++      }
++      base::DictValue result;
++      result.Set("owner", *owner == AgentHub::Owner::kUser ? "user" : "agent");
+       base::DictValue reply;
+       reply.Set("id", *id);
+-      reply.Set("error", std::move(error));
+-      if (const std::string* session = command->FindString("sessionId")) {
+-        reply.Set("sessionId", *session);
+-      }
++      reply.Set("result", std::move(result));
+       Write(base::WriteJson(reply).value_or("{}"));
+       return;
+     }
+-    if (!command->FindString("sessionId")) {
++    std::optional<std::string> refusal = Refusal(*method, *command);
++    if (!refusal && session && BlockedWhileUserInControl(*method)) {
++      auto it = target_by_session_.find(*session);
++      if (it != target_by_session_.end() &&
++          AgentHub::Get().OwnerOf(it->second) == AgentHub::Owner::kUser) {
++        refusal = "the user has taken control";
++      }
++    }
++    if (refusal) {
++      WriteError(*id, *refusal, session);
++      return;
++    }
++    if (!session) {
+       pending_[*id] = *method;
+     }
+     host_->DispatchProtocolMessage(this, base::as_byte_span(line));
+@@ -320,6 +369,15 @@
+       return;
+     }
+     const std::string* method = parsed->FindString("method");
++    if (method && *method == "Target.attachedToTarget") {
++      const std::string* session =
++          parsed->FindStringByDottedPath("params.sessionId");
++      const std::string* target_id =
++          parsed->FindStringByDottedPath("params.targetInfo.targetId");
++      if (session && target_id) {
++        target_by_session_[*session] = *target_id;
++      }
++    }
+     if (method && method->starts_with("Target.") &&
+         *method != "Target.attachedToTarget" &&
+         *method != "Target.detachedFromTarget") {
+@@ -351,12 +409,28 @@
+                       base::BindOnce(&WriteLine, fd_, std::move(line)));
+   }
+ 
++  void WriteError(int id,
++                  const std::string& message,
++                  const std::string* session) {
++    base::DictValue error;
++    error.Set("code", -32000);
++    error.Set("message", message);
++    base::DictValue reply;
++    reply.Set("id", id);
++    reply.Set("error", std::move(error));
++    if (session) {
++      reply.Set("sessionId", *session);
++    }
++    Write(base::WriteJson(reply).value_or("{}"));
++  }
++
+   scoped_refptr<SharedFd> fd_;
+   scoped_refptr<base::SequencedTaskRunner> writer_;
+   std::unique_ptr<base::Thread> reader_;
+   scoped_refptr<DevToolsAgentHost> host_;
+   OnClose on_close_;
+   std::map<int, std::string> pending_;
++  std::map<std::string, std::string> target_by_session_;
+   base::WeakPtrFactory<Connection> weak_factory_{this};
+ };
+ 
+--- /dev/null
++++ b/chrome/browser/devtools/open_eyes_agent_hub.h
+@@ -0,0 +1,65 @@
++// Copyright 2026 The open-eyes Authors
++// Use of this source code is governed by the MIT license.
++
++#ifndef CHROME_BROWSER_DEVTOOLS_OPEN_EYES_AGENT_HUB_H_
++#define CHROME_BROWSER_DEVTOOLS_OPEN_EYES_AGENT_HUB_H_
++
++#include <map>
++#include <string>
++
++#include "base/containers/circular_deque.h"
++#include "base/observer_list.h"
++#include "base/observer_list_types.h"
++#include "base/time/time.h"
++
++namespace open_eyes {
++
++class AgentHub {
++ public:
++  enum class Owner { kAgent, kUser };
++
++  struct Step {
++    base::Time at;
++    std::string label;
++  };
++
++  struct Tab {
++    Owner owner = Owner::kAgent;
++    std::string handoff_message;
++    base::circular_deque<Step> steps;
++  };
++
++  class Observer : public base::CheckedObserver {
++   public:
++    virtual void OnAgentTabChanged(const std::string& target_id) = 0;
++  };
++
++  static AgentHub& Get();
++
++  AgentHub();
++  AgentHub(const AgentHub&) = delete;
++  AgentHub& operator=(const AgentHub&) = delete;
++  ~AgentHub();
++
++  Owner AddStep(const std::string& target_id, std::string label);
++  Owner Handoff(const std::string& target_id, std::string message);
++  Owner OwnerOf(const std::string& target_id) const;
++
++  void TakeControl(const std::string& target_id);
++  void HandBack(const std::string& target_id);
++
++  const Tab* Find(const std::string& target_id) const;
++
++  void AddObserver(Observer* observer);
++  void RemoveObserver(Observer* observer);
++
++ private:
++  void Notify(const std::string& target_id);
++
++  std::map<std::string, Tab> tabs_;
++  base::ObserverList<Observer> observers_;
++};
++
++}  // namespace open_eyes
++
++#endif  // CHROME_BROWSER_DEVTOOLS_OPEN_EYES_AGENT_HUB_H_
+--- /dev/null
++++ b/chrome/browser/devtools/open_eyes_agent_hub.cc
+@@ -0,0 +1,94 @@
++// Copyright 2026 The open-eyes Authors
++// Use of this source code is governed by the MIT license.
++
++#include "chrome/browser/devtools/open_eyes_agent_hub.h"
++
++#include <utility>
++
++#include "base/no_destructor.h"
++#include "content/public/browser/browser_thread.h"
++
++namespace open_eyes {
++namespace {
++
++constexpr size_t kMaxSteps = 200;
++
++}  // namespace
++
++// static
++AgentHub& AgentHub::Get() {
++  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++  static base::NoDestructor<AgentHub> hub;
++  return *hub;
++}
++
++AgentHub::AgentHub() = default;
++AgentHub::~AgentHub() = default;
++
++AgentHub::Owner AgentHub::AddStep(const std::string& target_id,
++                                  std::string label) {
++  Tab& tab = tabs_[target_id];
++  if (tab.owner == Owner::kUser) {
++    return tab.owner;
++  }
++  if (tab.steps.size() == kMaxSteps) {
++    tab.steps.pop_front();
++  }
++  tab.steps.push_back({base::Time::Now(), std::move(label)});
++  Notify(target_id);
++  return tab.owner;
++}
++
++AgentHub::Owner AgentHub::Handoff(const std::string& target_id,
++                                  std::string message) {
++  Tab& tab = tabs_[target_id];
++  tab.owner = Owner::kUser;
++  tab.handoff_message = std::move(message);
++  Notify(target_id);
++  return tab.owner;
++}
++
++AgentHub::Owner AgentHub::OwnerOf(const std::string& target_id) const {
++  auto it = tabs_.find(target_id);
++  return it == tabs_.end() ? Owner::kAgent : it->second.owner;
++}
++
++void AgentHub::TakeControl(const std::string& target_id) {
++  auto it = tabs_.find(target_id);
++  if (it == tabs_.end() || it->second.owner == Owner::kUser) {
++    return;
++  }
++  it->second.owner = Owner::kUser;
++  Notify(target_id);
++}
++
++void AgentHub::HandBack(const std::string& target_id) {
++  auto it = tabs_.find(target_id);
++  if (it == tabs_.end() || it->second.owner == Owner::kAgent) {
++    return;
++  }
++  it->second.owner = Owner::kAgent;
++  it->second.handoff_message.clear();
++  Notify(target_id);
++}
++
++const AgentHub::Tab* AgentHub::Find(const std::string& target_id) const {
++  auto it = tabs_.find(target_id);
++  return it == tabs_.end() ? nullptr : &it->second;
++}
++
++void AgentHub::AddObserver(Observer* observer) {
++  observers_.AddObserver(observer);
++}
++
++void AgentHub::RemoveObserver(Observer* observer) {
++  observers_.RemoveObserver(observer);
++}
++
++void AgentHub::Notify(const std::string& target_id) {
++  for (Observer& observer : observers_) {
++    observer.OnAgentTabChanged(target_id);
++  }
++}
++
++}  // namespace open_eyes
+--- a/chrome/browser/ui/side_panel/side_panel_entry_id.h
++++ b/chrome/browser/ui/side_panel/side_panel_entry_id.h
+@@ -26,6 +26,7 @@
+   V(kFeed, kActionSidePanelShowFeed, "Feed")                                  \
+   V(kWebView, std::nullopt, "WebView")                                        \
+   V(kContextualTasks, kActionSidePanelShowContextualTasks, "ContextualTasks") \
++  V(kOpenEyesAgent, kActionSidePanelShowOpenEyesAgent, "OpenEyesAgent")       \
+   /* Contextual Entries */                                                    \
+   V(kSideSearch, kActionSidePanelShowSideSearch, "SideSearch")                \
+   V(kLens, kActionSidePanelShowLens, "Lens")                                  \
+--- a/chrome/browser/ui/actions/chrome_action_id.h
++++ b/chrome/browser/ui/actions/chrome_action_id.h
+@@ -519,7 +519,8 @@
+   E(kActionSidePanelShowSideSearch) \
+   E(kActionSidePanelShowMerchantTrust) \
+   E(kActionSidePanelShowTabsFromOtherDevices, \
+-    IDC_SHOW_TABS_FROM_OTHER_DEVICES_SIDE_PANEL)
++    IDC_SHOW_TABS_FROM_OTHER_DEVICES_SIDE_PANEL) \
++  E(kActionSidePanelShowOpenEyesAgent)
+ 
+ #define TOOLBAR_PINNABLE_ACTION_IDS \
+   E(kActionHome, IDC_HOME) \
+--- a/chrome/browser/ui/browser_actions.cc
++++ b/chrome/browser/ui/browser_actions.cc
+@@ -406,6 +406,21 @@
+   Profile* const profile = base::to_address(profile_);
+   BrowserWindowInterface* const bwi = base::to_address(bwi_);
+ 
++  // shortcut: English only, like the rest of the open-eyes UI, until it is
++  // translated.
++  root_action_item_->AddChild(
++      actions::ActionItem::Builder(
++          CreateToggleSidePanelActionCallback(
++              SidePanelEntryKey(SidePanelEntryId::kOpenEyesAgent), bwi))
++          .SetActionId(kActionSidePanelShowOpenEyesAgent)
++          .SetText(u"Agent")
++          .SetTooltipText(u"What the agent is doing, and who is in control")
++          .SetImage(ui::ImageModel::FromVectorIcon(
++              vector_icons::kVisibilityIcon, SkColorSetRGB(0x7c, 0x5c, 0xff)))
++          .SetProperty(actions::kActionItemPinnableKey,
++                       std::underlying_type_t<actions::ActionPinnableState>(
++                           actions::ActionPinnableState::kPinnable))
++          .Build());
+   root_action_item_->AddChild(
+       SidePanelAction(SidePanelEntryId::kBookmarks, IDS_BOOKMARK_MANAGER_TITLE,
+                       IDS_BOOKMARK_MANAGER_TITLE,
+--- a/chrome/browser/ui/toolbar/toolbar_pref_names.cc
++++ b/chrome/browser/ui/toolbar/toolbar_pref_names.cc
+@@ -15,6 +15,11 @@
+ 
+ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+   base::ListValue default_pinned_actions;
++  const std::optional<std::string>& open_eyes_agent_action =
++      actions::ActionIdMap::ActionIdToString(kActionSidePanelShowOpenEyesAgent);
++  if (open_eyes_agent_action.has_value()) {
++    default_pinned_actions.Append(open_eyes_agent_action.value());
++  }
+   const std::optional<std::string>& chrome_labs_action =
+       actions::ActionIdMap::ActionIdToString(kActionShowChromeLabs);
+   // ActionIdToStringMappings are not initialized in unit tests, therefore will
+--- a/chrome/browser/ui/views/side_panel/side_panel_helper.cc
++++ b/chrome/browser/ui/views/side_panel/side_panel_helper.cc
+@@ -16,6 +16,7 @@
+ #include "chrome/browser/ui/views/side_panel/comments/comments_side_panel_coordinator.h"
+ #include "chrome/browser/ui/views/side_panel/history/history_side_panel_coordinator.h"
+ #include "chrome/browser/ui/views/side_panel/history_clusters/history_clusters_side_panel_coordinator.h"
++#include "chrome/browser/ui/views/side_panel/open_eyes_agent/open_eyes_agent_side_panel.h"
+ #include "chrome/browser/ui/views/side_panel/reading_list/reading_list_side_panel_coordinator.h"
+ #include "chrome/browser/ui/views/side_panel/tabs_from_other_devices/tabs_from_other_devices_side_panel_coordinator.h"
+ #include "chrome/browser/ui/webui_browser/webui_browser.h"
+@@ -66,6 +67,8 @@
+     CommentsSidePanelCoordinator::From(browser)->CreateAndRegisterEntry(
+         window_registry);
+   }
++
++  RegisterOpenEyesAgentSidePanel(browser, window_registry);
+ }
+ 
+ // static
+--- a/chrome/browser/ui/views/side_panel/BUILD.gn
++++ b/chrome/browser/ui/views/side_panel/BUILD.gn
+@@ -27,6 +27,8 @@
+     "history_clusters/history_clusters_side_panel_utils.h",
+     "history_clusters/history_clusters_tab_helper.cc",
+     "history_clusters/history_clusters_tab_helper.h",
++    "open_eyes_agent/open_eyes_agent_side_panel.cc",
++    "open_eyes_agent/open_eyes_agent_side_panel.h",
+     "reading_list/read_later_side_panel_web_view.cc",
+     "reading_list/read_later_side_panel_web_view.h",
+     "reading_list/reading_list_side_panel_coordinator.cc",
+--- /dev/null
++++ b/chrome/browser/ui/views/side_panel/open_eyes_agent/open_eyes_agent_side_panel.h
+@@ -0,0 +1,13 @@
++// Copyright 2026 The open-eyes Authors
++// Use of this source code is governed by the MIT license.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_SIDE_PANEL_OPEN_EYES_AGENT_OPEN_EYES_AGENT_SIDE_PANEL_H_
++#define CHROME_BROWSER_UI_VIEWS_SIDE_PANEL_OPEN_EYES_AGENT_OPEN_EYES_AGENT_SIDE_PANEL_H_
++
++class BrowserWindowInterface;
++class SidePanelRegistry;
++
++void RegisterOpenEyesAgentSidePanel(BrowserWindowInterface* browser,
++                                    SidePanelRegistry* registry);
++
++#endif  // CHROME_BROWSER_UI_VIEWS_SIDE_PANEL_OPEN_EYES_AGENT_OPEN_EYES_AGENT_SIDE_PANEL_H_
+--- /dev/null
++++ b/chrome/browser/ui/views/side_panel/open_eyes_agent/open_eyes_agent_side_panel.cc
+@@ -0,0 +1,183 @@
++// Copyright 2026 The open-eyes Authors
++// Use of this source code is governed by the MIT license.
++
++#include "chrome/browser/ui/views/side_panel/open_eyes_agent/open_eyes_agent_side_panel.h"
++
++#include <limits>
++#include <memory>
++#include <string>
++
++#include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
++#include "base/i18n/time_formatting.h"
++#include "base/memory/raw_ptr.h"
++#include "base/no_destructor.h"
++#include "base/scoped_observation.h"
++#include "base/strings/strcat.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/actor/ui/states/tab_indicator_state.h"
++#include "chrome/browser/devtools/open_eyes_agent_hub.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/side_panel/side_panel_entry.h"
++#include "chrome/browser/ui/side_panel/side_panel_registry.h"
++#include "chrome/browser/ui/tabs/alert/tab_alert_controller.h"
++#include "components/tabs/public/tab_interface.h"
++#include "content/public/browser/devtools_agent_host.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/views/controls/button/md_text_button.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/controls/scroll_view.h"
++#include "ui/views/layout/box_layout.h"
++#include "ui/views/style/typography.h"
++#include "ui/views/view.h"
++
++namespace {
++
++using open_eyes::AgentHub;
++
++std::string ActiveTargetId(BrowserWindowInterface* browser) {
++  tabs::TabInterface* tab = browser->GetActiveTabInterface();
++  content::WebContents* contents = tab ? tab->GetContents() : nullptr;
++  if (!contents || !content::DevToolsAgentHost::HasFor(contents)) {
++    return std::string();
++  }
++  return content::DevToolsAgentHost::GetOrCreateFor(contents)->GetId();
++}
++
++// shortcut: English only, like the rest of the open-eyes UI, until it is
++// translated.
++class AgentPanelView : public views::View, public AgentHub::Observer {
++ public:
++  explicit AgentPanelView(BrowserWindowInterface* browser) : browser_(browser) {
++    auto* layout = SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kVertical, gfx::Insets(16), 12));
++    layout->set_cross_axis_alignment(
++        views::BoxLayout::CrossAxisAlignment::kStart);
++    status_ = AddChildView(std::make_unique<views::Label>(
++        std::u16string(), views::style::CONTEXT_DIALOG_BODY_TEXT,
++        views::style::STYLE_EMPHASIZED));
++    message_ = AddChildView(std::make_unique<views::Label>());
++    button_ = AddChildView(std::make_unique<views::MdTextButton>(
++        base::BindRepeating(&AgentPanelView::Toggle, base::Unretained(this))));
++    button_->SetStyle(ui::ButtonStyle::kProminent);
++    steps_ = AddChildView(std::make_unique<views::View>());
++    steps_->SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kVertical, gfx::Insets(), 6));
++    for (views::Label* label : {status_.get(), message_.get()}) {
++      label->SetMultiLine(true);
++      label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    }
++    hub_observation_.Observe(&AgentHub::Get());
++    active_tab_subscription_ =
++        browser->RegisterActiveTabDidChange(base::BindRepeating(
++            &AgentPanelView::OnActiveTabChanged, base::Unretained(this)));
++    Update();
++  }
++
++  void OnAgentTabChanged(const std::string& target_id) override {
++    if (target_id == target_id_) {
++      Update();
++    }
++  }
++
++ private:
++  void OnActiveTabChanged(BrowserWindowInterface* browser) { Update(); }
++
++  void Toggle() {
++    const AgentHub::Tab* tab = AgentHub::Get().Find(target_id_);
++    if (!tab) {
++      return;
++    }
++    if (tab->owner == AgentHub::Owner::kUser) {
++      AgentHub::Get().HandBack(target_id_);
++    } else {
++      AgentHub::Get().TakeControl(target_id_);
++    }
++  }
++
++  void Update() {
++    target_id_ = ActiveTargetId(browser_);
++    const AgentHub::Tab* tab = AgentHub::Get().Find(target_id_);
++    bool user = tab && tab->owner == AgentHub::Owner::kUser;
++    if (!tab) {
++      status_->SetText(u"This tab is not the agent's.");
++    } else if (user) {
++      status_->SetText(u"You are in control. The agent is paused.");
++    } else {
++      status_->SetText(u"The agent is in control.");
++    }
++    message_->SetVisible(user && !tab->handoff_message.empty());
++    if (message_->GetVisible()) {
++      message_->SetText(base::StrCat(
++          {u"The agent asks: ", base::UTF8ToUTF16(tab->handoff_message)}));
++    }
++    button_->SetVisible(tab);
++    button_->SetText(user ? u"Hand back to the agent" : u"Take control");
++    steps_->RemoveAllChildViews();
++    if (tab) {
++      for (auto it = tab->steps.rbegin(); it != tab->steps.rend(); ++it) {
++        auto* step = steps_->AddChildView(std::make_unique<views::Label>(
++            base::StrCat({base::TimeFormatTimeOfDay(it->at), u"  ",
++                          base::UTF8ToUTF16(it->label)}),
++            views::style::CONTEXT_LABEL,
++            it == tab->steps.rbegin() ? views::style::STYLE_PRIMARY
++                                      : views::style::STYLE_SECONDARY));
++        step->SetMultiLine(true);
++        step->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++      }
++    }
++    PreferredSizeChanged();
++  }
++
++  raw_ptr<BrowserWindowInterface> browser_;
++  std::string target_id_;
++  raw_ptr<views::Label> status_;
++  raw_ptr<views::Label> message_;
++  raw_ptr<views::MdTextButton> button_;
++  raw_ptr<views::View> steps_;
++  base::ScopedObservation<AgentHub, AgentHub::Observer> hub_observation_{this};
++  base::CallbackListSubscription active_tab_subscription_;
++};
++
++class TabMarker : public AgentHub::Observer {
++ public:
++  TabMarker() { AgentHub::Get().AddObserver(this); }
++
++  void OnAgentTabChanged(const std::string& target_id) override {
++    scoped_refptr<content::DevToolsAgentHost> host =
++        content::DevToolsAgentHost::GetForId(target_id);
++    content::WebContents* contents = host ? host->GetWebContents() : nullptr;
++    tabs::TabInterface* tab =
++        contents ? tabs::TabInterface::MaybeGetFromContents(contents) : nullptr;
++    tabs::TabAlertController* alerts =
++        tab ? tabs::TabAlertController::From(tab) : nullptr;
++    if (!alerts) {
++      return;
++    }
++    alerts->OnActorTabIndicatorStateChanged(
++        AgentHub::Get().OwnerOf(target_id) == AgentHub::Owner::kUser
++            ? actor::ui::TabIndicatorStatus::kStatic
++            : actor::ui::TabIndicatorStatus::kDynamic);
++  }
++};
++
++std::unique_ptr<views::View> CreateAgentPanel(BrowserWindowInterface* browser,
++                                              SidePanelEntryScope& scope) {
++  auto scroll = std::make_unique<views::ScrollView>();
++  scroll->SetHorizontalScrollBarMode(
++      views::ScrollView::ScrollBarMode::kDisabled);
++  scroll->ClipHeightTo(0, std::numeric_limits<int>::max());
++  scroll->SetContents(std::make_unique<AgentPanelView>(browser));
++  return scroll;
++}
++
++}  // namespace
++
++void RegisterOpenEyesAgentSidePanel(BrowserWindowInterface* browser,
++                                    SidePanelRegistry* registry) {
++  static base::NoDestructor<TabMarker> tab_marker;
++  registry->Register(std::make_unique<SidePanelEntry>(
++      SidePanelEntry::Key(SidePanelEntry::Id::kOpenEyesAgent),
++      base::BindRepeating(&CreateAgentPanel, browser),
++      /*default_content_width_callback=*/base::NullCallback()));
++}
+--- a/chrome/browser/ui/tabs/alert/tab_alert_controller.h
++++ b/chrome/browser/ui/tabs/alert/tab_alert_controller.h
+@@ -104,14 +104,15 @@
+   // VrTabHelper::Observer:
+   void OnIsContentDisplayedInHeadsetChanged(bool state) override;
+ 
++  void OnActorTabIndicatorStateChanged(
++      actor::ui::TabIndicatorStatus tab_indicator_state);
++
+  private:
+   class ScopedAlertNotifier;
+ 
+   void OnGlicSharingStateChange(bool is_sharing);
+   void OnGlicAccessingStateChange(bool is_accessing);
+ 
+-  void OnActorTabIndicatorStateChanged(
+-      actor::ui::TabIndicatorStatus tab_indicator_state);
+   void OnRecentlyAudibleStateChanged(bool was_audible);
+ 
+   // Adds `alert` to the set of already active alerts for this tab if it isn't
+--- a/chrome/app/actor_strings.grdp
++++ b/chrome/app/actor_strings.grdp
+@@ -54,7 +54,7 @@
+    Something went wrong
+   </message>
+   <message name="IDS_TOOLTIP_TAB_ALERT_STATE_ACTOR_ACCESSING" desc="Extra tool tip text, when the tab's context is being shared with Gemini" formatter_data="android_java">
+-    Gemini is working on your task...
++    The agent works in this tab
+   </message>
+   <if expr="is_android">
+     <message name="IDS_TAB_AX_LABEL_ACTOR_ACCESSING" is_accessibility_with_no_ui="true" desc="Accessibility label text, when the Gemini is working on tab" formatter_data="android_java">
+@@ -67,7 +67,7 @@
+     <message name="IDS_TAB_AX_LABEL_ACTOR_ACCESSING" is_accessibility_with_no_ui="true" desc="Accessibility label text, when the Gemini is working on tab">
+       <ph name="WINDOW_TITLE">
+         $1<ex>Wikipedia</ex>
+-      </ph> - Gemini is working on your task...
++      </ph> - The agent works in this tab
+     </message>
+   </if>
+   <message name="IDS_ACTOR_PIP_WORKING_STATUS" desc="Status text shown in Picture-in-Picture when the actor is actively performing a task." formatter_data="android_java">

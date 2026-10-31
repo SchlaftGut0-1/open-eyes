@@ -320,7 +320,7 @@ export async function connectExistingPage(state: State): Promise<{ cdp: CDP; pag
 async function attach(cdp: CDP, endpoint: string, targetId: string, state: State): Promise<Page> {
   await ensureWatcher(endpoint, targetId); // Sees the dialogs the page opens, between commands too.
   const { sessionId } = await cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
-  const page = new Page(cdp, sessionId, state);
+  const page = new Page(cdp, sessionId, state, endpoint === appEndpointUrl());
   await page.init();
   return page;
 }

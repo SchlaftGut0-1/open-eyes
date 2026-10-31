@@ -83,4 +83,24 @@ describe("the CLI drives open-eyes Browser built on Chromium", { skip: !existsSy
   test("the socket is private", () => {
     assert.equal(statSync(socket).mode & 0o777, 0o600);
   });
+
+  test("the agent reports its steps and cannot act once it hands control to the user", async () => {
+    await cli("open", PAGE);
+    const cdp = await CDP.connect(`unix:${socket}`);
+    try {
+      const [{ targetId }] = (await cdp.send<{ targetInfos: { targetId: string }[] }>("Target.getTargets")).targetInfos;
+      assert.deepEqual(await cdp.send("OpenEyes.step", { targetId, label: "looking" }), { owner: "agent" });
+      const { sessionId } = await cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
+      const move = () => cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 }, sessionId);
+      await move();
+      assert.deepEqual(await cdp.send("OpenEyes.handoff", { targetId, message: "Log in" }), { owner: "user" });
+      await assert.rejects(move(), /the user has taken control/);
+      assert.deepEqual(await cdp.send("OpenEyes.step", { targetId, label: "looking" }), { owner: "user" });
+      await assert.rejects(cli("press", "Tab"), /the user has taken control of the agent window/);
+      assert.match(await cli("status"), /in control: the user/);
+      await assert.rejects(cdp.send("OpenEyes.step", { targetId: "0".repeat(32), label: "looking" }), /No target with given id found/);
+    } finally {
+      cdp.close();
+    }
+  });
 });

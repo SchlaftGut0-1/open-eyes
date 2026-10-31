@@ -17,7 +17,8 @@ what it is doing** as it happens.
   that moves to each target, a highlight on the element it is about to touch, and a
   banner describing the step.
 - **Take control any time.** Press **Take control** in the agent's window to pause it,
-  do what you need, and hand it back. Agents can also ask for help with
+  do what you need, and hand it back. In open-eyes Browser the buttons are in the
+  **Agent** side panel, which also lists the agent's steps. Agents can also ask for help with
   `open-eyes handoff "Please log in"` and wait for you.
 - **Guardrails against prompt injection.** Allow and block lists keep the agent on the
   sites you choose; risky actions (paying, sending, deleting, submitting, typing a
