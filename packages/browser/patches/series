@@ -14,3 +14,6 @@ open-eyes/purple-by-default.patch
 open-eyes/hide-profile-button.patch
 open-eyes/vertical-tabs-by-default.patch
 open-eyes/color-palette.patch
+open-eyes/toolbar-shape.patch
+open-eyes/lock-icon.patch
+open-eyes/page-info-icons.patch

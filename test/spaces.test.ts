@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +8,7 @@ import { test } from "node:test";
 // state.ts reads the state dir when it loads, so set it first.
 process.env.XDG_STATE_HOME = mkdtempSync(join(tmpdir(), "open-eyes-spaces-"));
 delete process.env.OPEN_EYES_PORT;
-const { loadState, saveState, stateDir } = await import("../src/state.ts");
+const { forgetSpace, loadState, saveState, spaceDir, spaces, stateDir } = await import("../src/state.ts");
 
 const TARGET = (n: number) => String(n).repeat(32);
 const inSpace = <T>(name: string, run: () => T): T => {
@@ -38,4 +39,17 @@ test("spaces keep their own windows and never undo each other's shared changes",
   assert.equal(JSON.parse(readFileSync(join(stateDir, "state.json"), "utf8")).daemonPid, undefined);
   assert.equal(loadState().targetId, TARGET(3));
   assert.equal(inSpace("a", () => loadState()).targetId, TARGET(2));
+});
+
+test("a closed space is forgotten while its watcher deletes its own files", async () => {
+  for (let round = 0; round < 5; round++) {
+    const dir = spaceDir("gone");
+    mkdirSync(dir, { recursive: true });
+    for (let i = 0; i < 3000; i++) writeFileSync(join(dir, `f${i}`), "");
+    const watcher = spawn("sh", ["-c", `for i in $(seq 2999 -1 0); do rm -f "${dir}/f$i"; done`]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    forgetSpace("gone");
+    await new Promise((resolve) => watcher.on("exit", resolve));
+    assert.ok(!spaces().includes("gone"), `round ${round}`);
+  }
 });

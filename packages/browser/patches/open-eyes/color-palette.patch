@@ -29,7 +29,7 @@
      key.custom_theme->AddColorMixers(provider, key);
 --- /dev/null
 +++ b/chrome/browser/ui/color/open_eyes_color_mixer.cc
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,81 @@
 +// Copyright 2026 The open-eyes Authors
 +// Use of this source code is governed by the MIT license.
 +
@@ -94,6 +94,8 @@
 +  mixer[kColorLocationBarBackgroundHovered] = {p.omnibox_hover};
 +  mixer[kColorOmniboxText] = {p.text};
 +  mixer[kColorOmniboxResultsBackground] = {p.omnibox};
++  mixer[kColorOmniboxIconBackground] = {p.omnibox};
++  mixer[kColorOmniboxIconHover] = {p.omnibox_hover};
 +  mixer[kColorToolbarButtonIcon] = {p.text};
 +  mixer[kColorToolbarButtonIconDisabled] = {p.disabled};
 +  mixer[kColorToolbarContentAreaSeparator] = {p.line};
