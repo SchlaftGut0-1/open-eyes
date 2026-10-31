@@ -1,0 +1,83 @@
+--- a/chrome/browser/ui/color/chrome_color_id.h
++++ b/chrome/browser/ui/color/chrome_color_id.h
+@@ -975,6 +975,8 @@
+   E_CPONLY(kColorTabAlertPipPlayingActiveFrameInactive) \
+   E_CPONLY(kColorTabAlertPipPlayingInactiveFrameActive) \
+   E_CPONLY(kColorTabAlertPipPlayingInactiveFrameInactive) \
++  E_CPONLY(kColorOpenEyesAgent) \
++  E_CPONLY(kColorOpenEyesUser) \
+   /* Tab alert colors in hover cards */ \
+   E_CPONLY(kColorHoverCardTabAlertMediaRecordingIcon) \
+   E_CPONLY(kColorHoverCardTabAlertPipPlayingIcon) \
+--- a/chrome/browser/ui/color/open_eyes_color_mixer.cc
++++ b/chrome/browser/ui/color/open_eyes_color_mixer.cc
+@@ -41,14 +41,17 @@
+ 
+ void AddOpenEyesColorMixer(ui::ColorProvider* provider,
+                            const ui::ColorProviderKey& key) {
++  const bool dark = key.color_mode == ui::ColorProviderKey::ColorMode::kDark;
++  ui::ColorMixer& mixer = provider->AddMixer();
++  mixer[kColorOpenEyesAgent] = {dark ? SkColorSetRGB(0x7c, 0x5c, 0xff)
++                                     : SkColorSetRGB(0x6a, 0x4c, 0xf0)};
++  mixer[kColorOpenEyesUser] = {SkColorSetRGB(0x16, 0xa3, 0x4a)};
+   if (key.custom_theme ||
+       key.forced_colors != ui::ColorProviderKey::ForcedColors::kNone ||
+       (key.user_color && *key.user_color != SkColorSetRGB(0x7c, 0x5c, 0xff))) {
+     return;
+   }
+-  const Palette& p =
+-      key.color_mode == ui::ColorProviderKey::ColorMode::kDark ? kDark : kLight;
+-  ui::ColorMixer& mixer = provider->AddMixer();
++  const Palette& p = dark ? kDark : kLight;
+   mixer[ui::kColorFrameActive] = {p.frame};
+   mixer[ui::kColorFrameInactive] = {p.frame};
+   mixer[kColorToolbar] = {p.frame};
+--- a/chrome/browser/ui/tabs/alert/tab_alert_icon.cc
++++ b/chrome/browser/ui/tabs/alert/tab_alert_icon.cc
+@@ -19,6 +19,12 @@
+ ui::ColorId GetAlertIndicatorColor(TabAlert state,
+                                    bool is_tab_active,
+                                    bool is_frame_active) {
++  if (state == tabs::TabAlert::kActorAccessing) {
++    return kColorOpenEyesAgent;
++  }
++  if (state == tabs::TabAlert::kActorWaitingOnUser) {
++    return kColorOpenEyesUser;
++  }
+   int group = 0;
+   switch (state) {
+     case tabs::TabAlert::kMediaRecording:
+@@ -31,8 +37,6 @@
+     case tabs::TabAlert::kPipPlaying:
+     case tabs::TabAlert::kGlicAccessing:
+     case tabs::TabAlert::kGlicSharing:
+-    case tabs::TabAlert::kActorWaitingOnUser:
+-    case tabs::TabAlert::kActorAccessing:
+       group = 1;
+       break;
+     case tabs::TabAlert::kAudioPlaying:
+--- a/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
++++ b/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
+@@ -14,9 +14,11 @@
+ #include "base/notreached.h"
+ #include "base/strings/strcat.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/actions/chrome_action_id.h"
+ #include "chrome/browser/ui/browser_actions.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/customize_chrome/side_panel_controller.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/side_panel/side_panel_action_callback.h"
+@@ -254,6 +256,10 @@
+         GetColorProvider()->GetColor(kColorToolbarActionItemEngaged),
+         GetColorProvider()->GetColor(kColorToolbarActionItemEngaged),
+         GetForegroundColor(ButtonState::STATE_DISABLED));
++  } else if (action_id_ == kActionSidePanelShowOpenEyesAgent) {
++    const SkColor accent = GetColorProvider()->GetColor(kColorOpenEyesAgent);
++    UpdateIconsWithColors(icon, accent, accent, accent,
++                          GetForegroundColor(ButtonState::STATE_DISABLED));
+   } else {
+     UpdateIconsWithColors(icon, GetForegroundColor(ButtonState::STATE_NORMAL),
+                           GetForegroundColor(ButtonState::STATE_HOVERED),
