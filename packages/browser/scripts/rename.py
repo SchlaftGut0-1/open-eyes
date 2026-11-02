@@ -21,8 +21,12 @@ def rename(text: str) -> str:
     return WORD.sub(NAME, text)
 
 
+def calls_us_chrome(message: str) -> bool:
+    return bool(CALLED_CHROME.match(message)) or "Customize Chrome" in message
+
+
 def rename_message(message: str) -> str:
-    if CALLED_CHROME.match(message):
+    if calls_us_chrome(message):
         message = re.sub(r"\bChrome\b", NAME, message)
     return rename(message)
 
@@ -43,6 +47,7 @@ for before, after in [
     assert rename(before) == after, f"{before!r} became {rename(before)!r}"
 assert rename_message('<message name="IDS_CONTROLLED_BY_AUTOMATION">Chrome is being controlled</message>') == '<message name="IDS_CONTROLLED_BY_AUTOMATION">open-eyes Browser is being controlled</message>'
 assert rename_message('<message name="IDS_IMPORT">Import from Google Chrome</message>') == '<message name="IDS_IMPORT">Import from Google Chrome</message>'
+assert rename_message('<message name="IDS_SHOW_CUSTOMIZE_CHROME_SIDE_PANEL">Customize Chrome</message>') == '<message name="IDS_SHOW_CUSTOMIZE_CHROME_SIDE_PANEL">Customize open-eyes Browser</message>'
 
 
 def walk(src: Path, suffixes: tuple[str, ...]):
@@ -79,6 +84,7 @@ def main(src: Path) -> None:
     import grit.node.message
 
     sources = list(walk(src, (".grd", ".grdp")))
+    us = {re.search(r'name="(\w+)"', m).group(1) for path in sources for m in MESSAGE.findall(path.read_text(encoding="utf-8")) if calls_us_chrome(m)}
     changed = {path for path in sources if any(rename_message(m) != m for m in MESSAGE.findall(path.read_text(encoding="utf-8")))}
     grds = [path for path in sources if path.suffix == ".grd" and (path in changed or "<part " in path.read_text(encoding="utf-8"))]
     before = {grd: message_ids(grit, grd) for grd in grds}
@@ -95,7 +101,7 @@ def main(src: Path) -> None:
         for (old, name), (new, _) in zip(before[grd], after):
             if old != new:
                 moved[old] = new
-                if CALLED_CHROME.match(f'<message name="{name}"'):
+                if name in us:
                     called_chrome.add(old)
 
     translated = 0
