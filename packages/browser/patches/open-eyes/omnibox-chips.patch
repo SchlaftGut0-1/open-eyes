@@ -1,0 +1,21 @@
+--- a/chrome/browser/ui/color/open_eyes_color_mixer.cc
++++ b/chrome/browser/ui/color/open_eyes_color_mixer.cc
+@@ -9,6 +9,7 @@
+ #include "ui/color/color_mixer.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/color/color_recipe.h"
++#include "ui/color/color_transform.h"
+ 
+ namespace {
+ 
+@@ -111,4 +112,10 @@
+   mixer[ui::kColorSysTonalOutline] = {p.line};
+   mixer[ui::kColorSysNeutralOutline] = {p.line};
+   mixer[ui::kColorSysDivider] = {p.line};
++  mixer[ui::kColorSysBaseContainerElevated] = {p.menu_selected};
++  mixer[kColorOmniboxChipForegroundNormalVisibility] = {p.text};
++  mixer[kColorOmniboxChipInkDropHover] =
++      ui::SetAlpha(kColorOpenEyesAgent, 0x24);
++  mixer[kColorOmniboxChipInkDropRipple] =
++      ui::SetAlpha(kColorOpenEyesAgent, 0x24);
+ }
