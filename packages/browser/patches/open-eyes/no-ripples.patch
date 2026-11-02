@@ -1,0 +1,11 @@
+--- a/ui/views/style/platform_style.h
++++ b/ui/views/style/platform_style.h
+@@ -70,7 +70,7 @@
+   static constexpr bool kTreeViewSelectionPaintsEntireRow = BUILDFLAG(IS_MAC);
+ 
+   // Whether ripples should be used for visual feedback on control activation.
+-  static constexpr bool kUseRipples = !BUILDFLAG(IS_MAC);
++  static constexpr bool kUseRipples = false;
+ 
+   // Whether text fields should use a "drag" cursor when not actually
+   // dragging but available to do so.

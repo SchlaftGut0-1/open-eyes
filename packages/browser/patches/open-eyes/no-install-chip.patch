@@ -1,0 +1,15 @@
+--- a/chrome/browser/ui/web_applications/pwa_install_page_action.cc
++++ b/chrome/browser/ui/web_applications/pwa_install_page_action.cc
+@@ -189,11 +189,7 @@
+           IDS_OMNIBOX_PWA_INSTALL_ICON_TOOLTIP,
+           webapps::AppBannerManager::GetInstallableWebAppName(web_contents)));
+   page_action_controller_->Show(kActionInstallPwa);
+-  if (showChip) {
+-    page_action_controller_->ShowSuggestionChip(kActionInstallPwa);
+-  } else {
+-    page_action_controller_->HideSuggestionChip(kActionInstallPwa);
+-  }
++  page_action_controller_->HideSuggestionChip(kActionInstallPwa);
+ }
+ 
+ void PwaInstallPageActionController::Hide() {
