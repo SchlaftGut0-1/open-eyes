@@ -1,0 +1,20 @@
+--- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
++++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+@@ -2450,7 +2450,7 @@
+ void AddPeopleStrings(content::WebUIDataSource* html_source, Profile* profile) {
+   static constexpr webui::LocalizedString kLocalizedStrings[] = {
+       // Top level people strings:
+-      {"peoplePageTitle", IDS_SETTINGS_PEOPLE},
++      {"peoplePageTitle", IDS_SINGLE_PROFILE_DISPLAY_NAME},
+       {"syncSettingsSavedToast", IDS_SETTINGS_SYNC_SETTINGS_SAVED_TOAST_LABEL},
+       {"manageGoogleAccount", IDS_SETTINGS_MANAGE_GOOGLE_ACCOUNT},
+       {"syncAndNonPersonalizedServices",
+@@ -2464,7 +2464,7 @@
+ #else
+       {"accountDataTypesBody", IDS_SETTINGS_ACCOUNT_BODY},
+ #endif
+-      {"googleServicesPageTitle", IDS_SETTINGS_GOOGLE_SERVICES_PAGE_TITLE},
++      {"googleServicesPageTitle", IDS_SETTINGS_SUGGEST_PREF},
+       {"syncDisabledUserInformation", IDS_SETTINGS_ACCOUNT_SYNC_DISABLED},
+ #if BUILDFLAG(IS_CHROMEOS)
+       {"manageDeviceAccounts", IDS_ACCOUNT_CHROMEOS_DEVICE_ACCOUNTS},
