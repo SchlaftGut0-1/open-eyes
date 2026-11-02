@@ -66,6 +66,22 @@ ICONS = {
     "chrome/app/vector_icons/link_chrome_refresh_old.icon": ["link"],
     "chrome/app/vector_icons/devices_chrome_refresh_old.icon": ["monitor-smartphone"],
     "chrome/app/vector_icons/qr_code_chrome_refresh_old.icon": ["qr-code"],
+    "chrome/app/vector_icons/settings_menu_old.icon": ["settings"],
+    "chrome/app/vector_icons/help_menu_old.icon": ["circle-help"],
+    "chrome/app/vector_icons/developer_tools_old.icon": ["code-xml"],
+    "chrome/app/vector_icons/performance_old.icon": ["gauge"],
+    "chrome/app/vector_icons/name_window_old.icon": ["text-cursor-input"],
+    "chrome/app/vector_icons/report_old.icon": ["flag"],
+    "chrome/app/vector_icons/security_old.icon": ["shield"],
+    "chrome/app/vector_icons/dock_to_left_old.icon": ["panel-left"],
+    "chrome/app/vector_icons/dock_to_right_old.icon": ["panel-right"],
+    "chrome/app/vector_icons/desktop_windows_chrome_refresh_old.icon": ["monitor"],
+    "chrome/app/vector_icons/sharing_hub_screenshot_old.icon": ["scan"],
+    "components/vector_icons/warning_old.icon": ["triangle-alert"],
+    "components/vector_icons/science_old.icon": ["flask-conical"],
+    "components/vector_icons/mic_chrome_refresh_old.icon": ["mic"],
+    "components/vector_icons/search_chrome_refresh_old.icon": ["search"],
+    "components/vector_icons/business_chrome_refresh_old.icon": ["building-2"],
 }
 
 
