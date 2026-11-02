@@ -1,0 +1,61 @@
+--- a/chrome/browser/ui/color/open_eyes_color_mixer.cc
++++ b/chrome/browser/ui/color/open_eyes_color_mixer.cc
+@@ -21,6 +21,7 @@
+   SkColor text;
+   SkColor muted;
+   SkColor disabled;
++  SkColor menu_selected;
+ };
+ 
+ constexpr Palette kDark = {
+@@ -28,6 +29,7 @@
+     SkColorSetRGB(0x1b, 0x17, 0x29), SkColorSetRGB(0x22, 0x1d, 0x35),
+     SkColorSetRGB(0x2a, 0x24, 0x40), SkColorSetRGB(0xec, 0xe9, 0xf6),
+     SkColorSetRGB(0x9a, 0x93, 0xb3), SkColorSetRGB(0x5c, 0x56, 0x74),
++    SkColorSetRGB(0x2a, 0x21, 0x50),
+ };
+ 
+ constexpr Palette kLight = {
+@@ -35,6 +37,7 @@
+     SkColorSetRGB(0xff, 0xff, 0xff), SkColorSetRGB(0xf7, 0xf6, 0xfb),
+     SkColorSetRGB(0xe2, 0xdd, 0xf0), SkColorSetRGB(0x17, 0x14, 0x2a),
+     SkColorSetRGB(0x63, 0x5d, 0x7a), SkColorSetRGB(0xa8, 0xa2, 0xbd),
++    SkColorSetRGB(0xe3, 0xde, 0xf4),
+ };
+ 
+ }  // namespace
+@@ -81,4 +84,19 @@
+   mixer[kColorNewTabButtonForegroundFrameInactive] = {p.muted};
+   mixer[kColorNewTabButtonCRForegroundFrameActive] = {p.muted};
+   mixer[kColorNewTabButtonCRForegroundFrameInactive] = {p.muted};
++  mixer[ui::kColorMenuBackground] = {p.omnibox};
++  mixer[ui::kColorMenuBorder] = {p.line};
++  mixer[ui::kColorBubbleBorder] = {p.line};
++  mixer[ui::kColorMenuSeparator] = {p.line};
++  mixer[ui::kColorMenuSelectionBackground] = {p.menu_selected};
++  mixer[ui::kColorMenuItemBackgroundSelected] = {p.menu_selected};
++  mixer[ui::kColorMenuItemBackgroundHighlighted] = {p.menu_selected};
++  mixer[ui::kColorAppMenuRowBackgroundHovered] = {p.menu_selected};
++  mixer[ui::kColorMenuItemForeground] = {p.text};
++  mixer[ui::kColorMenuItemForegroundSelected] = {p.text};
++  mixer[ui::kColorMenuItemForegroundHighlighted] = {p.text};
++  mixer[ui::kColorMenuItemForegroundSecondary] = {p.muted};
++  mixer[ui::kColorMenuItemForegroundDisabled] = {p.disabled};
++  mixer[ui::kColorMenuIcon] = {p.muted};
++  mixer[ui::kColorMenuIconDisabled] = {p.disabled};
+ }
+--- a/ui/views/controls/menu/menu_config_linux.cc
++++ b/ui/views/controls/menu/menu_config_linux.cc
+@@ -10,6 +10,12 @@
+ 
+ void MenuConfig::InitPlatform() {
+   use_bubble_border = true;
++  use_outer_border = true;
++  menu_horizontal_border_size = 6;
++  rounded_menu_vertical_border_size = 6;
++  item_vertical_margin = 7;
++  item_corner_radius = 8;
++  separator_horizontal_border_padding = 1;
+ }
+ 
+ }  // namespace views

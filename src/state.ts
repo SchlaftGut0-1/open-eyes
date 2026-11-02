@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -21,10 +21,22 @@ export const spaceDir = (name = space()) => (name === "default" ? stateDir : joi
 
 /**
  * Deletes a space's files. Its dialog watcher deletes its own files as the window closes,
- * and since Node 24 rmSync gives up, leaving the folder, when a file vanishes under it.
+ * and since Node 24 a recursive rmSync gives up, leaving the folder, when a file vanishes
+ * under it. So each file is removed on its own, where force ignores one already gone.
  */
 export function forgetSpace(name: string): void {
-  for (let i = 0; i < 10 && existsSync(spaceDir(name)); i++) rmSync(spaceDir(name), { recursive: true, force: true });
+  const dir = spaceDir(name);
+  for (let i = 0; i < 10; i++) {
+    try {
+      for (const entry of readdirSync(dir)) rmSync(join(dir, entry), { recursive: true, force: true });
+      rmdirSync(dir);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return;
+      if (code !== "ENOTEMPTY") throw error;
+    }
+  }
 }
 
 /** Every space that has kept state, the default one first. */
