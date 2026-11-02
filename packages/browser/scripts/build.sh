@@ -58,6 +58,7 @@ fi
 
 theme="${src}/chrome/app/theme"
 cp "${root}/resources/icon.svg" "${theme}/chromium/product_logo.svg"
+cp "${root}/resources/icon.svg" "${src}/ui/webui/resources/images/chrome_logo_dark.svg"
 for size in 16 24 48 64 128 256; do rsvg-convert -w "${size}" -h "${size}" "${root}/resources/icon.svg" -o "${theme}/chromium/product_logo_${size}.png"; done
 for size in 24 48 64 128 256; do cp "${theme}/chromium/product_logo_${size}.png" "${theme}/chromium/linux/product_logo_${size}.png"; done
 rsvg-convert -w 32 -h 32 "${root}/resources/icon.svg" | magick png:- "${theme}/chromium/linux/product_logo_32.xpm"

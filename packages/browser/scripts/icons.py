@@ -82,6 +82,10 @@ ICONS = {
     "components/vector_icons/mic_chrome_refresh_old.icon": ["mic"],
     "components/vector_icons/search_chrome_refresh_old.icon": ["search"],
     "components/vector_icons/business_chrome_refresh_old.icon": ["building-2"],
+    "components/omnibox/browser/vector_icons/product_old.icon": ["eye"],
+    "components/omnibox/browser/vector_icons/product_chrome_refresh_old.icon": ["eye"],
+    "components/vector_icons/chromium/product.icon": ["eye"],
+    "components/vector_icons/chromium/product_refresh.icon": ["eye"],
 }
 
 
