@@ -1,0 +1,30 @@
+--- a/chrome/browser/ui/color/open_eyes_color_mixer.cc
++++ b/chrome/browser/ui/color/open_eyes_color_mixer.cc
+@@ -99,4 +99,16 @@
+   mixer[ui::kColorMenuItemForegroundDisabled] = {p.disabled};
+   mixer[ui::kColorMenuIcon] = {p.muted};
+   mixer[ui::kColorMenuIconDisabled] = {p.disabled};
++  mixer[ui::kColorSysPrimary] = {kColorOpenEyesAgent};
++  mixer[ui::kColorSysOnPrimary] = {SK_ColorWHITE};
++  mixer[ui::kColorSysStateFocusRing] = {kColorOpenEyesAgent};
++  mixer[ui::kColorSysSurface] = {p.omnibox};
++  mixer[ui::kColorSysOnSurface] = {p.text};
++  mixer[ui::kColorSysOnSurfaceSecondary] = {p.muted};
++  mixer[ui::kColorSysOnSurfaceSubtle] = {p.muted};
++  mixer[ui::kColorSysTonalContainer] = {p.menu_selected};
++  mixer[ui::kColorSysOnTonalContainer] = {p.text};
++  mixer[ui::kColorSysTonalOutline] = {p.line};
++  mixer[ui::kColorSysNeutralOutline] = {p.line};
++  mixer[ui::kColorSysDivider] = {p.line};
+ }
+--- a/ui/views/layout/layout_provider.cc
++++ b/ui/views/layout/layout_provider.cc
+@@ -207,7 +207,7 @@
+   static constexpr auto shape_token_map =
+       base::MakeFixedFlatMap<ShapeContextTokens, ShapeSysTokens>({
+           {ShapeContextTokens::kBadgeRadius, ShapeSysTokens::kXSmall},
+-          {ShapeContextTokens::kButtonRadius, ShapeSysTokens::kFull},
++          {ShapeContextTokens::kButtonRadius, ShapeSysTokens::kSmall},
+           {ShapeContextTokens::kComboboxRadius, ShapeSysTokens::kSmall},
+           {ShapeContextTokens::kDialogRadius, ShapeSysTokens::kMediumSmall},
+           {ShapeContextTokens::kExtensionsMenuButtonRadius,
