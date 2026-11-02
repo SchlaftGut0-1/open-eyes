@@ -81,3 +81,7 @@ The browser UI font is [Geist](https://github.com/vercel/geist-font) v1.7.2.
 `scripts/build.sh` downloads it, checks its SHA-256 and puts four weights in
 `out/Default/fonts/`, which `geist-font.patch` adds to fontconfig. Geist is under
 the SIL Open Font License 1.1; see `LICENSE.geist`.
+
+`scripts/icons.py <chromium-src>` writes the Lucide `.icon` files listed in its
+`ICONS` map, so an icon patch can be regenerated. `scripts/icons.py --test` checks
+the converter.
