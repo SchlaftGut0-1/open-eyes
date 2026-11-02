@@ -2,14 +2,19 @@
 """Writes Lucide icons into a Chromium tree as .icon files.
 
 usage: icons.py <chromium-src> [<.icon path> ...]
+       icons.py --favicons <chromium-src>
        icons.py --test
 
 Each ICONS entry maps a .icon path to Lucide names, drawn in order, or to
 literal .icon command lines. The file keeps its license header and its first
 CANVAS_DIMENSIONS, and the 24-unit Lucide grid is scaled to that canvas.
+
+Each FAVICONS entry maps an internal page's favicon PNG, under every
+default_<scale>_percent folder it has, to a Lucide name drawn in our accent.
 """
 
 import math
+import subprocess
 import re
 import sys
 import urllib.request
@@ -87,6 +92,15 @@ ICONS = {
     "components/vector_icons/chromium/product.icon": ["eye"],
     "components/vector_icons/chromium/product_refresh.icon": ["eye"],
 }
+
+FAVICONS = {
+    "chrome/app/theme/{scale}/common/favicon_settings.png": "settings",
+    "chrome/app/theme/{scale}/common/favicon_downloads.png": "download",
+    "chrome/app/theme/{scale}/common/favicon_bookmarks.png": "star",
+    "components/resources/{scale}/favicon_history.png": "history",
+    "extensions/browser/resources/{scale}/favicon_extensions.png": "puzzle",
+}
+ACCENT = "#7c5cff"
 
 
 def num(v):
@@ -258,12 +272,30 @@ def test():
     icon = render("// header\n\nCANVAS_DIMENSIONS, 20,\nFLIPS_IN_RTL,\nCLOSE\n\nCANVAS_DIMENSIONS, 16,\n",
                   ["CIRCLE, 10, 10, 2"])
     assert icon == "// header\n\nCANVAS_DIMENSIONS, 20,\nFLIPS_IN_RTL,\nSTROKE, 1.67,\nCIRCLE, 10, 10, 2\n", icon
+    assert favicon_svg('<svg stroke="currentColor"/>') == f'<svg stroke="{ACCENT}"/>'
     print("ok")
+
+
+def favicon_svg(svg):
+    return svg.replace('stroke="currentColor"', f'stroke="{ACCENT}"')
+
+
+def favicons(src):
+    for template, name in FAVICONS.items():
+        svg = favicon_svg(lucide(name)).encode()
+        for percent in (100, 200, 300):
+            png = src / template.format(scale=f"default_{percent}_percent")
+            if png.exists():
+                size = str(16 * percent // 100)
+                subprocess.run(["rsvg-convert", "-w", size, "-h", size, "-o", str(png)], input=svg, check=True)
+                print(png.relative_to(src))
 
 
 def main(argv):
     if argv == ["--test"]:
         return test()
+    if argv[:1] == ["--favicons"]:
+        return favicons(Path(argv[1]))
     src, picks = Path(argv[0]), argv[1:] or list(ICONS)
     for rel in picks:
         f = src / rel
