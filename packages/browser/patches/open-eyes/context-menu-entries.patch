@@ -1,0 +1,229 @@
+--- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
++++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+@@ -2345,26 +2345,12 @@
+   }
+ 
+   const int search_for_image_idc = GetSearchForImageIdc();
+-  auto* entry_point_controller =
+-      GetBrowser() ? lens::LensOverlayEntryPointController::From(GetBrowser())
+-                   : nullptr;
+   ui::ImageModel icon = GetLensContextMenuIcon();
+-  if (entry_point_controller && entry_point_controller->IsEnabled() &&
+-      lens::features::UseLensOverlayForImageSearch()) {
+-    // If the entrypoint is ephermally hidden, don't add the item.
+-    if (!entry_point_controller->AreVisible()) {
+-      return;
+-    }
+-    menu_model_.AddItemWithStringIdAndIcon(
+-        search_for_image_idc, IDS_LENS_OVERLAY_IMAGE_ENTRYPOINT_LABEL_ALT3,
+-        icon);
+-  } else {
+-    menu_model_.AddItemWithIcon(
+-        search_for_image_idc,
+-        l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHLENSFORIMAGE,
+-                                   provider->short_name()),
+-        icon);
+-  }
++  menu_model_.AddItemWithIcon(
++      search_for_image_idc,
++      l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHLENSFORIMAGE,
++                                 provider->short_name()),
++      icon);
+   const int command_index =
+       menu_model_.GetIndexOfCommandId(search_for_image_idc).value();
+   menu_model_.SetElementIdentifierAt(command_index, kSearchForImageItem);
+@@ -2826,28 +2812,9 @@
+   }
+ }
+ 
+-void RenderViewContextMenu::AppendTranslateItem() {
+-  if (features::IsMenuSimplificationEnabled() && IsPasswordField()) {
+-    return;
+-  }
+-
+-  menu_model_.AddItemWithIcon(
+-      IDC_CONTENT_CONTEXT_TRANSLATE,
+-      l10n_util::GetStringFUTF16(
+-          IDS_CONTENT_CONTEXT_TRANSLATE,
+-          GetTargetLanguageDisplayName(/*is_full_page_translation=*/true)),
+-      ui::ImageModel::FromVectorIcon(vector_icons::kGTranslateIcon,
+-                                     ui::kColorMenuIcon, kTabMenuIconSize));
+-}
++void RenderViewContextMenu::AppendTranslateItem() {}
+ 
+-void RenderViewContextMenu::AppendMediaRouterItem() {
+-  if (media_router::MediaRouterEnabled(browser_context_)) {
+-    AddItemWithOptionalIcon(IDC_ROUTE_MEDIA, IDS_MEDIA_ROUTER_MENU_ITEM_TITLE,
+-                            features::IsRoundedIconsEnabled()
+-                                ? kCastIcon
+-                                : kCastChromeRefreshOldIcon);
+-  }
+-}
++void RenderViewContextMenu::AppendMediaRouterItem() {}
+ 
+ void RenderViewContextMenu::AppendReadAnythingItem() {
+   const bool is_menu_simplification_enabled =
+@@ -4771,119 +4738,7 @@
+   return true;
+ }
+ 
+-void RenderViewContextMenu::AppendSendTabToSelfItem(bool add_separator) {
+-  if (!embedder_web_contents_) {
+-    return;
+-  }
+-
+-  // Determine the target URL to share based on what element was right-clicked:
+-  // if the context menu was triggered on a valid link, offer to share the
+-  // link destination URL; otherwise, offer to share the active page URL.
+-  const bool is_link = params_.link_url.is_valid();
+-  if (is_link && !base::FeatureList::IsEnabled(
+-                     send_tab_to_self::kSendTabToSelfEnhancedDesktopUIv2)) {
+-    return;
+-  }
+-  const GURL target_url = is_link
+-                              ? params_.link_url
+-                              : embedder_web_contents_->GetLastCommittedURL();
+-
+-  // Only returns nullopt when unshareable (e.g., incognito, invalid scheme,
+-  // policy disabled). Signed-out or zero-device states still return a valid
+-  // display reason (`kOfferSignIn` or `kInformNoTargetDevice`) to show promos.
+-  std::optional<send_tab_to_self::EntryPointDisplayReason> display_reason =
+-      send_tab_to_self::GetEntryPointDisplayReason(embedder_web_contents_,
+-                                                   target_url);
+-  if (!display_reason.has_value()) {
+-    return;
+-  }
+-
+-  if (add_separator) {
+-    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+-  }
+-
+-  const bool should_offer_submenu =
+-      (base::FeatureList::IsEnabled(
+-           send_tab_to_self::kSendTabToSelfEnhancedDesktopUI) ||
+-       base::FeatureList::IsEnabled(
+-           send_tab_to_self::kSendTabToSelfEnhancedDesktopUIv2)) &&
+-      (*display_reason ==
+-       send_tab_to_self::EntryPointDisplayReason::kOfferFeature);
+-
+-  if (should_offer_submenu) {
+-    // TODO(crbug.com/530097533): Investigate improved title handling when the
+-    // user interacts with the right-click flow on a hyperlink (e.g., fetching
+-    // the destination page title or using a domain fallback if anchor text is
+-    // empty).
+-    send_tab_to_self_submenu_delegate_ =
+-        std::make_unique<send_tab_to_self::SendTabToSelfContextMenuDelegate>(
+-            embedder_web_contents_,
+-            is_link ? send_tab_to_self::ShareEntryPoint::kLinkMenu
+-                    : send_tab_to_self::ShareEntryPoint::kContentMenu,
+-            target_url,
+-            is_link ? base::UTF16ToUTF8(params_.link_text) : std::string());
+-    send_tab_to_self_submenu_ = std::make_unique<ui::SimpleMenuModel>(
+-        send_tab_to_self_submenu_delegate_.get());
+-    send_tab_to_self_submenu_delegate_->PopulateSubmenu(
+-        send_tab_to_self_submenu_.get());
+-
+-#if BUILDFLAG(IS_MAC)
+-    if (features::IsMenuSimplificationEnabled()) {
+-      menu_model_.AddSubMenuWithStringIdAndIcon(
+-          IDC_SEND_TAB_TO_SELF, IDS_CONTEXT_MENU_SEND_TAB_TO_SELF,
+-          send_tab_to_self_submenu_.get(),
+-          ui::ImageModel::FromVectorIcon(features::IsRoundedIconsEnabled()
+-                                             ? kDevicesIcon
+-                                             : kDevicesOldIcon));
+-    } else {
+-      menu_model_.AddSubMenu(
+-          IDC_SEND_TAB_TO_SELF,
+-          l10n_util::GetStringUTF16(IDS_CONTEXT_MENU_SEND_TAB_TO_SELF),
+-          send_tab_to_self_submenu_.get());
+-    }
+-#else
+-    menu_model_.AddSubMenuWithStringIdAndIcon(
+-        IDC_SEND_TAB_TO_SELF, IDS_CONTEXT_MENU_SEND_TAB_TO_SELF,
+-        send_tab_to_self_submenu_.get(),
+-        ui::ImageModel::FromVectorIcon(features::IsRoundedIconsEnabled()
+-                                           ? kDevicesIcon
+-                                           : kDevicesOldIcon));
+-#endif
+-
+-    const base::Feature& stts_feature =
+-        (is_link || base::FeatureList::IsEnabled(
+-                        send_tab_to_self::kSendTabToSelfEnhancedDesktopUIv2))
+-            ? send_tab_to_self::kSendTabToSelfEnhancedDesktopUIv2
+-            : send_tab_to_self::kSendTabToSelfEnhancedDesktopUI;
+-
+-    // TODO(crbug.com/516708776): Remove new feature tag when no longer new.
+-    menu_model_.SetIsNewFeatureAt(menu_model_.GetItemCount() - 1,
+-                                  UserEducationService::MaybeShowNewBadge(
+-                                      GetBrowserContext(), stts_feature));
+-    return;
+-  }
+-
+-#if BUILDFLAG(IS_MAC)
+-  if (features::IsMenuSimplificationEnabled()) {
+-    menu_model_.AddItemWithIcon(
+-        IDC_SEND_TAB_TO_SELF,
+-        l10n_util::GetStringUTF16(IDS_CONTEXT_MENU_SEND_TAB_TO_SELF),
+-        ui::ImageModel::FromVectorIcon(features::IsRoundedIconsEnabled()
+-                                           ? kDevicesIcon
+-                                           : kDevicesOldIcon));
+-  } else {
+-    menu_model_.AddItem(
+-        IDC_SEND_TAB_TO_SELF,
+-        l10n_util::GetStringUTF16(IDS_CONTEXT_MENU_SEND_TAB_TO_SELF));
+-  }
+-#else
+-  menu_model_.AddItemWithIcon(
+-      IDC_SEND_TAB_TO_SELF,
+-      l10n_util::GetStringUTF16(IDS_CONTEXT_MENU_SEND_TAB_TO_SELF),
+-      ui::ImageModel::FromVectorIcon(
+-          features::IsRoundedIconsEnabled() ? kDevicesIcon : kDevicesOldIcon));
+-#endif
+-}
++void RenderViewContextMenu::AppendSendTabToSelfItem(bool add_separator) {}
+ 
+ std::unique_ptr<ui::DataTransferEndpoint>
+ RenderViewContextMenu::CreateDataEndpoint(bool notify_if_restricted) const {
+@@ -6115,41 +5970,7 @@
+              optimization_guide::PageContextEligibilityStatus::kEligible;
+ }
+ 
+-void RenderViewContextMenu::AppendLensGeminiSection() {
+-  if (!features::IsMenuSimplificationEnabled()) {
+-    return;
+-  }
+-
+-  bool can_region =
+-      content_type_->SupportsGroup(ContextMenuContentType::ITEM_GROUP_PAGE) &&
+-      CanAppendRegionSearchItem();
+-  bool can_glic = content_type_->SupportsGroup(
+-                      ContextMenuContentType::ITEM_GROUP_GLICSHAREIMAGE) &&
+-                  CanAppendGlicShareImageItem();
+-  bool can_image_search =
+-      content_type_->SupportsGroup(
+-          ContextMenuContentType::ITEM_GROUP_SEARCHWEBFORIMAGE) &&
+-      params_.has_image_contents && IsSearchAllowedByPolicy() &&
+-      GetImageSearchProvider() != nullptr;
+-
+-  if (!can_region && !can_glic && !can_image_search) {
+-    return;
+-  }
+-
+-  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+-
+-  if (can_region) {
+-    AppendRegionSearchItem();
+-  }
+-  if (can_image_search) {
+-    AppendSearchWebForImageItems();
+-  }
+-  if (can_glic) {
+-    AppendGlicShareImageItem();
+-  }
+-
+-  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+-}
++void RenderViewContextMenu::AppendLensGeminiSection() {}
+ 
+ void RenderViewContextMenu::AppendRevisedTextSelectionSection() {
+   const bool glic_below_search =
