@@ -67,7 +67,15 @@ ungoogled-chromium (the build steps and the portable patches) are BSD-3-Clause; 
 Some toolbar and tab rail icons in `patches/open-eyes/toolbar-icons.patch` are
 [Lucide](https://lucide.dev) icons redrawn in Chromium's `.icon` format: back,
 forward, reload, star, x, plus, ellipsis-vertical, panel-left-close, panel-left-open,
-layout-grid, search and puzzle. Lucide is ISC; see `LICENSE.lucide`.
+layout-grid, search and puzzle. So are the menu icons in
+`patches/open-eyes/menu-icons.patch`: square-plus, app-window, venetian-mask,
+circle-user-round, key-round, history, download, trash-2, zoom-in, minus,
+maximize, printer, languages, text-search, file-down, wrench, info, log-out,
+user-round-plus, user-round-cog, square-user-round, pencil, credit-card, map-pin,
+id-card, luggage, folder-plus, panel-top, book-marked, panel-right, book-open,
+glasses, copy-plus, scissors, copy, clipboard-paste, cast, monitor-down,
+square-arrow-out-up-right, link, monitor-smartphone and qr-code. Lucide is ISC;
+see `LICENSE.lucide`.
 
 The browser UI font is [Geist](https://github.com/vercel/geist-font) v1.7.2.
 `scripts/build.sh` downloads it, checks its SHA-256 and puts four weights in
