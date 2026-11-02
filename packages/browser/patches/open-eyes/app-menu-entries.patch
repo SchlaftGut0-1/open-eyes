@@ -1,0 +1,131 @@
+--- a/chrome/app/chrome_command_ids.h
++++ b/chrome/app/chrome_command_ids.h
+@@ -267,6 +267,7 @@
+ #define IDC_READING_LIST_MENU_SHOW_UI   40272
+ #define IDC_SHOW_READING_MODE_SIDE_PANEL 40273
+ #define IDC_SHOW_BOOKMARK_SIDE_PANEL    40274
++#define IDC_SHOW_OPEN_EYES_AGENT        40290
+ #define IDC_SHOW_CHROME_LABS            40276
+ #define IDC_RECENT_TABS_LOGIN_FOR_DEVICE_TABS  40277
+ #define IDC_OPEN_RECENT_TAB             40278
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -1259,6 +1259,10 @@
+       SidePanelUI::From(browser_)->Show(SidePanelEntryId::kBookmarks,
+                                         SidePanelOpenTrigger::kAppMenu);
+       break;
++    case IDC_SHOW_OPEN_EYES_AGENT:
++      SidePanelUI::From(browser_)->Show(SidePanelEntryId::kOpenEyesAgent,
++                                        SidePanelOpenTrigger::kAppMenu);
++      break;
+     case IDC_SHOW_APP_MENU:
+       base::RecordAction(base::UserMetricsAction("Accel_Show_App_Menu"));
+       ShowAppMenu(browser_);
+@@ -2020,6 +2024,7 @@
+   }
+ 
+   command_updater_->UpdateCommandEnabled(IDC_SHOW_BOOKMARK_SIDE_PANEL, true);
++  command_updater_->UpdateCommandEnabled(IDC_SHOW_OPEN_EYES_AGENT, true);
+ 
+   if (browser_->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
+     // Reading list commands.
+--- a/chrome/browser/ui/toolbar/app_menu_model.cc
++++ b/chrome/browser/ui/toolbar/app_menu_model.cc
+@@ -2030,20 +2030,6 @@
+   AddSeparator(ui::SPACING_SEPARATOR);
+ #endif
+ 
+-  if (!browser_->GetProfile()->IsGuestSession()) {
+-    sub_menus_.push_back(
+-        std::make_unique<PasswordsAndAutofillSubMenuModel>(this));
+-    AddSubMenuWithStringIdAndVectorIcon(
+-        this, kPasswordsAndAutofillMenuPlaceholder,
+-        IDS_PASSWORDS_AND_AUTOFILL_MENU, sub_menus_.back().get(),
+-        features::IsRoundedIconsEnabled()
+-            ? vector_icons::kPasswordManagerIcon
+-            : vector_icons::kPasswordManagerOldIcon);
+-    SetElementIdentifierAt(
+-        GetIndexOfCommandId(kPasswordsAndAutofillMenuPlaceholder).value(),
+-        kPasswordAndAutofillMenuItem);
+-  }
+-
+   if (!browser_->GetProfile()->IsOffTheRecord()) {
+     auto recent_tabs_sub_menu =
+         std::make_unique<RecentTabsSubMenuModel>(provider_, browser_);
+@@ -2063,19 +2049,6 @@
+       features::IsRoundedIconsEnabled() ? kDownloadIcon : kDownloadMenuOldIcon);
+   SetElementIdentifierAt(GetIndexOfCommandId(IDC_SHOW_DOWNLOADS).value(),
+                          kDownloadsMenuItem);
+-  if (!browser_->GetProfile()->IsGuestSession()) {
+-    bookmark_sub_menu_model_ =
+-        std::make_unique<BookmarkSubMenuModel>(this, browser_);
+-
+-    AddSubMenuWithStringIdAndVectorIcon(
+-        this, kBookmarksMenuPlaceholder, IDS_BOOKMARKS_AND_LISTS_MENU,
+-        bookmark_sub_menu_model_.get(),
+-        features::IsRoundedIconsEnabled() ? kStarIcon
+-                                          : kBookmarksListsMenuOldIcon);
+-    SetElementIdentifierAt(
+-        GetIndexOfCommandId(kBookmarksMenuPlaceholder).value(),
+-        kBookmarksMenuItem);
+-  }
+ 
+   if (browser_->GetProfile()->IsRegularProfile()) {
+     auto saved_tab_groups_model = std::make_unique<ui::SimpleMenuModel>(this);
+@@ -2129,12 +2102,6 @@
+             features::kSkillsAppMenu));
+   }
+ 
+-  AddItemWithStringIdAndVectorIcon(
+-      this, IDC_CLEAR_BROWSING_DATA, IDS_CLEAR_BROWSING_DATA,
+-      features::IsRoundedIconsEnabled() ? kDeleteIcon
+-                                        : kTrashCanRefreshOldIcon);
+-  SetElementIdentifierAt(GetIndexOfCommandId(IDC_CLEAR_BROWSING_DATA).value(),
+-                         kClearBrowsingDataMenuItem);
+ 
+   AddSeparator(ui::NORMAL_SEPARATOR);
+   CreateZoomMenu();
+@@ -2192,23 +2159,9 @@
+             lens::features::kLensOverlay));
+   }
+ 
+-  AddItemWithStringIdAndVectorIcon(this, IDC_SHOW_TRANSLATE, IDS_SHOW_TRANSLATE,
+-                                   vector_icons::kGTranslateIcon);
+ 
+   CreateFindAndEditSubMenu();
+ 
+-  sub_menus_.push_back(
+-      std::make_unique<SaveAndShareSubMenuModel>(this, browser_));
+-  int string_id = media_router::MediaRouterEnabled(browser()->GetProfile())
+-                      ? IDS_CAST_SAVE_AND_SHARE_MENU
+-                      : IDS_SAVE_AND_SHARE_MENU;
+-  AddSubMenuWithStringIdAndVectorIcon(
+-      this, kSaveAndShareMenuPlaceholder, string_id, sub_menus_.back().get(),
+-      features::IsRoundedIconsEnabled() ? kFileSaveIcon
+-                                        : kFileSaveChromeRefreshOldIcon);
+-  SetElementIdentifierAt(
+-      GetIndexOfCommandId(kSaveAndShareMenuPlaceholder).value(),
+-      kSaveAndShareMenuItem);
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+   // Always show this option if we're in tablet mode on Chrome OS.
+@@ -2248,14 +2201,14 @@
+ #else
+ #if BUILDFLAG(IS_CHROMEOS)
+   AddItem(IDC_ABOUT, l10n_util::GetStringUTF16(IDS_ABOUT));
+-#else
+-  AddItemWithStringIdAndVectorIcon(this, IDC_ABOUT, IDS_ABOUT,
+-                                   features::IsRoundedIconsEnabled()
+-                                       ? vector_icons::kInfoIcon
+-                                       : vector_icons::kInfoRefreshOldIcon);
+ #endif
+ #endif
+ 
++  // shortcut: English label, until our strings get translations.
++  AddItemWithIcon(IDC_SHOW_OPEN_EYES_AGENT, u"Agent panel",
++                  ui::ImageModel::FromVectorIcon(vector_icons::kVisibilityIcon,
++                                                 ui::kColorMenuIcon,
++                                                 kDefaultIconSize));
+   AddItemWithStringIdAndVectorIcon(
+       this, IDC_OPTIONS, IDS_SETTINGS,
+       features::IsRoundedIconsEnabled() ? kSettingsIcon : kSettingsMenuOldIcon);
