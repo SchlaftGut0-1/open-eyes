@@ -1,0 +1,101 @@
+--- a/chrome/browser/ui/color/open_eyes_color_mixer.cc
++++ b/chrome/browser/ui/color/open_eyes_color_mixer.cc
+@@ -99,4 +99,16 @@
+   mixer[ui::kColorMenuItemForegroundDisabled] = {p.disabled};
+   mixer[ui::kColorMenuIcon] = {p.muted};
+   mixer[ui::kColorMenuIconDisabled] = {p.disabled};
++  mixer[ui::kColorSysPrimary] = {kColorOpenEyesAgent};
++  mixer[ui::kColorSysOnPrimary] = {SK_ColorWHITE};
++  mixer[ui::kColorSysStateFocusRing] = {kColorOpenEyesAgent};
++  mixer[ui::kColorSysSurface] = {p.omnibox};
++  mixer[ui::kColorSysOnSurface] = {p.text};
++  mixer[ui::kColorSysOnSurfaceSecondary] = {p.muted};
++  mixer[ui::kColorSysOnSurfaceSubtle] = {p.muted};
++  mixer[ui::kColorSysTonalContainer] = {p.menu_selected};
++  mixer[ui::kColorSysOnTonalContainer] = {p.text};
++  mixer[ui::kColorSysTonalOutline] = {p.line};
++  mixer[ui::kColorSysNeutralOutline] = {p.line};
++  mixer[ui::kColorSysDivider] = {p.line};
+ }
+--- a/chrome/browser/ui/views/chrome_layout_provider.cc
++++ b/chrome/browser/ui/views/chrome_layout_provider.cc
+@@ -48,10 +48,10 @@
+   switch (metric) {
+     case views::INSETS_DIALOG:
+     case views::INSETS_DIALOG_SUBSECTION: {
+-      return gfx::Insets::VH(20, 20);
++      return gfx::Insets(16);
+     }
+     case views::INSETS_DIALOG_FOOTNOTE: {
+-      return gfx::Insets::TLBR(10, 20, 15, 20);
++      return gfx::Insets::TLBR(8, 16, 12, 16);
+     }
+     case views::INSETS_CHECKBOX_RADIO_BUTTON: {
+       gfx::Insets insets = LayoutProvider::GetInsetsMetric(metric);
+@@ -77,7 +77,7 @@
+     case INSETS_PAGE_INFO_HOVER_BUTTON: {
+       const gfx::Insets insets =
+           LayoutProvider::GetInsetsMetric(views::INSETS_LABEL_BUTTON);
+-      const int horizontal_padding = 20;
++      const int horizontal_padding = 16;
+       // Hover button in page info requires double the height compared to the
+       // label button because it behaves like a menu control.
+       return gfx::Insets::VH(insets.height(), horizontal_padding);
+@@ -87,7 +87,7 @@
+     case INSETS_TASK_MANAGER:
+       return gfx::Insets::TLBR(4, 20, 20, 20);
+     case INSETS_PAGE_INFO_FOOTER_BUTTON:
+-      return gfx::Insets::VH(12, 20);
++      return gfx::Insets::VH(8, 16);
+     case INSETS_ACTION_APP_MENU_ITEM:
+       return gfx::Insets::VH(0, 24);
+     case INSETS_ACTION_APP_MENU_SEARCH_BAR_MARGIN:
+--- a/chrome/browser/ui/views/chrome_typography_provider.cc
++++ b/chrome/browser/ui/views/chrome_typography_provider.cc
+@@ -62,7 +62,7 @@
+   }
+ 
+   // "Target" font size constants.
+-  constexpr int kTitleSize = 15;
++  constexpr int kTitleSize = 14;
+   constexpr int kTouchableLabelSize = 14;
+   constexpr int kBodyTextLargeSize = 13;
+   constexpr int kCR23ButtonTextSize = 13;
+@@ -91,6 +91,7 @@
+       break;
+     case views::style::CONTEXT_DIALOG_TITLE:
+       details.size_delta = gfx::PlatformFont::GetFontSizeDelta(kTitleSize);
++      details.weight = gfx::Font::Weight::SEMIBOLD;
+       break;
+     case views::style::CONTEXT_TOUCH_MENU:
+       details.size_delta =
+--- a/ui/views/layout/layout_provider.cc
++++ b/ui/views/layout/layout_provider.cc
+@@ -88,15 +88,15 @@
+     case DISTANCE_BUBBLE_PREFERRED_WIDTH:
+       return kSmallDialogWidth;
+     case DISTANCE_BUTTON_HORIZONTAL_PADDING:
+-      return 16;
++      return 12;
+     case DISTANCE_BUTTON_MAX_LINKABLE_WIDTH:
+       return 112;
+     case DISTANCE_CLOSE_BUTTON_MARGIN:
+-      return 20;
++      return 14;
+     case DISTANCE_CONTROL_LIST_VERTICAL:
+       return 12;
+     case DISTANCE_CONTROL_VERTICAL_TEXT_PADDING:
+-      return 10;
++      return 4;
+     case DISTANCE_TABLE_VERTICAL_TEXT_PADDING:
+       return 6;
+     case DISTANCE_DIALOG_BUTTON_MINIMUM_WIDTH:
+@@ -207,7 +207,7 @@
+   static constexpr auto shape_token_map =
+       base::MakeFixedFlatMap<ShapeContextTokens, ShapeSysTokens>({
+           {ShapeContextTokens::kBadgeRadius, ShapeSysTokens::kXSmall},
+-          {ShapeContextTokens::kButtonRadius, ShapeSysTokens::kFull},
++          {ShapeContextTokens::kButtonRadius, ShapeSysTokens::kSmall},
+           {ShapeContextTokens::kComboboxRadius, ShapeSysTokens::kSmall},
+           {ShapeContextTokens::kDialogRadius, ShapeSysTokens::kMediumSmall},
+           {ShapeContextTokens::kExtensionsMenuButtonRadius,
