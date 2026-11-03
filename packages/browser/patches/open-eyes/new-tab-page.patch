@@ -1,0 +1,246 @@
+--- a/chrome/browser/resources/new_tab_page_third_party/new_tab_page_third_party.html
++++ b/chrome/browser/resources/new_tab_page_third_party/new_tab_page_third_party.html
+@@ -1,56 +1,130 @@
+ <!doctype html>
+-<html dir="$i18n{textdirection}" lang="$i18n{language}"
+-    $i18n{hascustombackground} $i18n{isdark} $i18n{webuiRoundedIconsAttribute}>
++<html dir="$i18n{textdirection}" lang="$i18n{language}">
+   <head>
+     <meta charset="utf-8">
+     <title>$i18n{title}</title>
+     <style>
+-      html {
+-        --ntp-focus-shadow-color: rgba(var(--google-blue-600-rgb), .4);
+-        --ntp-theme-text-color: var(--google-grey-800);
+-        background-attachment: fixed;
+-        background-color: $i18n{colorBackground};
+-        background-position: $i18n{backgroundPosition};
+-        background-repeat: $i18n{backgroundTiling};
+-        height: 100%;
+-        overflow: auto;
++      :root {
++        color-scheme: light dark;
++        --ground: #efecf8;
++        --glow: rgb(106 76 240 / 0.14);
++        --text: #17142a;
++        --muted: #635d7a;
++        --box: #ffffff;
++        --line: #e2ddf0;
++        --accent: #6a4cf0;
+       }
+ 
+       @media (prefers-color-scheme: dark) {
+-        html {
+-          --ntp-focus-shadow-color: rgba(var(--google-blue-300-rgb), .5);
+-          --ntp-theme-text-color: white;
++        :root {
++          --ground: #0e0c18;
++          --glow: rgb(124 92 255 / 0.22);
++          --text: #ece9f6;
++          --muted: #9a93b3;
++          --box: #1b1729;
++          --line: #2a2440;
++          --accent: #7c5cff;
+         }
+       }
+ 
+-      html[has-custom-background] {
+-        background-image: image-set(
+-            url(chrome://theme/IDR_THEME_NTP_BACKGROUND?$i18n{themeId}) 1x,
+-            url(chrome://theme/IDR_THEME_NTP_BACKGROUND@2x?$i18n{themeId}) 2x);
++      html,
++      body {
++        height: 100%;
+       }
+ 
+       body {
++        background: radial-gradient(ellipse 60% 45% at 50% 32%, var(--glow), transparent 70%), var(--ground);
++        box-sizing: border-box;
++        color: var(--text);
++        display: grid;
++        margin: 0;
++        padding: 24px 16px;
++        place-items: center;
++      }
++
++      main {
+         align-items: center;
+         display: flex;
+-        height: 100vh;
+-        justify-content: center;
+-        margin: 0;
++        flex-direction: column;
++        margin-top: -8vh;
++        max-width: 560px;
++        text-align: center;
++        width: 100%;
++      }
++
++      img {
++        border-radius: 12px;
++        box-shadow: 0 12px 32px var(--glow);
++      }
++
++      #greeting {
++        color: var(--muted);
++        font-size: 14px;
++        margin: 20px 0 0;
++      }
++
++      h1 {
++        font-size: 28px;
++        font-weight: 600;
++        letter-spacing: -0.02em;
++        margin: 4px 0 24px;
++      }
++
++      #box {
++        align-items: center;
++        background: var(--box);
++        border: 1px solid var(--line);
++        border-radius: 12px;
++        box-sizing: border-box;
++        color: var(--muted);
++        cursor: text;
++        display: flex;
++        font: inherit;
++        font-size: 14px;
++        gap: 10px;
++        height: 44px;
++        padding: 0 10px 0 14px;
++        text-align: start;
++        width: 100%;
++      }
++
++      #box:hover,
++      #box:focus-visible {
++        border-color: var(--accent);
++        outline: none;
++      }
++
++      #box span {
++        flex: 1;
+       }
+ 
+-      cr-most-visited {
+-        --most-visited-focus-shadow: 0 0 0 2px var(--ntp-focus-shadow-color);
+-        --most-visited-text-color: var(--ntp-theme-text-color);
+-        --most-visited-text-shadow: none;
++      kbd {
++        border: 1px solid var(--line);
++        border-radius: 6px;
++        font: 12px ui-monospace, monospace;
++        padding: 2px 6px;
+       }
+ 
+-      html[has-custom-background] cr-most-visited {
+-        --most-visited-text-shadow: 0 0 16px rgba(0, 0, 0, .3);
++      #hint {
++        color: var(--muted);
++        font-size: 13px;
++        margin: 20px 0 0;
++        max-width: 420px;
+       }
+     </style>
+   </head>
+   <body>
+-    <script type="module" src="strings.m.js"></script>
+-    <cr-most-visited></cr-most-visited>
++    <main>
++      <img src="chrome://resources/images/chrome_logo_dark.svg" alt="" width="48" height="48">
++      <p id="greeting"></p>
++      <h1>Where to?</h1>
++      <button id="box" type="button">
++        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
++        <span>Search or type an address</span>
++        <kbd>Ctrl L</kbd>
++      </button>
++      <p id="hint">Your agents work in their own spaces, beside you. Open the agent panel with the eye at the top right.</p>
++    </main>
+     <script type="module" src="new_tab_page_third_party.js"></script>
+     <link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
+   </body>
+--- a/chrome/browser/resources/new_tab_page_third_party/new_tab_page_third_party.ts
++++ b/chrome/browser/resources/new_tab_page_third_party/new_tab_page_third_party.ts
+@@ -2,31 +2,14 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-import 'chrome://resources/cr_components/most_visited/most_visited.js';
+-
+-import {assert} from 'chrome://resources/js/assert.js';
+-import {skColorToRgba} from 'chrome://resources/js/color_utils.js';
+-
+ import {BrowserProxy} from './browser_proxy.js';
+ 
++const hour = new Date().getHours();
++const greeting = hour < 5 ? 'Good night' :
++    hour < 12             ? 'Good morning' :
++    hour < 19             ? 'Good afternoon' :
++                            'Good evening';
++document.getElementById('greeting')!.textContent = greeting;
+ 
+-const {callbackRouter, handler} = BrowserProxy.getInstance();
+-
+-callbackRouter.setTheme.addListener(theme => {
+-  const html = document.documentElement;
+-  html.toggleAttribute('has-custom-background', theme.hasCustomBackground);
+-  const style = html.style;
+-  style.backgroundColor = theme.colorBackground;
+-  const backgroundImage = `image-set(
+-      url(chrome://theme/IDR_THEME_NTP_BACKGROUND?${theme.id}) 1x,
+-      url(chrome://theme/IDR_THEME_NTP_BACKGROUND@2x?${theme.id}) 2x)`;
+-  style.backgroundImage = theme.hasCustomBackground ? backgroundImage : 'unset';
+-  style.backgroundRepeat = theme.backgroundTiling;
+-  style.backgroundPosition = theme.backgroundPosition;
+-  style.setProperty('--ntp-theme-text-color', skColorToRgba(theme.textColor));
+-
+-  const mostVisitedElement = document.querySelector('cr-most-visited');
+-  assert(mostVisitedElement);
+-  mostVisitedElement.theme = theme.mostVisited;
+-});
+-handler.updateTheme();
++document.getElementById('box')!.addEventListener(
++    'click', () => BrowserProxy.getInstance().handler.focusOmnibox());
+--- a/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_handler.cc
++++ b/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_handler.cc
+@@ -10,6 +10,7 @@
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/themes/theme_service_factory.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
++#include "chrome/browser/ui/search/omnibox_utils.h"
+ #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
+ #include "chrome/browser/ui/webui/util/webui_util_desktop.h"
+ #include "chrome/common/pref_names.h"
+@@ -42,6 +43,10 @@
+   NotifyAboutTheme();
+ }
+ 
++void NewTabPageThirdPartyHandler::FocusOmnibox() {
++  search::FocusOmnibox(true, web_contents_);
++}
++
+ void NewTabPageThirdPartyHandler::OnThemeChanged() {
+   NotifyAboutTheme();
+ }
+--- a/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_handler.h
++++ b/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_handler.h
+@@ -43,6 +43,7 @@
+ 
+   // new_tab_page_third_party::mojom::PageHandler:
+   void UpdateTheme() override;
++  void FocusOmnibox() override;
+ 
+  private:
+   // ThemeServiceObserver:
+--- a/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party.mojom
++++ b/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party.mojom
+@@ -39,6 +39,8 @@
+ interface PageHandler {
+   // Called to update the theme.
+   UpdateTheme();
++  // Gives the omnibox invisible focus, so typing on the page goes there.
++  FocusOmnibox();
+ };
+ 
+ // WebUI-side handler for requests from the browser.
