@@ -1,0 +1,18 @@
+--- a/components/search_engines/template_url_prepopulate_data.cc
++++ b/components/search_engines/template_url_prepopulate_data.cc
+@@ -317,9 +317,12 @@
+     PrefService& prefs,
+     const std::vector<raw_ptr<const PrepopulatedEngine>>&
+         regional_prepopulated_engines) {
+-  return FindPrepopulatedEngineInternal(prefs, regional_prepopulated_engines,
+-                                        google.id,
+-                                        /*use_first_as_fallback=*/true);
++  if (auto engine = FindPrepopulatedEngineInternal(
++          prefs, regional_prepopulated_engines, duckduckgo.id,
++          /*use_first_as_fallback=*/false)) {
++    return engine;
++  }
++  return TemplateURLDataFromPrepopulatedEngine(duckduckgo);
+ }
+ 
+ }  // namespace TemplateURLPrepopulateData
