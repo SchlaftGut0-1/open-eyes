@@ -1,0 +1,11 @@
+--- a/chrome/browser/ui/browser_ui_prefs.cc
++++ b/chrome/browser/ui/browser_ui_prefs.cc
+@@ -171,7 +171,7 @@
+ 
+   // We need to register the type of these preferences in order to query
+   // them even though they're only typically controlled via policy.
+-  registry->RegisterBooleanPref(policy::policy_prefs::kHideWebStoreIcon, false);
++  registry->RegisterBooleanPref(policy::policy_prefs::kHideWebStoreIcon, true);
+ 
+ #if BUILDFLAG(IS_MAC)
+   // This really belongs in platform code, but there's no good place to
